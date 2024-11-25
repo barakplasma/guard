@@ -1,99 +1,124 @@
-from os import path
-from csv import DictReader, DictWriter
+from datetime import datetime, timedelta
+from typing import List, Dict
 from argparse import ArgumentParser
-from pprint import pprint
-from datetime import datetime,timedelta
-from dataclasses import dataclass,asdict
-from queue import PriorityQueue
-from statistics import pvariance
+from pydantic import BaseModel
+from pathlib import Path
+import csv
+import heapq
 import random
+import pprint
+import statistics
 
-@dataclass()
-class Shift:
+class Shift(BaseModel):
     start: datetime
     end: datetime
-    guards: str
-    def __repr__(self):
+    guards: List[str]
+
+    def __str__(self):
         dfo = '%d/%m %H:%M'
-        return f"{self.start.strftime(dfo)} - {self.end.strftime(dfo)} | {self.guards}"
+        return f"{self.start.strftime(dfo)} - {self.end.strftime(dfo)} | {', '.join(self.guards)}"
 
-rows=[]
+def compute_stats(shifts: List[Shift]):
+    total_hours: Dict[str, float] = {}
+    for shift in shifts:
+        duration_hours = (shift.end - shift.start).total_seconds() / 3600
+        for guard in shift.guards:
+            total_hours[guard] = total_hours.get(guard, 0) + duration_hours
+    sorted_stats = sorted([(hours, guard) for guard, hours in total_hours.items()])
+    print("Hours for each guard:")
+    pprint.pprint(sorted_stats)
+    if len(sorted_stats) > 0:
+        vari = statistics.pvariance([s[0] for s in sorted_stats])
+        print("Population variance for guard shifts:")
+        print(round(vari, 3))
 
-def stats():
-    stats = {}
-    for r in rows:
-        rg = r.guards.split("\t")
-        for g in rg:
-            prev = stats.setdefault(g, timedelta(0))
-            stats[g] = prev + r.end-r.start
-    stats = list(map(lambda s: (round(s[1].total_seconds()/3600, 2), s[0]), stats.items()))
-    stats.sort(key=lambda x: x[0])
-    print("hours for each guard: " )
-    pprint(stats)
-    if len(stats)>0:
-        print("population variance for guard shifts")
-        pprint(round(pvariance(list(map(lambda s: s[0], stats))), 3))
+def main():
+    parser = ArgumentParser(description='Generates guard shift schedules')
+    parser.add_argument('start', type=lambda s: datetime.fromisoformat(s), help='Start time for schedule')
+    parser.add_argument('end', type=lambda s: datetime.fromisoformat(s), help='End time for schedule')
+    parser.add_argument('length', type=int, help='Length of each shift in minutes')
+    parser.add_argument('positions', type=int, help='Number of guard positions per shift')
+    parser.add_argument('guards', nargs="+", help='List of guards')
 
-q = PriorityQueue()
+    parser.add_argument('--dry_run', action='store_true', help='Dry run without saving to disk')
+    parser.add_argument('--seed', type=int, default=None, help='Seed for shuffling guards')
 
-guards = {}
+    args = parser.parse_args()
 
-parser = ArgumentParser(description='generates guard shift schedules')
-parser.add_argument('start',type=datetime.fromisoformat,help='start time for schedule')
-parser.add_argument('end',type=datetime.fromisoformat,help='end time for schedule')
-parser.add_argument('length',type=lambda x: timedelta(minutes=int(x)),help='length of shift in minutes')
-parser.add_argument('positions',type=int,help='count of positions for shifts')
-parser.add_argument('guards',type=str, nargs="+",help='guards for the shift')
+    if args.seed is not None:
+        random.seed(args.seed)
+        print(f"Seed: {args.seed}")
 
-parser.add_argument('--dry_run',default=False,type=bool,help='dry run without savimg to disk')
-parser.add_argument('--seed',default=random.randint(100,999),type=int,help='seed for shuffling guards who didnt guard yet')
+    # Read existing schedule if it exists
+    shifts: List[Shift] = []
+    schedule_file = Path('schedule.csv')
+    if schedule_file.is_file():
+        with schedule_file.open('r', newline='') as csvfile:
+            reader = csv.DictReader(csvfile)
+            for row in reader:
+                shift = Shift(
+                    start=datetime.fromisoformat(row['start']),
+                    end=datetime.fromisoformat(row['end']),
+                    guards=row['guards'].split(',')
+                )
+                shifts.append(shift)
+    shifts.sort(key=lambda s: s.start)
 
-args = parser.parse_args()
+    compute_stats(shifts)
 
-random.seed(args.seed)
-print(f"seed: {args.seed}")
+    # Initialize guard availability
+    guard_availability: Dict[str, datetime] = {guard: datetime.min for guard in args.guards}
+    for shift in shifts:
+        for guard in shift.guards:
+            if guard in guard_availability:
+                guard_availability[guard] = max(guard_availability[guard], shift.end)
 
-current = args.start
+    # Initialize priority queue with guard availability
+    # Each item in the queue is (next_available_time, guard_name)
+    guard_queue = [(guard_availability[guard], guard) for guard in args.guards]
+    heapq.heapify(guard_queue)
 
-if path.isfile("chedule.csv"):
-    with open("chedule.csv","r") as fp:
-        dr = DictReader(fp)
-        dfo="%Y-%m-%d %H:%M:%S"
-        rows.extend(list(map(lambda r: Shift(datetime.strptime(r["start"],dfo),datetime.strptime(r["end"],dfo),r["guards"]),dr)))
+    # Generate shifts
+    current_time = args.start
+    shift_length = timedelta(minutes=args.length)
+    new_shifts = []
 
-rows.sort(key=lambda r: r.start)
+    while current_time < args.end:
+        assigned_guards = []
+        for _ in range(args.positions):
+            if not guard_queue:
+                raise Exception("Not enough guards to fill positions")
 
-stats()
+            next_available_time, guard = heapq.heappop(guard_queue)
+            assigned_guards.append(guard)
+            # Update guard's next available time to current_time + shift_length
+            new_available_time = current_time + shift_length
+            heapq.heappush(guard_queue, (new_available_time, guard))
+            guard_availability[guard] = new_available_time
 
-for s in rows:
-    for g in s.guards.split("\t"):
-        if g in args.guards:
-            guards[g] = s.end
+        new_shift = Shift(start=current_time, end=current_time + shift_length, guards=assigned_guards)
+        new_shifts.append(new_shift)
+        current_time += shift_length
 
-for g in args.guards:
-    guards[g]=guards.setdefault(g, datetime(1948,1,random.randint(1,30)))
-    q.put((guards[g], g))
+    # Combine existing shifts with new shifts
+    shifts.extend(new_shifts)
+    shifts.sort(key=lambda s: s.start)
 
-while current < args.end:
-    sg = []
-    for _ in range(args.positions):
-        ng = q.get()
-        sg.append(ng[1])
-        newend=current+args.length
-        guards[ng[1]] = newend
-        q.put((newend, ng[1]))
-    sg.sort()
-    rows.append(Shift(current,current+args.length,"\t".join(sg)))
-    current += args.length
+    if not args.dry_run:
+        with schedule_file.open('w', newline='') as csvfile:
+            fieldnames = ['start', 'end', 'guards']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            for shift in shifts:
+                writer.writerow({
+                    'start': shift.start.isoformat(),
+                    'end': shift.end.isoformat(),
+                    'guards': ','.join(shift.guards)
+                })
+    else:
+        for shift in shifts:
+            print(shift)
+        compute_stats(shifts)
 
-rows.sort(key=lambda r: r.start)
-
-if not args.dry_run:
-    with open("chedule.csv","w") as fp:
-        dw = DictWriter(fp,["start","end","guards"])
-        dw.writeheader()
-        rows = list(map(asdict, rows))
-        dw.writerows(rows)
-else:
-    pprint(rows)
-    stats()
+if __name__ == '__main__':
+    main()
