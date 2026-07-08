@@ -109,9 +109,17 @@ as written.
 **Layout**
 
 ```
+package.json                # root-level, {"type":"module"} only - needed so `node --test` works
+                             # regardless of a given Node build's ESM-auto-detection behavior
+                             # (confirmed to matter: Node 22 didn't need this, Node 24 did)
 scheduler/scheduler.js      # pure ES module: generateShifts()/computeStats(), no deps, shared by
                              # frontend, tests/scheduler.test.js (node:test), and frontend/tests.html
-tests/scheduler.test.js      # `node --test` (or `node --test tests/scheduler.test.js`)
+tests/
+  scheduler.test.js          # unit tests, no PocketBase needed
+  pb-integration.test.js      # spins up an ISOLATED pocketbase (tmp --dir, port 8099) against the
+                             # real pb_migrations/pb_hooks, exercises auth rules + swap flow + multi-
+                             # position roster generation, tears itself down. Skipped (not failed) if
+                             # ./pocketbase isn't present. Never touches the real pb_data/.
 pb_migrations/*.js           # schema source of truth - extends "users", creates schedules/shifts/swap_requests
 pb_hooks/
   users.pb.js                # forces role="guard" + active=true on public signup
@@ -140,8 +148,14 @@ built bundle is static files, nothing fetches the internet, no service worker, n
 vendored UMD build) for the SDK, and `scheduler/scheduler.js` imported directly by both the app and its
 own test suite so there's exactly one implementation of the scheduling algorithm.
 
-**Verifying**: `node --test` runs the scheduler suite (dependency-free, no PocketBase needed). Migrations
-and hooks are written against the documented PocketBase JS/JSVM API but have only been syntax-checked
-(`node --check`) in this environment — the sandboxed session couldn't download a PocketBase binary to
-run them end-to-end (no network access to GitHub releases), so run `./pocketbase migrate up` and exercise
-the app for real before trusting the rules/hooks in production.
+**Verifying**: `node --test` (needs the root `package.json` above) runs both suites. `pb-integration.test.js`
+has been run for real against the actual PocketBase binary on the deployed host and passes (7 cases: signup
+role/active defaults, commander-only create rules, swap accept + non-recipient rejection, and multi-`positions`
+(1/2/3) roster generation+persistence matching what `scheduler.js` planned). It found and fixed two real bugs
+along the way that pure syntax-checking couldn't have caught:
+- `collection.fields.add()` on an *existing* collection needs actual `core.Field` instances
+  (`new SelectField(...)`/`new BoolField(...)`), unlike `new Collection({ fields: [...] })`'s constructor,
+  which accepts plain object literals - `pb_migrations/1700000000_users.js` was fixed to match.
+- `scripts/setup.sh` wasn't catching `pocketbase migrate up` printing "Error: ..." while still exiting 0;
+  it now greps command output explicitly instead of trusting the exit code alone, and checks
+  `SUPERUSER_PASSWORD` length upfront.
