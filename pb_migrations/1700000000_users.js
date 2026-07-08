@@ -8,17 +8,24 @@ migrate(
   (app) => {
     const collection = app.findCollectionByNameOrId('users');
 
-    collection.fields.add({
-      name: 'role',
-      type: 'select',
-      values: ['guard', 'commander'],
-      maxSelect: 1,
-    });
+    // Unlike `new Collection({ fields: [...] })` (which accepts plain object
+    // literals and converts them internally - see the other 3 migrations),
+    // FieldsList.add() on an already-existing collection requires real
+    // core.Field instances, or it throws "could not convert [object Object]
+    // to core.Field".
+    collection.fields.add(
+      new SelectField({
+        name: 'role',
+        values: ['guard', 'commander'],
+        maxSelect: 1,
+      }),
+    );
 
-    collection.fields.add({
-      name: 'active',
-      type: 'bool',
-    });
+    collection.fields.add(
+      new BoolField({
+        name: 'active',
+      }),
+    );
 
     // Any authenticated guard can list/view every other guard (needed for the
     // roster and swap picker); only the superuser (Admin UI) can delete a user.

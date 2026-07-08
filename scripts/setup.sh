@@ -15,6 +15,11 @@ PB_VERSION="${PB_VERSION:-0.30.2}"
 SUPERUSER_EMAIL="${SUPERUSER_EMAIL:?Set SUPERUSER_EMAIL before running this script}"
 SUPERUSER_PASSWORD="${SUPERUSER_PASSWORD:?Set SUPERUSER_PASSWORD before running this script}"
 
+if [ "${#SUPERUSER_PASSWORD}" -lt 8 ]; then
+  echo "SUPERUSER_PASSWORD must be at least 8 characters (PocketBase requirement)." >&2
+  exit 1
+fi
+
 case "$(uname -m)" in
   aarch64|arm64) PB_ARCH="arm64" ;;
   x86_64|amd64) PB_ARCH="amd64" ;;
@@ -39,10 +44,22 @@ echo "==> Building frontend (npm ci && npm run build -> pb_public/)"
 (cd frontend && npm ci && npm run build)
 
 echo "==> Applying migrations"
-./pocketbase migrate up
+# `migrate up` can print "Error: ..." for an individual bad migration while
+# still exiting 0, so grep the output instead of trusting the exit code alone.
+migrate_output="$(./pocketbase migrate up 2>&1)"
+echo "$migrate_output"
+if echo "$migrate_output" | grep -q "Error:"; then
+  echo "Migration failed - see errors above." >&2
+  exit 1
+fi
 
 echo "==> Creating/updating superuser"
-./pocketbase superuser upsert "$SUPERUSER_EMAIL" "$SUPERUSER_PASSWORD"
+superuser_output="$(./pocketbase superuser upsert "$SUPERUSER_EMAIL" "$SUPERUSER_PASSWORD" 2>&1)"
+echo "$superuser_output"
+if echo "$superuser_output" | grep -q "Error:"; then
+  echo "Superuser upsert failed - see errors above." >&2
+  exit 1
+fi
 
 echo
 echo "Setup complete. Start the server with:"
