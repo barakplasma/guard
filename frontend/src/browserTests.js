@@ -1,0 +1,156 @@
+// Browser-runnable mirror of tests/scheduler.test.js (node:test can't run in a
+// browser). Same cases, plain assertions, renders pass/fail to the DOM so the
+// suite works on the phone with zero tooling - open pb_public/tests.html.
+import { generateShifts, computeStats } from './lib/scheduler.js';
+
+const HOUR = 3600 * 1000;
+const results = [];
+
+// Positions are time-restricted via local hour/minute, so timestamps are
+// built with the LOCAL Date constructor, not Date.UTC - see scheduler.js.
+function localTime(y, m, d, h = 0, min = 0) {
+  return new Date(y, m, d, h, min, 0, 0).getTime();
+}
+
+const POS_A = { name: 'A' };
+const POS_B = { name: 'B' };
+
+function check(name, fn) {
+  try {
+    fn();
+    results.push({ name, pass: true });
+  } catch (err) {
+    results.push({ name, pass: false, error: err.message });
+  }
+}
+
+function assertEqual(actual, expected, message) {
+  if (actual !== expected) {
+    throw new Error(message || `expected ${expected}, got ${actual}`);
+  }
+}
+
+function assertDeepEqual(actual, expected, message) {
+  const a = JSON.stringify(actual);
+  const b = JSON.stringify(expected);
+  if (a !== b) throw new Error(message || `expected ${b}, got ${a}`);
+}
+
+function assertThrows(fn, message) {
+  try {
+    fn();
+  } catch {
+    return;
+  }
+  throw new Error(message || 'expected function to throw');
+}
+
+check('demo case (3 guards, 2 named positions, 24x1h) balances hours ~16/16/16', () => {
+  const start = localTime(2024, 0, 1, 0, 0);
+  const end = start + 24 * HOUR;
+  const guards = ['Alice', 'Bob', 'Carol'];
+  const shifts = generateShifts({ start, end, shiftMinutes: 60, positions: [POS_A, POS_B], guards });
+  assertEqual(shifts.length, 48);
+  const { hoursPerGuard } = computeStats(shifts);
+  for (const guard of guards) {
+    const hours = hoursPerGuard.get(guard);
+    if (Math.abs(hours - 16) > 1) throw new Error(`${guard} worked ${hours}h, expected ~16h`);
+  }
+});
+
+check('matches gs2.py output on a no-ties input (1 position, staggered availability)', () => {
+  const start = localTime(2024, 0, 1, 0, 0);
+  const existingShifts = [
+    { start: start - 3 * HOUR, end: start - 2 * HOUR, guard: 'Alice' },
+    { start: start - 2 * HOUR, end: start - HOUR, guard: 'Bob' },
+    { start: start - HOUR, end: start, guard: 'Carol' },
+  ];
+  const shifts = generateShifts({
+    start,
+    end: start + 3 * HOUR,
+    shiftMinutes: 60,
+    positions: [POS_A],
+    guards: ['Alice', 'Bob', 'Carol'],
+    existingShifts,
+  });
+  assertDeepEqual(shifts.map((s) => s.guard), ['Alice', 'Bob', 'Carol']);
+});
+
+check('validation errors', () => {
+  assertThrows(() => generateShifts({ start: 10, end: 0, shiftMinutes: 60, positions: [POS_A], guards: ['A'] }));
+  assertThrows(() => generateShifts({ start: 0, end: 10, shiftMinutes: 0, positions: [POS_A], guards: ['A'] }));
+  assertThrows(() => generateShifts({ start: 0, end: 10, shiftMinutes: 60, positions: [], guards: ['A'] }));
+  assertThrows(() => generateShifts({ start: 0, end: 10, shiftMinutes: 60, positions: [{ name: '' }], guards: ['A'] }));
+  assertThrows(() =>
+    generateShifts({
+      start: 0,
+      end: 10,
+      shiftMinutes: 60,
+      positions: [{ name: 'Patrol', timeRestricted: true, windowStart: 'nope', windowEnd: '06:00' }],
+      guards: ['A'],
+    }),
+  );
+  assertThrows(() => generateShifts({ start: 0, end: 10, shiftMinutes: 60, positions: [POS_A], guards: [] }));
+  assertThrows(() => generateShifts({ start: 0, end: 10, shiftMinutes: 60, positions: [POS_A], guards: ['A', 'A'] }));
+  assertThrows(() => generateShifts({ start: 0, end: 10, shiftMinutes: 60, positions: [POS_A, POS_B], guards: ['A'] }));
+});
+
+check('seeds availability from existingShifts', () => {
+  const start = localTime(2024, 0, 1, 0, 0);
+  const existingShifts = [{ start, end: start + 2 * HOUR, guard: 'Alice' }];
+  const shifts = generateShifts({
+    start,
+    end: start + 3 * HOUR,
+    shiftMinutes: 60,
+    positions: [POS_A],
+    guards: ['Alice', 'Bob'],
+    existingShifts,
+  });
+  assertDeepEqual(shifts.map((s) => s.guard), ['Bob', 'Bob', 'Alice']);
+});
+
+check('time-restricted position (patrol, 22:00-06:00 overnight window) only appears in-window', () => {
+  const patrol = { name: 'Patrol', timeRestricted: true, windowStart: '22:00', windowEnd: '06:00' };
+  const regular = { name: 'Gate' };
+  const start = localTime(2024, 0, 1, 20, 0);
+  const end = localTime(2024, 0, 2, 8, 0);
+  const shifts = generateShifts({
+    start,
+    end,
+    shiftMinutes: 60,
+    positions: [regular, patrol],
+    guards: ['Alice', 'Bob', 'Carol'],
+  });
+  const gateSlots = shifts.filter((s) => s.position === 'Gate');
+  const patrolSlots = shifts.filter((s) => s.position === 'Patrol');
+  assertEqual(gateSlots.length, 12);
+  assertEqual(patrolSlots.length, 8);
+});
+
+check('computeStats variance matches the corrected worked example ([4h, 8h] -> 4.0)', () => {
+  const start = localTime(2023, 9, 1, 9, 0);
+  const shifts = [
+    { start, end: start + 8 * HOUR, guard: 'Alice' },
+    { start: start + 8 * HOUR, end: start + 12 * HOUR, guard: 'Bob' },
+  ];
+  const { hoursPerGuard, variance } = computeStats(shifts);
+  assertEqual(hoursPerGuard.get('Alice'), 8);
+  assertEqual(hoursPerGuard.get('Bob'), 4);
+  assertEqual(variance, 4.0);
+});
+
+check('computeStats returns null variance for a single guard', () => {
+  const start = localTime(2023, 9, 1, 9, 0);
+  const { variance } = computeStats([{ start, end: start + HOUR, guard: 'Alice' }]);
+  assertEqual(variance, null);
+});
+
+const list = document.getElementById('results');
+for (const result of results) {
+  const li = document.createElement('li');
+  li.className = result.pass ? 'pass' : 'fail';
+  li.textContent = result.pass ? `PASS - ${result.name}` : `FAIL - ${result.name}: ${result.error}`;
+  list.appendChild(li);
+}
+const failed = results.filter((r) => !r.pass).length;
+document.title = `${failed === 0 ? 'PASS' : 'FAIL'} (${results.length - failed}/${results.length}) - scheduler tests`;

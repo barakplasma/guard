@@ -96,3 +96,100 @@ configured, and no test files beyond those doctests.
   `@field_validator`.
 - `gs2.py`'s scheduler assumes `len(guards) >= positions` for every shift or raises; it does not currently
   prevent back-to-back shifts across the position count (same gap noted as a `#TODO` in `guard.py`).
+
+## v3 — Guard Roster web app (PocketBase + React/MUI)
+
+Implements `DESIGN.md`'s self-hosted, offline roster web app, with two deliberate deviations from that
+spec (per explicit follow-up instructions): the frontend uses a Vite build step (not vanilla no-build JS)
+so it can pull in real npm libraries, it's built with **React + Material UI** instead of hand-rolled
+HTML/CSS/JS, and there is no PWA/`manifest.json`/Add-to-Home-Screen support at all. Everything else in
+DESIGN.md (data model, API rules, scheduler algorithm, i18n/RTL, swap flow, deployment topology) applies
+as written.
+
+**Layout**
+
+```
+package.json                # root-level, {"type":"module"} only - needed so `node --test` works
+                             # regardless of a given Node build's ESM-auto-detection behavior
+                             # (confirmed to matter: Node 22 didn't need this, Node 24 did)
+scheduler/scheduler.js      # pure ES module: generateShifts()/computeStats(), no deps, shared by
+                             # frontend, tests/scheduler.test.js (node:test), and frontend/tests.html
+tests/
+  scheduler.test.js          # unit tests, no PocketBase needed
+  pb-integration.test.js      # spins up an ISOLATED pocketbase (tmp --dir, port 8099) against the
+                             # real pb_migrations/pb_hooks, exercises auth rules + swap flow + multi-
+                             # position roster generation, tears itself down. Skipped (not failed) if
+                             # ./pocketbase isn't present. Never touches the real pb_data/.
+pb_migrations/*.js           # schema source of truth - extends "users", creates schedules/shifts/swap_requests
+pb_hooks/
+  users.pb.js                # forces role="guard" + active=true on public signup
+  swaps.pb.js                # onRecordUpdateRequest: applies an accepted swap's guard replacement
+frontend/                    # Vite + React + MUI source (see below)
+scripts/
+  setup.sh                   # downloads pocketbase, builds the frontend, migrates, creates superuser
+  guard.service               # systemd --user unit (Debian VM path)
+pb_public/                   # GITIGNORED - `frontend`'s build output, served by PocketBase. Rebuilt by
+                             # scripts/setup.sh; there is nothing here until you build.
+pb_data/                     # GITIGNORED - PocketBase's SQLite data dir
+pocketbase                   # GITIGNORED - the downloaded binary
+```
+
+**Frontend build step.** `cd frontend && npm install` then either `npm run dev` (Vite dev server; point
+`frontend/.env.development`'s `VITE_PB_URL` at a separately-running `pocketbase serve`) or `npm run build`
+(outputs straight into `../pb_public`, the directory PocketBase serves as static files — see
+`frontend/vite.config.js`). This means, unlike DESIGN.md's original "no build step, no npm on the phone"
+plan, **Node/npm now has to be present on-device** (Debian VM or Termux) to run `npm run build` once
+during `scripts/setup.sh` — after that build, the app is exactly as offline as the original design: the
+built bundle is static files, nothing fetches the internet, no service worker, no install-to-home-screen.
+
+**Tech**: React Router (`HashRouter`, matching DESIGN.md's no-History-API constraint), MUI
+`ThemeProvider`/`CssBaseline` with a system-font-only theme (no webfonts, still fully offline), an
+`@emotion/cache` + `stylis-plugin-rtl` swap for Hebrew RTL, the official `pocketbase` npm package (not a
+vendored UMD build) for the SDK, and `scheduler/scheduler.js` imported directly by both the app and its
+own test suite so there's exactly one implementation of the scheduling algorithm.
+
+**Verifying**: `node --test` (needs the root `package.json` above) runs both suites. `pb-integration.test.js`
+has been run for real against the actual PocketBase binary on the deployed host. It found and fixed two real
+bugs along the way that pure syntax-checking couldn't have caught:
+- `collection.fields.add()` on an *existing* collection needs actual `core.Field` instances
+  (`new SelectField(...)`/`new BoolField(...)`), unlike `new Collection({ fields: [...] })`'s constructor,
+  which accepts plain object literals - `pb_migrations/1700000000_users.js` was fixed to match.
+- `scripts/setup.sh` wasn't catching `pocketbase migrate up` printing "Error: ..." while still exiting 0;
+  it now greps command output explicitly instead of trusting the exit code alone, and checks
+  `SUPERUSER_PASSWORD` length upfront.
+
+### Named, time-restricted positions
+
+Positions are named entities a commander manages (e.g. "דרומי", "ש''ג"), not a plain per-shift
+headcount, and can be time-restricted (e.g. "פטרול" only staffed 22:00-06:00) - added per follow-up
+request, on top of the v3 implementation above.
+
+- **`positions` collection** (`pb_migrations/1700000004_positions.js`): `name`, `time_restricted` (bool),
+  `window_start`/`window_end` (text, "HH:MM" 24h, only meaningful when `time_restricted`), `active` (bool).
+  Commander-only create/update/delete; any authenticated user can list/view (needed for the roster).
+- **`schedules.positions`**: was a plain `number` headcount, now a required multi-relation to `positions` -
+  the set of named posts a generation batch covers (`1700000005_schedules_named_positions.js`).
+- **`shifts`**: was a single `guards` multi-relation (one row per time-slot, N guards), now a required
+  single `position` relation + single `guard` relation (one row per guard-filling-one-position-for-one-
+  slot) - `1700000006_shifts_named_positions.js`. `pb_hooks/swaps.pb.js` simplified to match: accepting a
+  swap now just overwrites `guard` directly instead of relation +/- syntax on an array.
+- **`scheduler/scheduler.js`**: `generateShifts()`'s `positions` param changed from a count to an array of
+  `{id, name, timeRestricted, windowStart, windowEnd}`. Per slot, a time-restricted position only counts as
+  "active" if the slot's LOCAL hour/minute falls in its window (handles overnight wraps like 22:00-06:00);
+  all positions still share one fairness pool (a guard's total hours across every position they fill is
+  what gets balanced, not per-position). Output rows are `{start, end, position, guard}` (singular `guard`,
+  matching the new `shifts` shape) instead of `{start, end, guards: [...]}`.
+- These migrations were written as NEW files rather than edits to the already-applied
+  `1700000001_schedules.js`/`1700000002_shifts.js`, so `./pocketbase migrate up` on an already-provisioned
+  instance (or the running `guard.service`, which auto-applied them live without a restart) picks up the
+  schema change correctly instead of silently diverging from a would-be-edited historical migration.
+- Frontend: new commander-only `Positions` page/tab (CRUD for named positions, time-window inputs).
+  `Generate` swapped its positions-count field for a position checklist; its preview groups rows by
+  time-slot so a slot reads like "18:00 - 19:00: דרומי - Alice, ש''ג - Bob". `Roster` groups
+  concurrent same-slot rows the same way. `MyShifts`/`Stats` updated for the singular `guard` field.
+- `tests/scheduler.test.js` and `tests/pb-integration.test.js` (9 cases, including a live time-window
+  round-trip through the real positions/schedules/shifts collections) were rewritten for the new shapes and
+  pass; `frontend/src/browserTests.js` was updated to mirror `scheduler.test.js` but **not** re-run in an
+  actual browser this session (no headless-browser tooling on this host) - build + lint are clean and the
+  identical logic is covered by the Node suite, but visually exercise `pb_public/tests.html` before fully
+  trusting it.

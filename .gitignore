@@ -160,3 +160,17 @@ cython_debug/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+
+# Guard v3 (PocketBase + frontend build) - see DESIGN.md
+pocketbase
+pb_data/
+pb_public/
+frontend/node_modules/
+frontend/.env.local
+
+# The blanket `lib/` rule above (Python packaging section) matches at any
+# depth and would otherwise swallow frontend/src/lib/ (our React context/i18n
+# helpers, not a Python build output) - un-ignore it explicitly.
+!frontend/src/lib/
+!frontend/src/lib/**
+
