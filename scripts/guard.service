@@ -1,0 +1,11 @@
+[Unit]
+Description=Guard roster (PocketBase)
+After=network.target
+
+[Service]
+WorkingDirectory=%h/guard
+ExecStart=%h/guard/pocketbase serve --http=0.0.0.0:8090
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

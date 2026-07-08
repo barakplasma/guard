@@ -96,3 +96,52 @@ configured, and no test files beyond those doctests.
   `@field_validator`.
 - `gs2.py`'s scheduler assumes `len(guards) >= positions` for every shift or raises; it does not currently
   prevent back-to-back shifts across the position count (same gap noted as a `#TODO` in `guard.py`).
+
+## v3 — Guard Roster web app (PocketBase + React/MUI)
+
+Implements `DESIGN.md`'s self-hosted, offline roster web app, with two deliberate deviations from that
+spec (per explicit follow-up instructions): the frontend uses a Vite build step (not vanilla no-build JS)
+so it can pull in real npm libraries, it's built with **React + Material UI** instead of hand-rolled
+HTML/CSS/JS, and there is no PWA/`manifest.json`/Add-to-Home-Screen support at all. Everything else in
+DESIGN.md (data model, API rules, scheduler algorithm, i18n/RTL, swap flow, deployment topology) applies
+as written.
+
+**Layout**
+
+```
+scheduler/scheduler.js      # pure ES module: generateShifts()/computeStats(), no deps, shared by
+                             # frontend, tests/scheduler.test.js (node:test), and frontend/tests.html
+tests/scheduler.test.js      # `node --test` (or `node --test tests/scheduler.test.js`)
+pb_migrations/*.js           # schema source of truth - extends "users", creates schedules/shifts/swap_requests
+pb_hooks/
+  users.pb.js                # forces role="guard" + active=true on public signup
+  swaps.pb.js                # onRecordUpdateRequest: applies an accepted swap's guard replacement
+frontend/                    # Vite + React + MUI source (see below)
+scripts/
+  setup.sh                   # downloads pocketbase, builds the frontend, migrates, creates superuser
+  guard.service               # systemd --user unit (Debian VM path)
+pb_public/                   # GITIGNORED - `frontend`'s build output, served by PocketBase. Rebuilt by
+                             # scripts/setup.sh; there is nothing here until you build.
+pb_data/                     # GITIGNORED - PocketBase's SQLite data dir
+pocketbase                   # GITIGNORED - the downloaded binary
+```
+
+**Frontend build step.** `cd frontend && npm install` then either `npm run dev` (Vite dev server; point
+`frontend/.env.development`'s `VITE_PB_URL` at a separately-running `pocketbase serve`) or `npm run build`
+(outputs straight into `../pb_public`, the directory PocketBase serves as static files — see
+`frontend/vite.config.js`). This means, unlike DESIGN.md's original "no build step, no npm on the phone"
+plan, **Node/npm now has to be present on-device** (Debian VM or Termux) to run `npm run build` once
+during `scripts/setup.sh` — after that build, the app is exactly as offline as the original design: the
+built bundle is static files, nothing fetches the internet, no service worker, no install-to-home-screen.
+
+**Tech**: React Router (`HashRouter`, matching DESIGN.md's no-History-API constraint), MUI
+`ThemeProvider`/`CssBaseline` with a system-font-only theme (no webfonts, still fully offline), an
+`@emotion/cache` + `stylis-plugin-rtl` swap for Hebrew RTL, the official `pocketbase` npm package (not a
+vendored UMD build) for the SDK, and `scheduler/scheduler.js` imported directly by both the app and its
+own test suite so there's exactly one implementation of the scheduling algorithm.
+
+**Verifying**: `node --test` runs the scheduler suite (dependency-free, no PocketBase needed). Migrations
+and hooks are written against the documented PocketBase JS/JSVM API but have only been syntax-checked
+(`node --check`) in this environment — the sandboxed session couldn't download a PocketBase binary to
+run them end-to-end (no network access to GitHub releases), so run `./pocketbase migrate up` and exercise
+the app for real before trusting the rules/hooks in production.
