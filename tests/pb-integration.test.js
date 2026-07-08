@@ -100,6 +100,12 @@ async function loginAdmin(email, password) {
   return json.token;
 }
 
+async function createPosition(token, body) {
+  const { status, json } = await api('/api/collections/positions/records', { method: 'POST', token, body });
+  assert.equal(status, 200, `create position failed: ${JSON.stringify(json)}`);
+  return json;
+}
+
 test.before(async () => {
   if (!HAS_PB) {
     console.log(`Skipping pb-integration tests: no pocketbase binary at ${PB_BIN} (run scripts/setup.sh)`);
@@ -146,11 +152,26 @@ test('a guard cannot create a schedule (commander-only createRule)', { skip: !HA
       start: '2027-01-01 00:00:00',
       end: '2027-01-02 00:00:00',
       shift_minutes: 60,
-      positions: 1,
+      positions: [],
       created_by: 'anything',
     },
   });
   assert.equal(status, 400);
+});
+
+test('a guard cannot create a position (commander-only createRule), but can list them', { skip: !HAS_PB }, async () => {
+  await signup('guard.pos.test@example.com', 'testpass123', 'Guard Pos Test');
+  const token = await login('guard.pos.test@example.com', 'testpass123');
+
+  const { status: createStatus } = await api('/api/collections/positions/records', {
+    method: 'POST',
+    token,
+    body: { name: 'Should Fail', active: true },
+  });
+  assert.equal(createStatus, 400);
+
+  const { status: listStatus } = await api('/api/collections/positions/records', { token });
+  assert.equal(listStatus, 200);
 });
 
 test('unauthenticated requests see an empty shift list, not an error', { skip: !HAS_PB }, async () => {
@@ -160,13 +181,13 @@ test('unauthenticated requests see an empty shift list, not an error', { skip: !
 });
 
 // "check multiple different guard positions roster": generate + persist a
-// schedule for several different `positions` values (1, 2, 3 guards per
-// shift) and confirm what PocketBase actually stored matches what
-// scheduler.js planned - not just that the API call succeeded.
-for (const positions of [1, 2, 3]) {
-  test(`commander can generate and persist a roster with positions=${positions}`, { skip: !HAS_PB }, async () => {
+// schedule with several different NAMED positions per slot (1, 2, then 3
+// concurrent posts) and confirm what PocketBase actually stored matches what
+// scheduler.js planned - not just that the API calls succeeded.
+for (const positionCount of [1, 2, 3]) {
+  test(`commander can generate and persist a roster with ${positionCount} named position(s) per slot`, { skip: !HAS_PB }, async () => {
     const guardNames = ['Alice', 'Bob', 'Carol', 'Dana'];
-    const suffix = `pos${positions}`;
+    const suffix = `posn${positionCount}`;
     const guardIds = new Map();
 
     for (const name of guardNames) {
@@ -175,8 +196,6 @@ for (const positions of [1, 2, 3]) {
       guardIds.set(name, record.id);
     }
 
-    // Promote the first guard to commander via the ephemeral instance's own
-    // admin account (never touches the real superuser/prod instance).
     const adminToken = await loginAdmin(ADMIN_EMAIL, ADMIN_PASSWORD);
     const commanderName = guardNames[0];
     const { status: promoteStatus } = await api(`/api/collections/users/records/${guardIds.get(commanderName)}`, {
@@ -187,23 +206,26 @@ for (const positions of [1, 2, 3]) {
     assert.equal(promoteStatus, 200);
     const commanderToken = await login(`${commanderName.toLowerCase()}.${suffix}@example.com`, 'testpass123');
 
-    // Each `positions` value gets its own day so guard availability never
+    const positionNames = ['South', 'Gate', 'Patrol'].slice(0, positionCount);
+    const positionRecords = [];
+    for (const name of positionNames) {
+      positionRecords.push(await createPosition(commanderToken, { name: `${name} (${suffix})`, active: true }));
+    }
+    const positionDescriptors = positionRecords.map((p) => ({ id: p.id, name: p.name }));
+
+    // Each positionCount value gets its own day so guard availability never
     // overlaps across the 3 sub-tests sharing this guard pool.
-    const dayIndex = positions;
-    const start = Date.UTC(2027, 0, dayIndex, 0, 0, 0);
-    const end = start + 6 * 3600 * 1000; // 6 one-hour shifts
+    const start = Date.UTC(2027, 0, positionCount, 0, 0, 0);
+    const end = start + 6 * 3600 * 1000; // 6 one-hour slots
 
     const plannedShifts = generateShifts({
       start,
       end,
       shiftMinutes: 60,
-      positions,
+      positions: positionDescriptors,
       guards: guardNames,
     });
-    assert.equal(plannedShifts.length, 6);
-    for (const shift of plannedShifts) {
-      assert.equal(shift.guards.length, positions);
-    }
+    assert.equal(plannedShifts.length, 6 * positionCount);
 
     const { status: scheduleStatus, json: schedule } = await api('/api/collections/schedules/records', {
       method: 'POST',
@@ -212,42 +234,45 @@ for (const positions of [1, 2, 3]) {
         start: new Date(start).toISOString(),
         end: new Date(end).toISOString(),
         shift_minutes: 60,
-        positions,
+        positions: positionRecords.map((p) => p.id),
         created_by: guardIds.get(commanderName),
       },
     });
     assert.equal(scheduleStatus, 200, JSON.stringify(schedule));
 
     for (const shift of plannedShifts) {
-      const { status } = await api('/api/collections/shifts/records', {
+      const { status, json } = await api('/api/collections/shifts/records', {
         method: 'POST',
         token: commanderToken,
         body: {
           schedule: schedule.id,
+          position: shift.position,
           start: new Date(shift.start).toISOString(),
           end: new Date(shift.end).toISOString(),
-          guards: shift.guards.map((name) => guardIds.get(name)),
+          guard: guardIds.get(shift.guard),
         },
       });
-      assert.equal(status, 200);
+      assert.equal(status, 200, JSON.stringify(json));
     }
 
     const { status: listStatus, json: stored } = await api(
-      `/api/collections/shifts/records?filter=${encodeURIComponent(`schedule = "${schedule.id}"`)}&sort=start&expand=guards`,
+      `/api/collections/shifts/records?filter=${encodeURIComponent(`schedule = "${schedule.id}"`)}&sort=start&perPage=100&expand=guard,position`,
       { token: commanderToken },
     );
     assert.equal(listStatus, 200);
-    assert.equal(stored.items.length, 6);
+    assert.equal(stored.items.length, plannedShifts.length);
 
-    for (let i = 0; i < stored.items.length; i++) {
-      const storedGuardNames = stored.items[i].expand.guards.map((g) => g.name).sort();
-      const expectedGuardNames = [...plannedShifts[i].guards].sort();
-      assert.deepEqual(
-        storedGuardNames,
-        expectedGuardNames,
-        `shift ${i} (positions=${positions}): stored guards don't match what generateShifts planned`,
-      );
-    }
+    // Compare (start, position id, guard id) triples as sorted sets rather
+    // than by array index - multiple rows now share the same start/end, one
+    // per position, so index order isn't guaranteed to match insertion order.
+    const guardIdToName = new Map([...guardIds.entries()].map(([name, id]) => [id, name]));
+    const expected = plannedShifts
+      .map((s) => `${s.start}|${s.position}|${s.guard}`)
+      .sort();
+    const actual = stored.items
+      .map((s) => `${new Date(s.start).getTime()}|${s.expand.position.id}|${guardIdToName.get(s.expand.guard.id)}`)
+      .sort();
+    assert.deepEqual(actual, expected);
   });
 }
 
@@ -263,6 +288,7 @@ test('swap accept moves the guard, and only the recipient may accept', { skip: !
     body: { role: 'commander' },
   });
   const commanderToken = await login('swap.a@example.com', 'testpass123');
+  const position = await createPosition(commanderToken, { name: 'Gate (swap test)', active: true });
 
   const { json: schedule } = await api('/api/collections/schedules/records', {
     method: 'POST',
@@ -271,7 +297,7 @@ test('swap accept moves the guard, and only the recipient may accept', { skip: !
       start: '2027-06-01 00:00:00',
       end: '2027-06-01 06:00:00',
       shift_minutes: 60,
-      positions: 1,
+      positions: [position.id],
       created_by: guardA.id,
     },
   });
@@ -280,9 +306,10 @@ test('swap accept moves the guard, and only the recipient may accept', { skip: !
     token: commanderToken,
     body: {
       schedule: schedule.id,
+      position: position.id,
       start: '2027-06-01 00:00:00',
       end: '2027-06-01 01:00:00',
-      guards: [guardA.id],
+      guard: guardA.id,
     },
   });
 
@@ -315,5 +342,85 @@ test('swap accept moves the guard, and only the recipient may accept', { skip: !
   assert.equal(acceptStatus, 200);
 
   const { json: shiftAfter } = await api(`/api/collections/shifts/records/${shift.id}`, { token: tokenB });
-  assert.deepEqual(shiftAfter.guards, [guardB.id]);
+  assert.equal(shiftAfter.guard, guardB.id);
+});
+
+test('a time-restricted position (patrol) only generates + persists shifts inside its window', { skip: !HAS_PB }, async () => {
+  const guardNames = ['Erez', 'Fadi', 'Gila'];
+  const guardIds = new Map();
+  for (const name of guardNames) {
+    const record = await signup(`${name.toLowerCase()}.patrol@example.com`, 'testpass123', name);
+    guardIds.set(name, record.id);
+  }
+
+  const adminToken = await loginAdmin(ADMIN_EMAIL, ADMIN_PASSWORD);
+  await api(`/api/collections/users/records/${guardIds.get('Erez')}`, {
+    method: 'PATCH',
+    token: adminToken,
+    body: { role: 'commander' },
+  });
+  const commanderToken = await login('erez.patrol@example.com', 'testpass123');
+
+  const gate = await createPosition(commanderToken, { name: 'Gate (patrol test)', active: true });
+  const patrol = await createPosition(commanderToken, {
+    name: 'Patrol (patrol test)',
+    time_restricted: true,
+    window_start: '22:00',
+    window_end: '06:00',
+    active: true,
+  });
+
+  // 20:00 -> 08:00 next day, 1h slots: patrol should only cover 22:00-06:00 (8 of 12).
+  const start = new Date(2027, 7, 1, 20, 0, 0).getTime();
+  const end = new Date(2027, 7, 2, 8, 0, 0).getTime();
+
+  const plannedShifts = generateShifts({
+    start,
+    end,
+    shiftMinutes: 60,
+    positions: [
+      { id: gate.id, name: gate.name },
+      { id: patrol.id, name: patrol.name, timeRestricted: true, windowStart: '22:00', windowEnd: '06:00' },
+    ],
+    guards: guardNames,
+  });
+  assert.equal(plannedShifts.filter((s) => s.position === gate.id).length, 12);
+  assert.equal(plannedShifts.filter((s) => s.position === patrol.id).length, 8);
+
+  const { json: schedule } = await api('/api/collections/schedules/records', {
+    method: 'POST',
+    token: commanderToken,
+    body: {
+      start: new Date(start).toISOString(),
+      end: new Date(end).toISOString(),
+      shift_minutes: 60,
+      positions: [gate.id, patrol.id],
+      created_by: guardIds.get('Erez'),
+    },
+  });
+
+  for (const shift of plannedShifts) {
+    const { status } = await api('/api/collections/shifts/records', {
+      method: 'POST',
+      token: commanderToken,
+      body: {
+        schedule: schedule.id,
+        position: shift.position,
+        start: new Date(shift.start).toISOString(),
+        end: new Date(shift.end).toISOString(),
+        guard: guardIds.get(shift.guard),
+      },
+    });
+    assert.equal(status, 200);
+  }
+
+  const { json: stored } = await api(
+    `/api/collections/shifts/records?filter=${encodeURIComponent(`schedule = "${schedule.id}" && position = "${patrol.id}"`)}&perPage=100`,
+    { token: commanderToken },
+  );
+  assert.equal(stored.items.length, 8);
+  for (const item of stored.items) {
+    const hour = new Date(item.start).getHours();
+    assert.ok(hour >= 22 || hour < 6, `patrol shift at hour ${hour} is outside its 22:00-06:00 window`);
+  }
 });

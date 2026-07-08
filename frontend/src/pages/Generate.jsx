@@ -26,11 +26,12 @@ export default function Generate() {
   const { t, lang } = useLocale();
 
   const [users, setUsers] = useState([]);
+  const [positions, setPositions] = useState([]);
   const [selectedGuards, setSelectedGuards] = useState([]);
+  const [selectedPositions, setSelectedPositions] = useState([]);
   const [start, setStart] = useState('');
   const [end, setEnd] = useState('');
   const [shiftMinutes, setShiftMinutes] = useState(60);
-  const [positions, setPositions] = useState(1);
   const [preview, setPreview] = useState(null);
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -44,9 +45,32 @@ export default function Generate() {
         setUsers(records);
         setSelectedGuards(records.map((r) => r.id));
       });
+    pb.collection('positions')
+      .getFullList({ filter: 'active = true', sort: 'name' })
+      .then((records) => {
+        setPositions(records);
+        setSelectedPositions(records.map((r) => r.id));
+      });
   }, [isCommander]);
 
   const guardIdToName = useMemo(() => new Map(users.map((u) => [u.id, u.name])), [users]);
+  const positionById = useMemo(() => new Map(positions.map((p) => [p.id, p])), [positions]);
+
+  // Multiple positions share the same start/end now, so group rows by slot
+  // for a readable preview: "18:00 - 19:00: דרומי - Alice, ש''ג - Bob".
+  const groupedPreview = useMemo(() => {
+    if (!preview) return [];
+    const bySlot = new Map();
+    for (const shift of preview.shifts) {
+      const key = `${shift.start}-${shift.end}`;
+      if (!bySlot.has(key)) bySlot.set(key, { start: shift.start, end: shift.end, entries: [] });
+      bySlot.get(key).entries.push({
+        positionName: positionById.get(shift.position)?.name || shift.position,
+        guard: shift.guard,
+      });
+    }
+    return [...bySlot.values()].sort((a, b) => a.start - b.start);
+  }, [preview, positionById]);
 
   if (!isCommander) {
     return (
@@ -60,6 +84,10 @@ export default function Generate() {
     setSelectedGuards((prev) => (prev.includes(id) ? prev.filter((g) => g !== id) : [...prev, id]));
   };
 
+  const togglePosition = (id) => {
+    setSelectedPositions((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]));
+  };
+
   const runPreview = async () => {
     setError(null);
     setSaved(false);
@@ -67,22 +95,32 @@ export default function Generate() {
       const startMs = toEpoch(start);
       const endMs = toEpoch(end);
       const guardNames = selectedGuards.map((id) => guardIdToName.get(id));
+      const positionDescriptors = selectedPositions.map((id) => {
+        const p = positionById.get(id);
+        return {
+          id: p.id,
+          name: p.name,
+          timeRestricted: p.time_restricted,
+          windowStart: p.window_start,
+          windowEnd: p.window_end,
+        };
+      });
 
       const existingShifts = await pb.collection('shifts').getFullList({
         filter: `end > "${new Date().toISOString()}"`,
-        expand: 'guards',
+        expand: 'guard',
       });
       const existingForScheduler = existingShifts.map((s) => ({
         start: new Date(s.start).getTime(),
         end: new Date(s.end).getTime(),
-        guards: (s.expand?.guards || []).map((g) => g.name),
+        guard: s.expand?.guard?.name,
       }));
 
       const newShifts = generateShifts({
         start: startMs,
         end: endMs,
         shiftMinutes: Number(shiftMinutes),
-        positions: Number(positions),
+        positions: positionDescriptors,
         guards: guardNames,
         existingShifts: existingForScheduler,
       });
@@ -105,7 +143,7 @@ export default function Generate() {
         start: new Date(toEpoch(start)).toISOString(),
         end: new Date(toEpoch(end)).toISOString(),
         shift_minutes: Number(shiftMinutes),
-        positions: Number(positions),
+        positions: selectedPositions,
         created_by: pb.authStore.record.id,
       });
 
@@ -114,9 +152,10 @@ export default function Generate() {
       for (const shift of preview.shifts) {
         batch.collection('shifts').create({
           schedule: scheduleRecord.id,
+          position: shift.position,
           start: new Date(shift.start).toISOString(),
           end: new Date(shift.end).toISOString(),
-          guards: shift.guards.map((name) => nameToId.get(name)),
+          guard: nameToId.get(shift.guard),
         });
       }
       await batch.send();
@@ -173,12 +212,21 @@ export default function Generate() {
           value={shiftMinutes}
           onChange={(e) => setShiftMinutes(e.target.value)}
         />
-        <TextField
-          label={t('generate.positions')}
-          type="number"
-          value={positions}
-          onChange={(e) => setPositions(e.target.value)}
-        />
+
+        <Typography variant="subtitle2">{t('generate.positions')}</Typography>
+        {positions.length === 0 ? (
+          <Alert severity="info">{t('generate.noPositions')}</Alert>
+        ) : (
+          <FormGroup row>
+            {positions.map((p) => (
+              <FormControlLabel
+                key={p.id}
+                control={<Checkbox checked={selectedPositions.includes(p.id)} onChange={() => togglePosition(p.id)} />}
+                label={p.name}
+              />
+            ))}
+          </FormGroup>
+        )}
 
         <Typography variant="subtitle2">{t('generate.guards')}</Typography>
         <FormGroup row>
@@ -192,7 +240,7 @@ export default function Generate() {
         </FormGroup>
 
         <Box sx={{ display: 'flex', gap: 2 }}>
-          <Button variant="outlined" onClick={runPreview} disabled={!start || !end}>
+          <Button variant="outlined" onClick={runPreview} disabled={!start || !end || selectedPositions.length === 0}>
             {t('generate.preview')}
           </Button>
           <Button variant="contained" onClick={save} disabled={!preview || saving}>
@@ -205,13 +253,13 @@ export default function Generate() {
         <Paper sx={{ p: 2 }}>
           <Typography variant="h6">{t('generate.previewTitle')}</Typography>
           <List dense>
-            {preview.shifts.map((shift, i) => (
+            {groupedPreview.map((slot, i) => (
               <ListItem key={i}>
                 <ListItemText
-                  primary={`${new Date(shift.start).toLocaleString(lang === 'he' ? 'he-IL' : 'en-IL')} - ${new Date(
-                    shift.end,
+                  primary={`${new Date(slot.start).toLocaleString(lang === 'he' ? 'he-IL' : 'en-IL')} - ${new Date(
+                    slot.end,
                   ).toLocaleTimeString(lang === 'he' ? 'he-IL' : 'en-IL')}`}
-                  secondary={shift.guards.join(', ')}
+                  secondary={slot.entries.map((e) => `${e.positionName} - ${e.guard}`).join(', ')}
                 />
               </ListItem>
             ))}

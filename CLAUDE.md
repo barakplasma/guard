@@ -149,13 +149,47 @@ vendored UMD build) for the SDK, and `scheduler/scheduler.js` imported directly 
 own test suite so there's exactly one implementation of the scheduling algorithm.
 
 **Verifying**: `node --test` (needs the root `package.json` above) runs both suites. `pb-integration.test.js`
-has been run for real against the actual PocketBase binary on the deployed host and passes (7 cases: signup
-role/active defaults, commander-only create rules, swap accept + non-recipient rejection, and multi-`positions`
-(1/2/3) roster generation+persistence matching what `scheduler.js` planned). It found and fixed two real bugs
-along the way that pure syntax-checking couldn't have caught:
+has been run for real against the actual PocketBase binary on the deployed host. It found and fixed two real
+bugs along the way that pure syntax-checking couldn't have caught:
 - `collection.fields.add()` on an *existing* collection needs actual `core.Field` instances
   (`new SelectField(...)`/`new BoolField(...)`), unlike `new Collection({ fields: [...] })`'s constructor,
   which accepts plain object literals - `pb_migrations/1700000000_users.js` was fixed to match.
 - `scripts/setup.sh` wasn't catching `pocketbase migrate up` printing "Error: ..." while still exiting 0;
   it now greps command output explicitly instead of trusting the exit code alone, and checks
   `SUPERUSER_PASSWORD` length upfront.
+
+### Named, time-restricted positions
+
+Positions are named entities a commander manages (e.g. "דרומי", "ש''ג"), not a plain per-shift
+headcount, and can be time-restricted (e.g. "פטרול" only staffed 22:00-06:00) - added per follow-up
+request, on top of the v3 implementation above.
+
+- **`positions` collection** (`pb_migrations/1700000004_positions.js`): `name`, `time_restricted` (bool),
+  `window_start`/`window_end` (text, "HH:MM" 24h, only meaningful when `time_restricted`), `active` (bool).
+  Commander-only create/update/delete; any authenticated user can list/view (needed for the roster).
+- **`schedules.positions`**: was a plain `number` headcount, now a required multi-relation to `positions` -
+  the set of named posts a generation batch covers (`1700000005_schedules_named_positions.js`).
+- **`shifts`**: was a single `guards` multi-relation (one row per time-slot, N guards), now a required
+  single `position` relation + single `guard` relation (one row per guard-filling-one-position-for-one-
+  slot) - `1700000006_shifts_named_positions.js`. `pb_hooks/swaps.pb.js` simplified to match: accepting a
+  swap now just overwrites `guard` directly instead of relation +/- syntax on an array.
+- **`scheduler/scheduler.js`**: `generateShifts()`'s `positions` param changed from a count to an array of
+  `{id, name, timeRestricted, windowStart, windowEnd}`. Per slot, a time-restricted position only counts as
+  "active" if the slot's LOCAL hour/minute falls in its window (handles overnight wraps like 22:00-06:00);
+  all positions still share one fairness pool (a guard's total hours across every position they fill is
+  what gets balanced, not per-position). Output rows are `{start, end, position, guard}` (singular `guard`,
+  matching the new `shifts` shape) instead of `{start, end, guards: [...]}`.
+- These migrations were written as NEW files rather than edits to the already-applied
+  `1700000001_schedules.js`/`1700000002_shifts.js`, so `./pocketbase migrate up` on an already-provisioned
+  instance (or the running `guard.service`, which auto-applied them live without a restart) picks up the
+  schema change correctly instead of silently diverging from a would-be-edited historical migration.
+- Frontend: new commander-only `Positions` page/tab (CRUD for named positions, time-window inputs).
+  `Generate` swapped its positions-count field for a position checklist; its preview groups rows by
+  time-slot so a slot reads like "18:00 - 19:00: דרומי - Alice, ש''ג - Bob". `Roster` groups
+  concurrent same-slot rows the same way. `MyShifts`/`Stats` updated for the singular `guard` field.
+- `tests/scheduler.test.js` and `tests/pb-integration.test.js` (9 cases, including a live time-window
+  round-trip through the real positions/schedules/shifts collections) were rewritten for the new shapes and
+  pass; `frontend/src/browserTests.js` was updated to mirror `scheduler.test.js` but **not** re-run in an
+  actual browser this session (no headless-browser tooling on this host) - build + lint are clean and the
+  identical logic is covered by the Node suite, but visually exercise `pb_public/tests.html` before fully
+  trusting it.

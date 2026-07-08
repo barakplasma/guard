@@ -9,13 +9,14 @@ import BottomNavigation from '@mui/material/BottomNavigation';
 import BottomNavigationAction from '@mui/material/BottomNavigationAction';
 import ListAltIcon from '@mui/icons-material/ListAlt';
 import AddCircleIcon from '@mui/icons-material/AddCircle';
+import BadgeIcon from '@mui/icons-material/Badge';
 import PersonIcon from '@mui/icons-material/Person';
 import BarChartIcon from '@mui/icons-material/BarChart';
 import Box from '@mui/material/Box';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { useLocale } from '../lib/LocaleContext.jsx';
 
-const ROUTES = ['/roster', '/generate', '/me', '/stats'];
+const ROUTES = ['/roster', '/generate', '/positions', '/me', '/stats'];
 
 export default function Layout() {
   const { user, isCommander, logout } = useAuth();
@@ -56,6 +57,9 @@ export default function Layout() {
         <BottomNavigationAction label={t('nav.roster')} value="/roster" icon={<ListAltIcon />} />
         {isCommander && (
           <BottomNavigationAction label={t('nav.generate')} value="/generate" icon={<AddCircleIcon />} />
+        )}
+        {isCommander && (
+          <BottomNavigationAction label={t('nav.positions')} value="/positions" icon={<BadgeIcon />} />
         )}
         <BottomNavigationAction label={t('nav.me')} value="/me" icon={<PersonIcon />} />
         <BottomNavigationAction label={t('nav.stats')} value="/stats" icon={<BarChartIcon />} />

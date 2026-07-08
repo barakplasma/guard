@@ -46,7 +46,7 @@ export default function Roster() {
   const load = async () => {
     const records = await pb.collection('shifts').getFullList({
       sort: 'start',
-      expand: 'guards',
+      expand: 'guard,position',
     });
     setShifts(records);
   };
@@ -68,9 +68,7 @@ export default function Roster() {
   const allGuards = useMemo(() => {
     const names = new Map();
     for (const shift of shifts) {
-      for (const guard of shift.expand?.guards || []) {
-        names.set(guard.id, guard.name);
-      }
+      if (shift.expand?.guard) names.set(shift.expand.guard.id, shift.expand.guard.name);
     }
     return [...names.entries()];
   }, [shifts]);
@@ -80,23 +78,34 @@ export default function Roster() {
   const visible = useMemo(() => {
     return shifts.filter((shift) => {
       if (!showPast && new Date(shift.end).getTime() < now) return false;
-      if (guardFilter !== 'all') {
-        const ids = (shift.expand?.guards || []).map((g) => g.id);
-        if (!ids.includes(guardFilter)) return false;
-      }
+      if (guardFilter !== 'all' && shift.expand?.guard?.id !== guardFilter) return false;
       return true;
     });
   }, [shifts, showPast, guardFilter, now]);
 
+  // Every position sharing a time-slot is now its own row, so group them back
+  // into one displayed line per slot: "18:00 - 19:00: דרומי - Alice, ש''ג - Bob".
   const grouped = useMemo(() => {
     const byDay = new Map();
     for (const shift of visible) {
       const start = new Date(shift.start);
-      const key = start.toDateString();
-      if (!byDay.has(key)) byDay.set(key, { label: dayLabel(start, lang), items: [] });
-      byDay.get(key).items.push(shift);
+      const dayKey = start.toDateString();
+      if (!byDay.has(dayKey)) byDay.set(dayKey, { label: dayLabel(start, lang), slots: new Map() });
+      const day = byDay.get(dayKey);
+      const slotKey = `${shift.start}-${shift.end}`;
+      if (!day.slots.has(slotKey)) {
+        day.slots.set(slotKey, { start: shift.start, end: shift.end, entries: [] });
+      }
+      day.slots.get(slotKey).entries.push({
+        positionName: shift.expand?.position?.name || '?',
+        guardName: shift.expand?.guard?.name || '?',
+        guardId: shift.expand?.guard?.id,
+      });
     }
-    return [...byDay.values()];
+    return [...byDay.values()].map((day) => ({
+      label: day.label,
+      items: [...day.slots.values()].sort((a, b) => new Date(a.start) - new Date(b.start)),
+    }));
   }, [visible, lang]);
 
   return (
@@ -135,15 +144,14 @@ export default function Roster() {
           </Typography>
           <Divider sx={{ mb: 1 }} />
           <List dense>
-            {day.items.map((shift) => {
-              const start = new Date(shift.start).getTime();
-              const end = new Date(shift.end).getTime();
+            {day.items.map((slot) => {
+              const start = new Date(slot.start).getTime();
+              const end = new Date(slot.end).getTime();
               const isCurrent = start <= now && now < end;
-              const guardNames = (shift.expand?.guards || []).map((g) => g.name);
-              const includesMe = (shift.expand?.guards || []).some((g) => g.id === user?.id);
+              const includesMe = slot.entries.some((e) => e.guardId === user?.id);
               return (
                 <ListItem
-                  key={shift.id}
+                  key={`${slot.start}-${slot.end}`}
                   sx={{
                     bgcolor: isCurrent ? 'action.selected' : includesMe ? 'action.hover' : undefined,
                     borderRadius: 1,
@@ -151,7 +159,7 @@ export default function Roster() {
                 >
                   <ListItemText
                     primary={formatRange(start, end, lang)}
-                    secondary={guardNames.join(', ')}
+                    secondary={slot.entries.map((e) => `${e.positionName} - ${e.guardName}`).join(', ')}
                   />
                   {isCurrent && <Chip size="small" color="primary" label={t('roster.now')} />}
                 </ListItem>

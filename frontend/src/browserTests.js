@@ -6,6 +6,15 @@ import { generateShifts, computeStats } from './lib/scheduler.js';
 const HOUR = 3600 * 1000;
 const results = [];
 
+// Positions are time-restricted via local hour/minute, so timestamps are
+// built with the LOCAL Date constructor, not Date.UTC - see scheduler.js.
+function localTime(y, m, d, h = 0, min = 0) {
+  return new Date(y, m, d, h, min, 0, 0).getTime();
+}
+
+const POS_A = { name: 'A' };
+const POS_B = { name: 'B' };
+
 function check(name, fn) {
   try {
     fn();
@@ -36,12 +45,12 @@ function assertThrows(fn, message) {
   throw new Error(message || 'expected function to throw');
 }
 
-check('demo case (3 guards, 2 positions, 24x1h) balances hours ~16/16/16', () => {
-  const start = Date.UTC(2024, 0, 1, 0, 0, 0);
+check('demo case (3 guards, 2 named positions, 24x1h) balances hours ~16/16/16', () => {
+  const start = localTime(2024, 0, 1, 0, 0);
   const end = start + 24 * HOUR;
   const guards = ['Alice', 'Bob', 'Carol'];
-  const shifts = generateShifts({ start, end, shiftMinutes: 60, positions: 2, guards });
-  assertEqual(shifts.length, 24);
+  const shifts = generateShifts({ start, end, shiftMinutes: 60, positions: [POS_A, POS_B], guards });
+  assertEqual(shifts.length, 48);
   const { hoursPerGuard } = computeStats(shifts);
   for (const guard of guards) {
     const hours = hoursPerGuard.get(guard);
@@ -49,52 +58,80 @@ check('demo case (3 guards, 2 positions, 24x1h) balances hours ~16/16/16', () =>
   }
 });
 
-check('matches gs2.py output on a no-ties input (positions=1, staggered availability)', () => {
-  const start = Date.UTC(2024, 0, 1, 0, 0, 0);
+check('matches gs2.py output on a no-ties input (1 position, staggered availability)', () => {
+  const start = localTime(2024, 0, 1, 0, 0);
   const existingShifts = [
-    { start: start - 3 * HOUR, end: start - 2 * HOUR, guards: ['Alice'] },
-    { start: start - 2 * HOUR, end: start - HOUR, guards: ['Bob'] },
-    { start: start - HOUR, end: start, guards: ['Carol'] },
+    { start: start - 3 * HOUR, end: start - 2 * HOUR, guard: 'Alice' },
+    { start: start - 2 * HOUR, end: start - HOUR, guard: 'Bob' },
+    { start: start - HOUR, end: start, guard: 'Carol' },
   ];
   const shifts = generateShifts({
     start,
     end: start + 3 * HOUR,
     shiftMinutes: 60,
-    positions: 1,
+    positions: [POS_A],
     guards: ['Alice', 'Bob', 'Carol'],
     existingShifts,
   });
-  assertDeepEqual(shifts.map((s) => s.guards[0]), ['Alice', 'Bob', 'Carol']);
+  assertDeepEqual(shifts.map((s) => s.guard), ['Alice', 'Bob', 'Carol']);
 });
 
-check('validation errors mirror gs2.py asserts', () => {
-  assertThrows(() => generateShifts({ start: 10, end: 0, shiftMinutes: 60, positions: 1, guards: ['A'] }));
-  assertThrows(() => generateShifts({ start: 0, end: 10, shiftMinutes: 0, positions: 1, guards: ['A'] }));
-  assertThrows(() => generateShifts({ start: 0, end: 10, shiftMinutes: 60, positions: 0, guards: ['A'] }));
-  assertThrows(() => generateShifts({ start: 0, end: 10, shiftMinutes: 60, positions: 1, guards: [] }));
-  assertThrows(() => generateShifts({ start: 0, end: 10, shiftMinutes: 60, positions: 1, guards: ['A', 'A'] }));
-  assertThrows(() => generateShifts({ start: 0, end: 10, shiftMinutes: 60, positions: 2, guards: ['A'] }));
+check('validation errors', () => {
+  assertThrows(() => generateShifts({ start: 10, end: 0, shiftMinutes: 60, positions: [POS_A], guards: ['A'] }));
+  assertThrows(() => generateShifts({ start: 0, end: 10, shiftMinutes: 0, positions: [POS_A], guards: ['A'] }));
+  assertThrows(() => generateShifts({ start: 0, end: 10, shiftMinutes: 60, positions: [], guards: ['A'] }));
+  assertThrows(() => generateShifts({ start: 0, end: 10, shiftMinutes: 60, positions: [{ name: '' }], guards: ['A'] }));
+  assertThrows(() =>
+    generateShifts({
+      start: 0,
+      end: 10,
+      shiftMinutes: 60,
+      positions: [{ name: 'Patrol', timeRestricted: true, windowStart: 'nope', windowEnd: '06:00' }],
+      guards: ['A'],
+    }),
+  );
+  assertThrows(() => generateShifts({ start: 0, end: 10, shiftMinutes: 60, positions: [POS_A], guards: [] }));
+  assertThrows(() => generateShifts({ start: 0, end: 10, shiftMinutes: 60, positions: [POS_A], guards: ['A', 'A'] }));
+  assertThrows(() => generateShifts({ start: 0, end: 10, shiftMinutes: 60, positions: [POS_A, POS_B], guards: ['A'] }));
 });
 
 check('seeds availability from existingShifts', () => {
-  const start = Date.UTC(2024, 0, 1, 0, 0, 0);
-  const existingShifts = [{ start, end: start + 2 * HOUR, guards: ['Alice'] }];
+  const start = localTime(2024, 0, 1, 0, 0);
+  const existingShifts = [{ start, end: start + 2 * HOUR, guard: 'Alice' }];
   const shifts = generateShifts({
     start,
     end: start + 3 * HOUR,
     shiftMinutes: 60,
-    positions: 1,
+    positions: [POS_A],
     guards: ['Alice', 'Bob'],
     existingShifts,
   });
-  assertDeepEqual(shifts.map((s) => s.guards[0]), ['Bob', 'Bob', 'Alice']);
+  assertDeepEqual(shifts.map((s) => s.guard), ['Bob', 'Bob', 'Alice']);
+});
+
+check('time-restricted position (patrol, 22:00-06:00 overnight window) only appears in-window', () => {
+  const patrol = { name: 'Patrol', timeRestricted: true, windowStart: '22:00', windowEnd: '06:00' };
+  const regular = { name: 'Gate' };
+  const start = localTime(2024, 0, 1, 20, 0);
+  const end = localTime(2024, 0, 2, 8, 0);
+  const shifts = generateShifts({
+    start,
+    end,
+    shiftMinutes: 60,
+    positions: [regular, patrol],
+    guards: ['Alice', 'Bob', 'Carol'],
+  });
+  const gateSlots = shifts.filter((s) => s.position === 'Gate');
+  const patrolSlots = shifts.filter((s) => s.position === 'Patrol');
+  assertEqual(gateSlots.length, 12);
+  assertEqual(patrolSlots.length, 8);
 });
 
 check('computeStats variance matches the corrected worked example ([4h, 8h] -> 4.0)', () => {
-  const start = Date.UTC(2023, 9, 1, 9, 0, 0);
+  const start = localTime(2023, 9, 1, 9, 0);
   const shifts = [
-    { start, end: start + 8 * HOUR, guards: ['Alice'] },
-    { start: start + 8 * HOUR, end: start + 12 * HOUR, guards: ['Bob'] },
+    { start, end: start + 8 * HOUR, guard: 'Alice' },
+    { start: start + 8 * HOUR, end: start + 12 * HOUR, guard: 'Bob' },
   ];
   const { hoursPerGuard, variance } = computeStats(shifts);
   assertEqual(hoursPerGuard.get('Alice'), 8);
@@ -103,8 +140,8 @@ check('computeStats variance matches the corrected worked example ([4h, 8h] -> 4
 });
 
 check('computeStats returns null variance for a single guard', () => {
-  const start = Date.UTC(2023, 9, 1, 9, 0, 0);
-  const { variance } = computeStats([{ start, end: start + HOUR, guards: ['Alice'] }]);
+  const start = localTime(2023, 9, 1, 9, 0);
+  const { variance } = computeStats([{ start, end: start + HOUR, guard: 'Alice' }]);
   assertEqual(variance, null);
 });
 

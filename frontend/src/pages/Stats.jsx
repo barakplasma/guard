@@ -12,12 +12,12 @@ export default function Stats() {
 
   useEffect(() => {
     pb.collection('shifts')
-      .getFullList({ expand: 'guards' })
+      .getFullList({ expand: 'guard' })
       .then((records) => {
         const forScheduler = records.map((s) => ({
           start: new Date(s.start).getTime(),
           end: new Date(s.end).getTime(),
-          guards: (s.expand?.guards || []).map((g) => g.name),
+          guard: s.expand?.guard?.name,
         }));
         setStats(computeStats(forScheduler));
       });

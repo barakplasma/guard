@@ -18,17 +18,12 @@ onRecordUpdateRequest((e) => {
     }
 
     const shift = e.app.findRecordById('shifts', e.record.get('shift'));
-    const guardIds = shift.get('guards');
 
-    if (!guardIds.includes(fromUser)) {
+    if (shift.get('guard') !== fromUser) {
       throw new BadRequestError('from_user is no longer assigned to this shift.');
     }
-    if (guardIds.includes(toUser)) {
-      throw new BadRequestError('to_user is already assigned to this shift.');
-    }
 
-    shift.set('guards-', fromUser);
-    shift.set('guards+', toUser);
+    shift.set('guard', toUser);
     e.app.save(shift);
   }
 

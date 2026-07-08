@@ -33,18 +33,18 @@ export default function MyShifts() {
     const nowIso = new Date().toISOString();
     const [myShifts, allUsers, incomingReqs, outgoingReqs] = await Promise.all([
       pb.collection('shifts').getFullList({
-        filter: `guards ~ "${user.id}" && end > "${nowIso}"`,
+        filter: `guard = "${user.id}" && end > "${nowIso}"`,
         sort: 'start',
-        expand: 'guards',
+        expand: 'guard,position',
       }),
       pb.collection('users').getFullList({ filter: 'active = true', sort: 'name' }),
       pb.collection('swap_requests').getFullList({
         filter: `to_user = "${user.id}" && status = "pending"`,
-        expand: 'shift,from_user',
+        expand: 'shift.position,from_user',
       }),
       pb.collection('swap_requests').getFullList({
         filter: `from_user = "${user.id}" && status = "pending"`,
-        expand: 'shift,to_user',
+        expand: 'shift.position,to_user',
       }),
     ]);
     setShifts(myShifts);
@@ -70,10 +70,7 @@ export default function MyShifts() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user.id]);
 
-  const otherGuardsFor = (shift) => {
-    const assignedIds = (shift.expand?.guards || []).map((g) => g.id);
-    return users.filter((u) => !assignedIds.includes(u.id));
-  };
+  const otherGuardsFor = (shift) => users.filter((u) => u.id !== shift.expand?.guard?.id);
 
   const openSwapDialog = (shift) => {
     setSwapDialogShift(shift);
@@ -136,7 +133,7 @@ export default function MyShifts() {
           >
             <ListItemText
               primary={`${fmt.format(new Date(shift.start))} - ${fmt.format(new Date(shift.end))}`}
-              secondary={(shift.expand?.guards || []).map((g) => g.name).join(', ')}
+              secondary={shift.expand?.position?.name}
             />
           </ListItem>
         ))}
