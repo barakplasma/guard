@@ -32,6 +32,8 @@ export default function Generate() {
   const [start, setStart] = useState('');
   const [end, setEnd] = useState('');
   const [shiftMinutes, setShiftMinutes] = useState(60);
+  const [restMinutes, setRestMinutes] = useState(0);
+  const [fairnessWindowHours, setFairnessWindowHours] = useState(0);
   const [preview, setPreview] = useState(null);
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -114,8 +116,10 @@ export default function Generate() {
         start: new Date(s.start).getTime(),
         end: new Date(s.end).getTime(),
         guard: s.expand?.guard?.name,
+        position: s.position,
       }));
 
+      const fairnessWindowMinutes = Number(fairnessWindowHours) > 0 ? Number(fairnessWindowHours) * 60 : null;
       const newShifts = generateShifts({
         start: startMs,
         end: endMs,
@@ -123,6 +127,8 @@ export default function Generate() {
         positions: positionDescriptors,
         guards: guardNames,
         existingShifts: existingForScheduler,
+        restMinutes: Number(restMinutes),
+        fairnessWindowMinutes,
       });
 
       const stats = computeStats([...existingForScheduler, ...newShifts]);
@@ -211,6 +217,22 @@ export default function Generate() {
           type="number"
           value={shiftMinutes}
           onChange={(e) => setShiftMinutes(e.target.value)}
+        />
+        <TextField
+          label={t('generate.restMinutes')}
+          type="number"
+          value={restMinutes}
+          onChange={(e) => setRestMinutes(e.target.value)}
+          helperText={t('generate.restMinutesHelp')}
+          InputProps={{ inputProps: { min: 0 } }}
+        />
+        <TextField
+          label={t('generate.fairnessWindowHours')}
+          type="number"
+          value={fairnessWindowHours}
+          onChange={(e) => setFairnessWindowHours(e.target.value)}
+          helperText={t('generate.fairnessWindowHelp')}
+          InputProps={{ inputProps: { min: 0 } }}
         />
 
         <Typography variant="subtitle2">{t('generate.positions')}</Typography>
