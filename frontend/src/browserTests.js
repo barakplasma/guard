@@ -139,6 +139,82 @@ check('computeStats variance matches the corrected worked example ([4h, 8h] -> 4
   assertEqual(variance, 4.0);
 });
 
+check('restMinutes prevents back-to-back shifts (3 guards, 1 position)', () => {
+  const start = localTime(2024, 0, 1, 0, 0);
+  const shifts = generateShifts({
+    start,
+    end: start + 6 * HOUR,
+    shiftMinutes: 60,
+    positions: [POS_A],
+    guards: ['Alice', 'Bob', 'Carol'],
+    restMinutes: 60,
+  });
+  const order = shifts.map((s) => s.guard);
+  assertEqual(order.length, 6);
+  for (let i = 1; i < order.length; i++) {
+    if (order[i] === order[i - 1]) throw new Error(`slot ${i} (${order[i]}) is back-to-back`);
+  }
+});
+
+check('restMinutes falls back to under-rested guards rather than leaving a post empty', () => {
+  const start = localTime(2024, 0, 1, 0, 0);
+  const shifts = generateShifts({
+    start,
+    end: start + 4 * HOUR,
+    shiftMinutes: 60,
+    positions: [POS_A],
+    guards: ['Alice', 'Bob'],
+    restMinutes: 120,
+  });
+  assertEqual(shifts.length, 4);
+});
+
+check('fairnessWindowMinutes gently resets stale load (old hours stop counting)', () => {
+  const start = localTime(2024, 0, 1, 0, 0);
+  const existingShifts = [{ start: start - 58 * HOUR, end: start - 48 * HOUR, guard: 'Alice' }];
+  const params = {
+    start,
+    end: start + 2 * HOUR,
+    shiftMinutes: 60,
+    positions: [POS_A],
+    guards: ['Alice', 'Bob'],
+    existingShifts,
+  };
+  const count = (arr, name) => arr.filter((g) => g === name).length;
+
+  const allTime = generateShifts(params).map((s) => s.guard);
+  assertEqual(count(allTime, 'Bob'), 2);
+  assertEqual(count(allTime, 'Alice'), 0);
+
+  const windowed = generateShifts({ ...params, fairnessWindowMinutes: 24 * 60 }).map((s) => s.guard);
+  assertEqual(count(windowed, 'Alice'), 1);
+  assertEqual(count(windowed, 'Bob'), 1);
+});
+
+check('existing shift at a (slot, position) is not regenerated as a duplicate row', () => {
+  const start = localTime(2024, 0, 1, 0, 0);
+  const existingShifts = [{ start, end: start + HOUR, guard: 'Alice', position: 'A' }];
+  const shifts = generateShifts({
+    start,
+    end: start + 2 * HOUR,
+    shiftMinutes: 60,
+    positions: [POS_A],
+    guards: ['Alice', 'Bob'],
+    existingShifts,
+  });
+  assertEqual(shifts.length, 1);
+  assertEqual(shifts[0].start, start + HOUR);
+});
+
+check('rest/window validation errors', () => {
+  assertThrows(() =>
+    generateShifts({ start: 0, end: 10, shiftMinutes: 60, positions: [POS_A], guards: ['A'], restMinutes: -1 }),
+  );
+  assertThrows(() =>
+    generateShifts({ start: 0, end: 10, shiftMinutes: 60, positions: [POS_A], guards: ['A'], fairnessWindowMinutes: 0 }),
+  );
+});
+
 check('computeStats returns null variance for a single guard', () => {
   const start = localTime(2023, 9, 1, 9, 0);
   const { variance } = computeStats([{ start, end: start + HOUR, guard: 'Alice' }]);
