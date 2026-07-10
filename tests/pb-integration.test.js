@@ -276,6 +276,51 @@ for (const positionCount of [1, 2, 3]) {
   });
 }
 
+test('a position persists its staffing rules and creates one shift per required person', { skip: !HAS_PB }, async () => {
+  const guards = [];
+  for (const name of ['Staff Commander', 'Qualified One', 'Qualified Two']) {
+    guards.push(await signup(`${name.toLowerCase().replaceAll(' ', '.')}@staffing.example.com`, 'testpass123', name));
+  }
+
+  const adminToken = await loginAdmin(ADMIN_EMAIL, ADMIN_PASSWORD);
+  // This also keeps the test compatible with the approval gate when it is
+  // enabled: only active users may authenticate.
+  for (const [index, guard] of guards.entries()) {
+    const { status } = await api(`/api/collections/users/records/${guard.id}`, {
+      method: 'PATCH',
+      token: adminToken,
+      body: { active: true, ...(index === 0 ? { role: 'commander' } : {}) },
+    });
+    assert.equal(status, 200);
+  }
+
+  const commanderToken = await login('staff.commander@staffing.example.com', 'testpass123');
+  const patrol = await createPosition(commanderToken, {
+    name: 'Qualified patrol',
+    people_count: 2,
+    eligible_users: [guards[1].id, guards[2].id],
+    active: true,
+  });
+  assert.equal(patrol.people_count, 2);
+  assert.deepEqual(patrol.eligible_users.sort(), [guards[1].id, guards[2].id].sort());
+
+  const start = Date.UTC(2027, 8, 1, 8, 0, 0);
+  const plannedShifts = generateShifts({
+    start,
+    end: start + 60 * 60 * 1000,
+    shiftMinutes: 60,
+    positions: [{
+      id: patrol.id,
+      name: patrol.name,
+      peopleCount: patrol.people_count,
+      eligibleGuards: ['Qualified One', 'Qualified Two'],
+    }],
+    guards: guards.map((guard) => guard.name),
+  });
+  assert.equal(plannedShifts.length, 2);
+  assert.deepEqual(plannedShifts.map((shift) => shift.guard).sort(), ['Qualified One', 'Qualified Two']);
+});
+
 test('swap accept moves the guard, and only the recipient may accept', { skip: !HAS_PB }, async () => {
   const guardA = await signup('swap.a@example.com', 'testpass123', 'Swap A');
   const guardB = await signup('swap.b@example.com', 'testpass123', 'Swap B');

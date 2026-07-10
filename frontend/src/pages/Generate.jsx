@@ -105,6 +105,8 @@ export default function Generate() {
           timeRestricted: p.time_restricted,
           windowStart: p.window_start,
           windowEnd: p.window_end,
+          peopleCount: p.people_count || 1,
+          eligibleGuards: (p.eligible_users || []).map((userId) => guardIdToName.get(userId)).filter(Boolean),
         };
       });
 

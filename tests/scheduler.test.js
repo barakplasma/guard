@@ -245,6 +245,40 @@ test('rest/window validation errors', () => {
   );
 });
 
+test('a position creates one shift per required person and can restrict who fills it', () => {
+  const start = localTime(2024, 0, 1, 8, 0);
+  const shifts = generateShifts({
+    start,
+    end: start + HOUR,
+    shiftMinutes: 60,
+    positions: [
+      { name: 'Patrol', peopleCount: 2, eligibleGuards: ['Alice', 'Bob'] },
+      { name: 'Gate', peopleCount: 1 },
+    ],
+    guards: ['Alice', 'Bob', 'Carol'],
+  });
+
+  assert.equal(shifts.length, 3);
+  assert.deepEqual(shifts.filter((shift) => shift.position === 'Patrol').map((shift) => shift.guard).sort(), ['Alice', 'Bob']);
+  assert.equal(shifts.find((shift) => shift.position === 'Gate').guard, 'Carol');
+});
+
+test('an overlapping multi-person position generates only its unfilled places', () => {
+  const start = localTime(2024, 0, 1, 8, 0);
+  const shifts = generateShifts({
+    start,
+    end: start + HOUR,
+    shiftMinutes: 60,
+    positions: [{ name: 'Patrol', peopleCount: 2 }],
+    guards: ['Alice', 'Bob', 'Carol'],
+    existingShifts: [{ start, end: start + HOUR, position: 'Patrol', guard: 'Alice' }],
+  });
+
+  assert.equal(shifts.length, 1);
+  assert.equal(shifts[0].position, 'Patrol');
+  assert.notEqual(shifts[0].guard, 'Alice');
+});
+
 test('computeStats variance matches the corrected worked example (gs2.py doctest is wrong, see CLAUDE.md)', () => {
   const start = localTime(2023, 9, 1, 9, 0);
   const shifts = [
