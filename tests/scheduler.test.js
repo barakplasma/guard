@@ -146,6 +146,105 @@ test('time-restricted position (patrol, 22:00-06:00 overnight window) only appea
   assert.deepEqual(patrolHours.sort((a, b) => a - b), [0, 1, 2, 3, 4, 5, 22, 23].sort((a, b) => a - b));
 });
 
+test('restMinutes prevents back-to-back shifts (3 guards, 1 position rotates A/B/C)', () => {
+  const start = localTime(2024, 0, 1, 0, 0);
+  const shifts = generateShifts({
+    start,
+    end: start + 6 * HOUR,
+    shiftMinutes: 60,
+    positions: [POS_A],
+    guards: ['Alice', 'Bob', 'Carol'],
+    restMinutes: 60, // one full shift of rest between a guard's shifts
+  });
+
+  const order = shifts.map((s) => s.guard);
+  assert.equal(order.length, 6);
+  for (let i = 1; i < order.length; i++) {
+    assert.notEqual(order[i], order[i - 1], `slot ${i} (${order[i]}) is back-to-back with slot ${i - 1}`);
+  }
+});
+
+test('restMinutes falls back to under-rested guards rather than leaving a post empty', () => {
+  const start = localTime(2024, 0, 1, 0, 0);
+  // Only 2 guards for 4 single-position slots with a 2h rest gap - impossible to
+  // honor fully, so the scheduler must still staff every slot (best effort).
+  const shifts = generateShifts({
+    start,
+    end: start + 4 * HOUR,
+    shiftMinutes: 60,
+    positions: [POS_A],
+    guards: ['Alice', 'Bob'],
+    restMinutes: 120,
+  });
+  assert.equal(shifts.length, 4); // every slot filled, no throw
+  // A guard is never double-booked onto two concurrent slots.
+  for (let i = 1; i < shifts.length; i++) {
+    assert.notEqual(shifts[i].guard, shifts[i - 1].guard);
+  }
+});
+
+test('fairnessWindowMinutes gently resets stale load (old hours stop counting)', () => {
+  const start = localTime(2024, 0, 1, 0, 0);
+  // Alice logged 10h that ended 48h ago; Bob has done nothing.
+  const existingShifts = [{ start: start - 58 * HOUR, end: start - 48 * HOUR, guard: 'Alice' }];
+  const params = {
+    start,
+    end: start + 2 * HOUR,
+    shiftMinutes: 60,
+    positions: [POS_A],
+    guards: ['Alice', 'Bob'],
+    existingShifts,
+  };
+
+  const count = (arr, name) => arr.filter((g) => g === name).length;
+
+  // All-time fairness still resents Alice's old 10h, so Bob takes both slots.
+  const allTime = generateShifts(params).map((s) => s.guard);
+  assert.equal(count(allTime, 'Bob'), 2);
+  assert.equal(count(allTime, 'Alice'), 0);
+
+  // A 24h window drops the 48h-old load, so Alice and Bob start even and split 1-1.
+  const windowed = generateShifts({ ...params, fairnessWindowMinutes: 24 * 60 }).map((s) => s.guard);
+  assert.equal(count(windowed, 'Alice'), 1);
+  assert.equal(count(windowed, 'Bob'), 1);
+});
+
+test('existing shift at a (slot, position) is not regenerated as a duplicate row', () => {
+  const start = localTime(2024, 0, 1, 0, 0);
+  const existingShifts = [{ start, end: start + HOUR, guard: 'Alice', position: 'A' }];
+  const shifts = generateShifts({
+    start,
+    end: start + 2 * HOUR,
+    shiftMinutes: 60,
+    positions: [POS_A],
+    guards: ['Alice', 'Bob'],
+    existingShifts,
+  });
+  // Only the second slot is generated; the first is already filled.
+  assert.equal(shifts.length, 1);
+  assert.equal(shifts[0].start, start + HOUR);
+  assert.equal(shifts[0].position, 'A');
+});
+
+test('rest/window validation errors', () => {
+  assert.throws(
+    () => generateShifts({ start: 0, end: 10, shiftMinutes: 60, positions: [POS_A], guards: ['A'], restMinutes: -1 }),
+    /Rest minutes must be non-negative/,
+  );
+  assert.throws(
+    () =>
+      generateShifts({
+        start: 0,
+        end: 10,
+        shiftMinutes: 60,
+        positions: [POS_A],
+        guards: ['A'],
+        fairnessWindowMinutes: 0,
+      }),
+    /Fairness window must be positive/,
+  );
+});
+
 test('computeStats variance matches the corrected worked example (gs2.py doctest is wrong, see CLAUDE.md)', () => {
   const start = localTime(2023, 9, 1, 9, 0);
   const shifts = [

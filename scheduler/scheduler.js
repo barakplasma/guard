@@ -15,61 +15,6 @@
  * per-position) is what gets balanced.
  */
 
-class MinHeap {
-  constructor(compare) {
-    this._compare = compare;
-    this._items = [];
-  }
-
-  get size() {
-    return this._items.length;
-  }
-
-  push(item) {
-    const items = this._items;
-    items.push(item);
-    let i = items.length - 1;
-    while (i > 0) {
-      const parent = (i - 1) >> 1;
-      if (this._compare(items[i], items[parent]) < 0) {
-        [items[i], items[parent]] = [items[parent], items[i]];
-        i = parent;
-      } else {
-        break;
-      }
-    }
-  }
-
-  pop() {
-    const items = this._items;
-    if (items.length === 0) return undefined;
-    const top = items[0];
-    const last = items.pop();
-    if (items.length > 0) {
-      items[0] = last;
-      let i = 0;
-      const n = items.length;
-      for (;;) {
-        const left = 2 * i + 1;
-        const right = 2 * i + 2;
-        let smallest = i;
-        if (left < n && this._compare(items[left], items[smallest]) < 0) smallest = left;
-        if (right < n && this._compare(items[right], items[smallest]) < 0) smallest = right;
-        if (smallest === i) break;
-        [items[i], items[smallest]] = [items[smallest], items[i]];
-        i = smallest;
-      }
-    }
-    return top;
-  }
-}
-
-function compareGuards(a, b) {
-  if (a.nextAvailable !== b.nextAvailable) return a.nextAvailable - b.nextAvailable;
-  if (a.totalHours !== b.totalHours) return a.totalHours - b.totalHours;
-  return a.seq - b.seq;
-}
-
 function parseHHMM(value, label) {
   const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value ?? '');
   if (!match) throw new Error(`${label} must be an "HH:MM" 24h string, got ${JSON.stringify(value)}`);
@@ -103,64 +48,124 @@ function normalizePositions(positions) {
 }
 
 /**
+ * Sum a guard's hours that count toward fairness at slot time `t`.
+ * With no window this is the all-time total (original behavior); with a
+ * trailing window only shifts that ended within the last `windowMs` count,
+ * so past load "gently resets" over time instead of penalizing a guard forever.
+ */
+function loadAt(history, t, windowMs) {
+  if (windowMs == null) return history.total;
+  let sum = 0;
+  for (const entry of history.shifts) {
+    if (entry.end > t - windowMs) sum += entry.hours;
+  }
+  return sum;
+}
+
+/**
  * @param {object} params
  * @param {number} params.start - ms epoch
  * @param {number} params.end - ms epoch
  * @param {number} params.shiftMinutes
  * @param {{id?:string,name:string,timeRestricted?:boolean,windowStart?:string,windowEnd?:string}[]} params.positions
  * @param {string[]} params.guards
- * @param {{start:number,end:number,guard:string}[]} [params.existingShifts]
+ * @param {{start:number,end:number,guard:string,position?:string}[]} [params.existingShifts]
+ * @param {number} [params.restMinutes=0] - minimum rest between a guard's shifts (anti-back-to-back).
+ *   Guards who haven't rested this long are only used as a last resort to avoid leaving a post empty.
+ * @param {number|null} [params.fairnessWindowMinutes=null] - if set, balance load over a trailing
+ *   window of this many minutes instead of all time (e.g. 1440 = a rolling 24h window).
  * @returns {{start:number,end:number,position:string,guard:string}[]} only the newly generated shifts
  */
-export function generateShifts({ start, end, shiftMinutes, positions, guards, existingShifts = [] }) {
+export function generateShifts({
+  start,
+  end,
+  shiftMinutes,
+  positions,
+  guards,
+  existingShifts = [],
+  restMinutes = 0,
+  fairnessWindowMinutes = null,
+}) {
   if (!(end > start)) throw new Error('Start time must be before end time.');
   if (!(shiftMinutes > 0)) throw new Error('Shift length must be positive.');
   if (!guards || guards.length === 0) throw new Error('At least one guard must be specified.');
   if (new Set(guards).size !== guards.length) throw new Error('Guard names must be unique.');
+  if (!(restMinutes >= 0)) throw new Error('Rest minutes must be non-negative.');
+  if (fairnessWindowMinutes != null && !(fairnessWindowMinutes > 0)) {
+    throw new Error('Fairness window must be positive.');
+  }
   const normalizedPositions = normalizePositions(positions);
 
   const shiftMs = shiftMinutes * 60 * 1000;
+  const restMs = restMinutes * 60 * 1000;
+  const windowMs = fairnessWindowMinutes == null ? null : fairnessWindowMinutes * 60 * 1000;
+  const shiftHours = shiftMs / 3600000;
 
-  const nextAvailable = new Map(guards.map((g) => [g, 0]));
-  const totalHours = new Map(guards.map((g) => [g, 0]));
+  // Per-guard state. `busyUntil` is a hard constraint (a shift actually covers
+  // that time - can't double-book); `restedAt` = busyUntil + rest gap is a soft
+  // preference. `seq` round-robins ties: a just-picked guard moves to the back.
+  let seq = 0;
+  const state = new Map(
+    guards.map((g) => [g, { name: g, busyUntil: 0, restedAt: 0, seq: seq++, history: { total: 0, shifts: [] } }]),
+  );
 
+  // Seed availability + fairness from existing shifts, and remember which
+  // (slot start, position) pairs are already filled so we never emit a
+  // duplicate row when a generation range overlaps shifts that already exist.
+  const occupied = new Set();
   for (const shift of existingShifts) {
-    const hours = (shift.end - shift.start) / 3600000;
-    if (nextAvailable.has(shift.guard)) {
-      nextAvailable.set(shift.guard, Math.max(nextAvailable.get(shift.guard), shift.end));
-      totalHours.set(shift.guard, totalHours.get(shift.guard) + hours);
+    if (shift.position != null) occupied.add(`${shift.start}|${shift.position}`);
+    const st = state.get(shift.guard);
+    if (st) {
+      const hours = (shift.end - shift.start) / 3600000;
+      st.busyUntil = Math.max(st.busyUntil, shift.end);
+      st.restedAt = Math.max(st.restedAt, shift.end + restMs);
+      st.history.total += hours;
+      st.history.shifts.push({ end: shift.end, hours });
     }
   }
 
-  let seq = 0;
-  const heap = new MinHeap(compareGuards);
-  for (const g of guards) {
-    heap.push({ name: g, nextAvailable: nextAvailable.get(g), totalHours: totalHours.get(g), seq: seq++ });
-  }
-
-  const shiftHours = shiftMs / 3600000;
   const newShifts = [];
 
   for (let t = start; t < end; t += shiftMs) {
-    const activePositions = normalizedPositions.filter((p) => isPositionActiveAt(p, t));
     const shiftEnd = t + shiftMs;
-    const popped = [];
+    const activePositions = normalizedPositions
+      .filter((p) => isPositionActiveAt(p, t))
+      .filter((p) => !occupied.has(`${t}|${p.id}`));
+    if (activePositions.length === 0) continue;
 
-    for (const position of activePositions) {
-      if (heap.size === 0) throw new Error('Not enough guards to fill positions');
-      const item = heap.pop();
-      if (item.nextAvailable > t) {
-        throw new Error(`Guard ${item.name} is not available until ${new Date(item.nextAvailable).toISOString()}`);
-      }
-      popped.push(item);
-      newShifts.push({ start: t, end: shiftEnd, position: position.id, guard: item.name });
+    if (guards.length < activePositions.length) {
+      throw new Error('Not enough guards to fill positions');
     }
 
-    for (const item of popped) {
-      item.nextAvailable = shiftEnd;
-      item.totalHours += shiftHours;
-      item.seq = seq++;
-      heap.push(item);
+    // Only guards not actually on duty at `t` are eligible (no double-booking).
+    // Among them, prefer rested guards, then lightest load in the fairness
+    // window, then longest since last on duty, then round-robin order.
+    const eligible = [...state.values()].filter((s) => s.busyUntil <= t);
+    if (eligible.length < activePositions.length) {
+      throw new Error(`Not enough available guards at ${new Date(t).toISOString()} (others are on existing shifts)`);
+    }
+    eligible.sort((a, b) => {
+      const aRested = a.restedAt <= t ? 0 : 1;
+      const bRested = b.restedAt <= t ? 0 : 1;
+      if (aRested !== bRested) return aRested - bRested;
+      const aLoad = loadAt(a.history, t, windowMs);
+      const bLoad = loadAt(b.history, t, windowMs);
+      if (aLoad !== bLoad) return aLoad - bLoad;
+      if (a.busyUntil !== b.busyUntil) return a.busyUntil - b.busyUntil;
+      return a.seq - b.seq;
+    });
+
+    const chosen = eligible.slice(0, activePositions.length);
+    for (let i = 0; i < activePositions.length; i++) {
+      const position = activePositions[i];
+      const st = chosen[i];
+      newShifts.push({ start: t, end: shiftEnd, position: position.id, guard: st.name });
+      st.busyUntil = shiftEnd;
+      st.restedAt = shiftEnd + restMs;
+      st.history.total += shiftHours;
+      st.history.shifts.push({ end: shiftEnd, hours: shiftHours });
+      st.seq = seq++;
     }
   }
 
