@@ -168,7 +168,7 @@ test('a position with headcount 2 staffs two distinct guards per slot', () => {
   }
 });
 
-test('assigned guards: a restricted position is staffed only from its list, balanced across nights', () => {
+test('assigned guards: prefers its list and rotates among them when enough are available', () => {
   const patrol = {
     name: 'Patrol',
     timeRestricted: true,
@@ -190,11 +190,12 @@ test('assigned guards: a restricted position is staffed only from its list, bala
 
   const patrolGuards = shifts.map((s) => s.guard);
   assert.equal(patrolGuards.length, 2); // one continuous block per night
-  assert.ok(!patrolGuards.includes('Alice'), 'Alice is not assigned and must not staff patrol');
+  // Both assigned guards are free, so the off-list fallback is never triggered.
+  assert.ok(!patrolGuards.includes('Alice'), 'Alice is off-list and not needed here');
   assert.deepEqual([...patrolGuards].sort(), ['Bob', 'Carol']); // rotated for fairness
 });
 
-test('assigned guards: errors when too few assigned guards are available', () => {
+test('assigned guards: falls back to someone off-list when too few assigned are available', () => {
   const patrol = {
     name: 'Patrol',
     timeRestricted: true,
@@ -206,10 +207,21 @@ test('assigned guards: errors when too few assigned guards are available', () =>
   const start = localTime(2024, 0, 1, 22, 0);
   const end = localTime(2024, 0, 2, 6, 0);
 
-  assert.throws(
-    () => generateShifts({ start, end, shiftMinutes: 60, positions: [patrol], guards: ['Alice', 'Bob', 'Carol'] }),
-    /Not enough available assigned guards for position Patrol/,
-  );
+  const shifts = generateShifts({
+    start,
+    end,
+    shiftMinutes: 60,
+    positions: [patrol],
+    guards: ['Alice', 'Bob', 'Carol'],
+  });
+
+  assert.equal(shifts.length, 2); // one continuous block, headcount 2, no throw
+  const guardsOnPatrol = shifts.map((s) => s.guard);
+  assert.ok(guardsOnPatrol.includes('Bob'), 'the sole assigned guard is used');
+  // The second seat is pulled from off-list (Alice or Carol).
+  const offList = guardsOnPatrol.filter((g) => g !== 'Bob');
+  assert.equal(offList.length, 1);
+  assert.ok(['Alice', 'Carol'].includes(offList[0]));
 });
 
 test('assigned guards must be part of the overall guard pool', () => {

@@ -13,8 +13,9 @@
  *     each slot's LOCAL hour/minute (the JS runtime's local timezone), matching
  *     the rest of the app's "device-local time is the interface" convention.
  *   - guards: an optional list of specific assigned guard NAMES. When non-empty,
- *     that position is staffed ONLY from this list (balanced among them across
- *     occurrences for fairness); generation errors if too few are available.
+ *     that position PREFERS this list (used first, balanced among them across
+ *     occurrences for fairness), but falls back to the wider pool when too few
+ *     of them are free rather than leaving the post empty.
  *
  * A time-restricted position is one CONTINUOUS shift per window: the same
  * guard(s) hold the entire window (e.g. 22:00-06:00 is a single 8h block, not
@@ -55,7 +56,8 @@ function normalizePositions(positions) {
     // Missing/0/negative headcount means "one guard" (also the default for rows
     // that predate the headcount field, which read back as 0 from PocketBase).
     const headcount = Number.isInteger(p.headcount) && p.headcount >= 1 ? p.headcount : 1;
-    // An empty assigned list means "any guard is eligible" (null sentinel).
+    // An empty assigned list means "no preference, any guard" (null sentinel);
+    // a non-empty list is a preference, not a hard restriction (see below).
     const assigned = p.guards && p.guards.length > 0 ? new Set(p.guards) : null;
     return {
       id: p.id ?? p.name,
@@ -91,7 +93,8 @@ function loadAt(history, t, windowMs) {
  * @param {number} params.shiftMinutes
  * @param {{id?:string,name:string,timeRestricted?:boolean,windowStart?:string,windowEnd?:string,headcount?:number,guards?:string[]}[]} params.positions
  *   `headcount` is guards-per-slot (default 1); `guards` is an optional list of
- *   assigned guard names that, when set, is the ONLY pool that position draws from.
+ *   assigned guard names that, when set, that position draws from first before
+ *   falling back to the wider pool.
  * @param {string[]} params.guards
  * @param {{start:number,end:number,guard:string,position?:string}[]} [params.existingShifts]
  * @param {number} [params.restMinutes=0] - minimum rest between a guard's shifts (anti-back-to-back).
@@ -215,23 +218,25 @@ export function generateShifts({
 
     const usedThisSlot = new Set();
     for (const demand of demands) {
-      // Only guards not on duty at `t` (no double-booking), not already picked
-      // this slot, and - for a restricted post - on its assigned list.
-      const candidates = [...state.values()].filter(
-        (s) =>
-          s.busyUntil <= t &&
-          !usedThisSlot.has(s.name) &&
-          (demand.assigned == null || demand.assigned.has(s.name)),
-      );
+      // Available guards: not on duty at `t` (no double-booking) and not already
+      // picked this slot. A restricted post PREFERS its assigned guards but falls
+      // back to the wider pool when too few of them are free, rather than leaving
+      // the post empty.
+      const candidates = [...state.values()].filter((s) => s.busyUntil <= t && !usedThisSlot.has(s.name));
       if (candidates.length < demand.need) {
-        const scope = demand.assigned ? 'assigned ' : '';
         throw new Error(
-          `Not enough available ${scope}guards for position ${demand.position.name} at ${new Date(t).toISOString()}`,
+          `Not enough available guards for position ${demand.position.name} at ${new Date(t).toISOString()}`,
         );
       }
-      // Prefer rested guards, then lightest load in the fairness window, then
-      // longest since last on duty, then round-robin order.
+      // Assigned guards first (when the post has a list), then prefer rested
+      // guards, then lightest load in the fairness window, then longest since
+      // last on duty, then round-robin order.
       candidates.sort((a, b) => {
+        if (demand.assigned) {
+          const aAssigned = demand.assigned.has(a.name) ? 0 : 1;
+          const bAssigned = demand.assigned.has(b.name) ? 0 : 1;
+          if (aAssigned !== bAssigned) return aAssigned - bAssigned;
+        }
         const aRested = a.restedAt <= t ? 0 : 1;
         const bRested = b.restedAt <= t ? 0 : 1;
         if (aRested !== bRested) return aRested - bRested;

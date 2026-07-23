@@ -146,7 +146,7 @@ check('a position with headcount 2 staffs two distinct guards per slot', () => {
   for (const guards of bySlot.values()) assertEqual(guards.size, 2);
 });
 
-check('assigned guards: a restricted position is staffed only from its list', () => {
+check('assigned guards: prefers its list and rotates among them when enough are available', () => {
   const patrol = {
     name: 'Patrol',
     timeRestricted: true,
@@ -169,7 +169,7 @@ check('assigned guards: a restricted position is staffed only from its list', ()
   assertDeepEqual([...patrolGuards].sort(), ['Bob', 'Carol']);
 });
 
-check('assigned guards: errors when too few assigned guards are available', () => {
+check('assigned guards: falls back to someone off-list when too few assigned are available', () => {
   const patrol = {
     name: 'Patrol',
     timeRestricted: true,
@@ -180,9 +180,19 @@ check('assigned guards: errors when too few assigned guards are available', () =
   };
   const start = localTime(2024, 0, 1, 22, 0);
   const end = localTime(2024, 0, 2, 6, 0);
-  assertThrows(() =>
-    generateShifts({ start, end, shiftMinutes: 60, positions: [patrol], guards: ['Alice', 'Bob', 'Carol'] }),
-  );
+  const shifts = generateShifts({
+    start,
+    end,
+    shiftMinutes: 60,
+    positions: [patrol],
+    guards: ['Alice', 'Bob', 'Carol'],
+  });
+  assertEqual(shifts.length, 2);
+  const guardsOnPatrol = shifts.map((s) => s.guard);
+  if (!guardsOnPatrol.includes('Bob')) throw new Error('the sole assigned guard is used');
+  const offList = guardsOnPatrol.filter((g) => g !== 'Bob');
+  assertEqual(offList.length, 1);
+  if (!['Alice', 'Carol'].includes(offList[0])) throw new Error('second seat should be off-list');
 });
 
 check('computeStats variance matches the corrected worked example ([4h, 8h] -> 4.0)', () => {
