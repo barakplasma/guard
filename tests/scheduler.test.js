@@ -195,6 +195,33 @@ test('assigned guards: prefers its list and rotates among them when enough are a
   assert.deepEqual([...patrolGuards].sort(), ['Bob', 'Carol']); // rotated for fairness
 });
 
+test('time-restricted post rotates guards day to day, even against global hour-fairness', () => {
+  const patrol = { name: 'Patrol', timeRestricted: true, windowStart: '22:00', windowEnd: '06:00' };
+  // Alice is carrying a big daytime load, so pure hour-fairness would keep
+  // handing patrol to the lighter Bob every night. Rotation must still put
+  // Alice on some nights so the post alternates.
+  const existingShifts = [{ start: localTime(2023, 11, 30, 8, 0), end: localTime(2023, 11, 30, 20, 0), guard: 'Alice' }];
+  const start = localTime(2024, 0, 1, 22, 0);
+  const end = localTime(2024, 0, 4, 6, 0); // three overnight windows
+
+  const shifts = generateShifts({
+    start,
+    end,
+    shiftMinutes: 60,
+    positions: [patrol],
+    guards: ['Alice', 'Bob'],
+    existingShifts,
+  });
+
+  const nightlyGuards = shifts.sort((a, b) => a.start - b.start).map((s) => s.guard);
+  assert.equal(nightlyGuards.length, 3); // one continuous block per night
+  // No guard does patrol two nights running.
+  for (let i = 1; i < nightlyGuards.length; i++) {
+    assert.notEqual(nightlyGuards[i], nightlyGuards[i - 1], `night ${i} repeats ${nightlyGuards[i]}`);
+  }
+  assert.ok(nightlyGuards.includes('Alice') && nightlyGuards.includes('Bob'), 'both guards take turns');
+});
+
 test('assigned guards: falls back to someone off-list when too few assigned are available', () => {
   const patrol = {
     name: 'Patrol',

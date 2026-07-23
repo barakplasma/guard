@@ -169,6 +169,27 @@ check('assigned guards: prefers its list and rotates among them when enough are 
   assertDeepEqual([...patrolGuards].sort(), ['Bob', 'Carol']);
 });
 
+check('time-restricted post rotates guards day to day, even against global hour-fairness', () => {
+  const patrol = { name: 'Patrol', timeRestricted: true, windowStart: '22:00', windowEnd: '06:00' };
+  const existingShifts = [{ start: localTime(2023, 11, 30, 8, 0), end: localTime(2023, 11, 30, 20, 0), guard: 'Alice' }];
+  const start = localTime(2024, 0, 1, 22, 0);
+  const end = localTime(2024, 0, 4, 6, 0);
+  const shifts = generateShifts({
+    start,
+    end,
+    shiftMinutes: 60,
+    positions: [patrol],
+    guards: ['Alice', 'Bob'],
+    existingShifts,
+  });
+  const nightlyGuards = shifts.sort((a, b) => a.start - b.start).map((s) => s.guard);
+  assertEqual(nightlyGuards.length, 3);
+  for (let i = 1; i < nightlyGuards.length; i++) {
+    if (nightlyGuards[i] === nightlyGuards[i - 1]) throw new Error(`night ${i} repeats ${nightlyGuards[i]}`);
+  }
+  if (!(nightlyGuards.includes('Alice') && nightlyGuards.includes('Bob'))) throw new Error('both guards take turns');
+});
+
 check('assigned guards: falls back to someone off-list when too few assigned are available', () => {
   const patrol = {
     name: 'Patrol',

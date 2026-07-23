@@ -141,6 +141,39 @@ test('signup always lands as an active guard, never commander', { skip: !HAS_PB 
   assert.equal(record.active, true);
 });
 
+test('a commander can set another user\'s min_sleep_hours, a guard cannot edit others', { skip: !HAS_PB }, async () => {
+  const boss = await signup('sleep.boss@example.com', 'testpass123', 'Sleep Boss');
+  const driver = await signup('sleep.driver@example.com', 'testpass123', 'Sleep Driver');
+  const nosy = await signup('sleep.nosy@example.com', 'testpass123', 'Sleep Nosy');
+
+  const adminToken = await loginAdmin(ADMIN_EMAIL, ADMIN_PASSWORD);
+  await api(`/api/collections/users/records/${boss.id}`, {
+    method: 'PATCH',
+    token: adminToken,
+    body: { role: 'commander' },
+  });
+
+  // Commander sets the driver's minimum sleep to 6h.
+  const commanderToken = await login('sleep.boss@example.com', 'testpass123');
+  const { status: setStatus, json: updated } = await api(`/api/collections/users/records/${driver.id}`, {
+    method: 'PATCH',
+    token: commanderToken,
+    body: { min_sleep_hours: 6 },
+  });
+  assert.equal(setStatus, 200, JSON.stringify(updated));
+  assert.equal(updated.min_sleep_hours, 6);
+
+  // A plain guard must not be able to edit another user's record (the rule folds
+  // into the lookup, so a mismatch reads as 404 - see the swap test).
+  const nosyToken = await login('sleep.nosy@example.com', 'testpass123');
+  const { status: forbidden } = await api(`/api/collections/users/records/${driver.id}`, {
+    method: 'PATCH',
+    token: nosyToken,
+    body: { min_sleep_hours: 0 },
+  });
+  assert.equal(forbidden, 404);
+});
+
 test('a guard cannot create a schedule (commander-only createRule)', { skip: !HAS_PB }, async () => {
   await signup('guard.perm.test@example.com', 'testpass123', 'Guard Perm Test');
   const token = await login('guard.perm.test@example.com', 'testpass123');
