@@ -96,7 +96,6 @@ export default function Generate() {
     try {
       const startMs = toEpoch(start);
       const endMs = toEpoch(end);
-      const guardNames = selectedGuards.map((id) => guardIdToName.get(id));
       const positionDescriptors = selectedPositions.map((id) => {
         const p = positionById.get(id);
         return {
@@ -105,8 +104,19 @@ export default function Generate() {
           timeRestricted: p.time_restricted,
           windowStart: p.window_start,
           windowEnd: p.window_end,
+          headcount: p.headcount,
+          guards: (p.guards || []).map((gid) => guardIdToName.get(gid)).filter(Boolean),
         };
       });
+      // A position's assigned guards must be schedulable even if unchecked in
+      // the general list, so the pool is the union of both (the scheduler
+      // rejects assigned guards that aren't in the pool).
+      const guardNames = [
+        ...new Set([
+          ...selectedGuards.map((id) => guardIdToName.get(id)),
+          ...positionDescriptors.flatMap((p) => p.guards),
+        ]),
+      ].filter(Boolean);
 
       const existingShifts = await pb.collection('shifts').getFullList({
         filter: `end > "${new Date().toISOString()}"`,

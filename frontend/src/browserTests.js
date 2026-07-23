@@ -109,7 +109,7 @@ check('seeds availability from existingShifts', () => {
   assertDeepEqual(shifts.map((s) => s.guard), ['Bob', 'Bob', 'Alice']);
 });
 
-check('time-restricted position (patrol, 22:00-06:00 overnight window) only appears in-window', () => {
+check('time-restricted position (patrol, 22:00-06:00) is one continuous shift, same guard all window', () => {
   const patrol = { name: 'Patrol', timeRestricted: true, windowStart: '22:00', windowEnd: '06:00' };
   const regular = { name: 'Gate' };
   const start = localTime(2024, 0, 1, 20, 0);
@@ -124,7 +124,65 @@ check('time-restricted position (patrol, 22:00-06:00 overnight window) only appe
   const gateSlots = shifts.filter((s) => s.position === 'Gate');
   const patrolSlots = shifts.filter((s) => s.position === 'Patrol');
   assertEqual(gateSlots.length, 12);
-  assertEqual(patrolSlots.length, 8);
+  assertEqual(patrolSlots.length, 1); // one 22:00->06:00 block, not eight hourly rows
+  assertEqual((patrolSlots[0].end - patrolSlots[0].start) / HOUR, 8);
+});
+
+check('a position with headcount 2 staffs two distinct guards per slot', () => {
+  const start = localTime(2024, 0, 1, 0, 0);
+  const shifts = generateShifts({
+    start,
+    end: start + 4 * HOUR,
+    shiftMinutes: 60,
+    positions: [{ name: 'Gate', headcount: 2 }],
+    guards: ['Alice', 'Bob', 'Carol'],
+  });
+  assertEqual(shifts.length, 8);
+  const bySlot = new Map();
+  for (const s of shifts) {
+    if (!bySlot.has(s.start)) bySlot.set(s.start, new Set());
+    bySlot.get(s.start).add(s.guard);
+  }
+  for (const guards of bySlot.values()) assertEqual(guards.size, 2);
+});
+
+check('assigned guards: a restricted position is staffed only from its list', () => {
+  const patrol = {
+    name: 'Patrol',
+    timeRestricted: true,
+    windowStart: '22:00',
+    windowEnd: '06:00',
+    guards: ['Bob', 'Carol'],
+  };
+  const start = localTime(2024, 0, 1, 22, 0);
+  const end = localTime(2024, 0, 3, 6, 0);
+  const shifts = generateShifts({
+    start,
+    end,
+    shiftMinutes: 60,
+    positions: [patrol],
+    guards: ['Alice', 'Bob', 'Carol'],
+  });
+  const patrolGuards = shifts.map((s) => s.guard);
+  assertEqual(patrolGuards.length, 2);
+  if (patrolGuards.includes('Alice')) throw new Error('Alice is not assigned and must not staff patrol');
+  assertDeepEqual([...patrolGuards].sort(), ['Bob', 'Carol']);
+});
+
+check('assigned guards: errors when too few assigned guards are available', () => {
+  const patrol = {
+    name: 'Patrol',
+    timeRestricted: true,
+    windowStart: '22:00',
+    windowEnd: '06:00',
+    headcount: 2,
+    guards: ['Bob'],
+  };
+  const start = localTime(2024, 0, 1, 22, 0);
+  const end = localTime(2024, 0, 2, 6, 0);
+  assertThrows(() =>
+    generateShifts({ start, end, shiftMinutes: 60, positions: [patrol], guards: ['Alice', 'Bob', 'Carol'] }),
+  );
 });
 
 check('computeStats variance matches the corrected worked example ([4h, 8h] -> 4.0)', () => {

@@ -385,7 +385,8 @@ test('a time-restricted position (patrol) only generates + persists shifts insid
     guards: guardNames,
   });
   assert.equal(plannedShifts.filter((s) => s.position === gate.id).length, 12);
-  assert.equal(plannedShifts.filter((s) => s.position === patrol.id).length, 8);
+  // Patrol is one continuous 22:00->06:00 block per night, not eight hourly rows.
+  assert.equal(plannedShifts.filter((s) => s.position === patrol.id).length, 1);
 
   const { json: schedule } = await api('/api/collections/schedules/records', {
     method: 'POST',
@@ -418,9 +419,85 @@ test('a time-restricted position (patrol) only generates + persists shifts insid
     `/api/collections/shifts/records?filter=${encodeURIComponent(`schedule = "${schedule.id}" && position = "${patrol.id}"`)}&perPage=100`,
     { token: commanderToken },
   );
-  assert.equal(stored.items.length, 8);
+  assert.equal(stored.items.length, 1);
+  const patrolBlock = stored.items[0];
+  assert.equal(new Date(patrolBlock.start).getHours(), 22);
+  assert.equal(new Date(patrolBlock.end).getHours(), 6);
+  assert.equal((new Date(patrolBlock.end).getTime() - new Date(patrolBlock.start).getTime()) / (3600 * 1000), 8);
+});
+
+// A position with headcount 2 must persist two distinct-guard rows per slot -
+// round-tripped through the real collections, not just planned in memory.
+test('a headcount-2 position persists two distinct guards per slot', { skip: !HAS_PB }, async () => {
+  const guardNames = ['Hila', 'Ivan', 'Jord'];
+  const guardIds = new Map();
+  for (const name of guardNames) {
+    const record = await signup(`${name.toLowerCase()}.hc2@example.com`, 'testpass123', name);
+    guardIds.set(name, record.id);
+  }
+
+  const adminToken = await loginAdmin(ADMIN_EMAIL, ADMIN_PASSWORD);
+  await api(`/api/collections/users/records/${guardIds.get('Hila')}`, {
+    method: 'PATCH',
+    token: adminToken,
+    body: { role: 'commander' },
+  });
+  const commanderToken = await login('hila.hc2@example.com', 'testpass123');
+
+  const post = await createPosition(commanderToken, { name: 'Double (hc2)', active: true, headcount: 2 });
+
+  const start = new Date(2027, 8, 1, 0, 0, 0).getTime();
+  const end = start + 3 * 3600 * 1000; // 3 one-hour slots
+
+  const plannedShifts = generateShifts({
+    start,
+    end,
+    shiftMinutes: 60,
+    positions: [{ id: post.id, name: post.name, headcount: 2 }],
+    guards: guardNames,
+  });
+  assert.equal(plannedShifts.length, 6); // 3 slots x 2 seats
+
+  const { json: schedule } = await api('/api/collections/schedules/records', {
+    method: 'POST',
+    token: commanderToken,
+    body: {
+      start: new Date(start).toISOString(),
+      end: new Date(end).toISOString(),
+      shift_minutes: 60,
+      positions: [post.id],
+      created_by: guardIds.get('Hila'),
+    },
+  });
+
+  for (const shift of plannedShifts) {
+    const { status } = await api('/api/collections/shifts/records', {
+      method: 'POST',
+      token: commanderToken,
+      body: {
+        schedule: schedule.id,
+        position: shift.position,
+        start: new Date(shift.start).toISOString(),
+        end: new Date(shift.end).toISOString(),
+        guard: guardIds.get(shift.guard),
+      },
+    });
+    assert.equal(status, 200);
+  }
+
+  const { json: stored } = await api(
+    `/api/collections/shifts/records?filter=${encodeURIComponent(`schedule = "${schedule.id}"`)}&perPage=100`,
+    { token: commanderToken },
+  );
+  assert.equal(stored.items.length, 6);
+  const bySlot = new Map();
   for (const item of stored.items) {
-    const hour = new Date(item.start).getHours();
-    assert.ok(hour >= 22 || hour < 6, `patrol shift at hour ${hour} is outside its 22:00-06:00 window`);
+    const key = new Date(item.start).getTime();
+    if (!bySlot.has(key)) bySlot.set(key, new Set());
+    bySlot.get(key).add(item.guard);
+  }
+  assert.equal(bySlot.size, 3);
+  for (const guardsInSlot of bySlot.values()) {
+    assert.equal(guardsInSlot.size, 2); // two different guards on the same slot
   }
 });

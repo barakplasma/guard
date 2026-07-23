@@ -119,7 +119,7 @@ test('seeds availability from existingShifts', () => {
   );
 });
 
-test('time-restricted position (patrol, 22:00-06:00 overnight window) only appears in-window', () => {
+test('time-restricted position (patrol, 22:00-06:00) is one continuous shift, same guard all window', () => {
   const patrol = { name: 'Patrol', timeRestricted: true, windowStart: '22:00', windowEnd: '06:00' };
   const regular = { name: 'Gate' };
 
@@ -138,12 +138,92 @@ test('time-restricted position (patrol, 22:00-06:00 overnight window) only appea
   const gateSlots = shifts.filter((s) => s.position === 'Gate');
   const patrolSlots = shifts.filter((s) => s.position === 'Patrol');
 
-  assert.equal(gateSlots.length, 12); // staffed every slot
-  // in-window slots: 22,23,00,01,02,03,04,05 (8 slots); 20,21,06,07 excluded
-  assert.equal(patrolSlots.length, 8);
+  assert.equal(gateSlots.length, 12); // regular post still staffed every hourly slot
+  // Patrol is ONE 22:00->06:00 block, not eight hourly rows - can't switch mid-shift.
+  assert.equal(patrolSlots.length, 1);
+  const block = patrolSlots[0];
+  assert.equal(new Date(block.start).getHours(), 22);
+  assert.equal(new Date(block.end).getHours(), 6);
+  assert.equal((block.end - block.start) / HOUR, 8);
+});
 
-  const patrolHours = patrolSlots.map((s) => new Date(s.start).getHours());
-  assert.deepEqual(patrolHours.sort((a, b) => a - b), [0, 1, 2, 3, 4, 5, 22, 23].sort((a, b) => a - b));
+test('a position with headcount 2 staffs two distinct guards per slot', () => {
+  const start = localTime(2024, 0, 1, 0, 0);
+  const shifts = generateShifts({
+    start,
+    end: start + 4 * HOUR,
+    shiftMinutes: 60,
+    positions: [{ name: 'Gate', headcount: 2 }],
+    guards: ['Alice', 'Bob', 'Carol'],
+  });
+
+  assert.equal(shifts.length, 8); // 4 slots x 2 seats
+  const bySlot = new Map();
+  for (const s of shifts) {
+    if (!bySlot.has(s.start)) bySlot.set(s.start, new Set());
+    bySlot.get(s.start).add(s.guard);
+  }
+  for (const guards of bySlot.values()) {
+    assert.equal(guards.size, 2); // two different guards, never the same one twice
+  }
+});
+
+test('assigned guards: a restricted position is staffed only from its list, balanced across nights', () => {
+  const patrol = {
+    name: 'Patrol',
+    timeRestricted: true,
+    windowStart: '22:00',
+    windowEnd: '06:00',
+    guards: ['Bob', 'Carol'],
+  };
+  // Two nights so the assigned pool has to rotate; Alice must never appear.
+  const start = localTime(2024, 0, 1, 22, 0);
+  const end = localTime(2024, 0, 3, 6, 0);
+
+  const shifts = generateShifts({
+    start,
+    end,
+    shiftMinutes: 60,
+    positions: [patrol],
+    guards: ['Alice', 'Bob', 'Carol'],
+  });
+
+  const patrolGuards = shifts.map((s) => s.guard);
+  assert.equal(patrolGuards.length, 2); // one continuous block per night
+  assert.ok(!patrolGuards.includes('Alice'), 'Alice is not assigned and must not staff patrol');
+  assert.deepEqual([...patrolGuards].sort(), ['Bob', 'Carol']); // rotated for fairness
+});
+
+test('assigned guards: errors when too few assigned guards are available', () => {
+  const patrol = {
+    name: 'Patrol',
+    timeRestricted: true,
+    windowStart: '22:00',
+    windowEnd: '06:00',
+    headcount: 2,
+    guards: ['Bob'], // only one assigned, but two needed at once
+  };
+  const start = localTime(2024, 0, 1, 22, 0);
+  const end = localTime(2024, 0, 2, 6, 0);
+
+  assert.throws(
+    () => generateShifts({ start, end, shiftMinutes: 60, positions: [patrol], guards: ['Alice', 'Bob', 'Carol'] }),
+    /Not enough available assigned guards for position Patrol/,
+  );
+});
+
+test('assigned guards must be part of the overall guard pool', () => {
+  assert.throws(
+    () =>
+      generateShifts({
+        start: localTime(2024, 0, 1, 0, 0),
+        end: localTime(2024, 0, 1, 2, 0),
+        shiftMinutes: 60,
+        positions: [{ name: 'Gate', guards: ['Zoe'] }],
+        guards: ['Alice', 'Bob'],
+      }),
+    /assigns guard "Zoe" who is not in the guard pool/,
+  );
 });
 
 test('restMinutes prevents back-to-back shifts (3 guards, 1 position rotates A/B/C)', () => {

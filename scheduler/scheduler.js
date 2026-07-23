@@ -7,12 +7,21 @@
  * equally available (see CLAUDE.md gotchas / DESIGN.md section 4).
  *
  * Positions are named (e.g. "דרומי", "ש''ג") rather than
- * a plain headcount. A position can be time-restricted (e.g. patrol only staffed
- * 22:00-06:00) - "HH:MM" window strings are compared against each slot's LOCAL
- * hour/minute (the JS runtime's local timezone), matching the rest of the app's
- * "device-local time is the interface" convention. All positions share one
- * fairness pool: a guard's total hours across every position they fill (not
- * per-position) is what gets balanced.
+ * a plain headcount. Each position also carries:
+ *   - headcount: how many guards it needs at once (default 1).
+ *   - timeRestricted + windowStart/windowEnd: an "HH:MM" window compared against
+ *     each slot's LOCAL hour/minute (the JS runtime's local timezone), matching
+ *     the rest of the app's "device-local time is the interface" convention.
+ *   - guards: an optional list of specific assigned guard NAMES. When non-empty,
+ *     that position is staffed ONLY from this list (balanced among them across
+ *     occurrences for fairness); generation errors if too few are available.
+ *
+ * A time-restricted position is one CONTINUOUS shift per window: the same
+ * guard(s) hold the entire window (e.g. 22:00-06:00 is a single 8h block, not
+ * eight hourly rows), so nobody switches out mid-shift. Regular (non-time-
+ * restricted) positions still rotate every `shiftMinutes` slot. All positions
+ * share one fairness pool: a guard's total hours across every position they fill
+ * (not per-position) is what gets balanced.
  */
 
 function parseHHMM(value, label) {
@@ -43,7 +52,20 @@ function normalizePositions(positions) {
       parseHHMM(p.windowStart, `${p.name}.windowStart`);
       parseHHMM(p.windowEnd, `${p.name}.windowEnd`);
     }
-    return { id: p.id ?? p.name, name: p.name, timeRestricted: !!p.timeRestricted, windowStart: p.windowStart, windowEnd: p.windowEnd };
+    // Missing/0/negative headcount means "one guard" (also the default for rows
+    // that predate the headcount field, which read back as 0 from PocketBase).
+    const headcount = Number.isInteger(p.headcount) && p.headcount >= 1 ? p.headcount : 1;
+    // An empty assigned list means "any guard is eligible" (null sentinel).
+    const assigned = p.guards && p.guards.length > 0 ? new Set(p.guards) : null;
+    return {
+      id: p.id ?? p.name,
+      name: p.name,
+      timeRestricted: !!p.timeRestricted,
+      windowStart: p.windowStart,
+      windowEnd: p.windowEnd,
+      headcount,
+      assigned,
+    };
   });
 }
 
@@ -67,7 +89,9 @@ function loadAt(history, t, windowMs) {
  * @param {number} params.start - ms epoch
  * @param {number} params.end - ms epoch
  * @param {number} params.shiftMinutes
- * @param {{id?:string,name:string,timeRestricted?:boolean,windowStart?:string,windowEnd?:string}[]} params.positions
+ * @param {{id?:string,name:string,timeRestricted?:boolean,windowStart?:string,windowEnd?:string,headcount?:number,guards?:string[]}[]} params.positions
+ *   `headcount` is guards-per-slot (default 1); `guards` is an optional list of
+ *   assigned guard names that, when set, is the ONLY pool that position draws from.
  * @param {string[]} params.guards
  * @param {{start:number,end:number,guard:string,position?:string}[]} [params.existingShifts]
  * @param {number} [params.restMinutes=0] - minimum rest between a guard's shifts (anti-back-to-back).
@@ -99,7 +123,19 @@ export function generateShifts({
   const shiftMs = shiftMinutes * 60 * 1000;
   const restMs = restMinutes * 60 * 1000;
   const windowMs = fairnessWindowMinutes == null ? null : fairnessWindowMinutes * 60 * 1000;
-  const shiftHours = shiftMs / 3600000;
+
+  const guardSet = new Set(guards);
+  // Every assigned guard must be part of the overall guard pool - otherwise the
+  // position could never be staffed (the guard has no scheduling state). The
+  // Generate page enforces this by unioning assigned guards into the pool.
+  for (const p of normalizedPositions) {
+    if (!p.assigned) continue;
+    for (const name of p.assigned) {
+      if (!guardSet.has(name)) {
+        throw new Error(`Position ${p.name} assigns guard "${name}" who is not in the guard pool`);
+      }
+    }
+  }
 
   // Per-guard state. `busyUntil` is a hard constraint (a shift actually covers
   // that time - can't double-book); `restedAt` = busyUntil + rest gap is a soft
@@ -109,12 +145,17 @@ export function generateShifts({
     guards.map((g) => [g, { name: g, busyUntil: 0, restedAt: 0, seq: seq++, history: { total: 0, shifts: [] } }]),
   );
 
-  // Seed availability + fairness from existing shifts, and remember which
-  // (slot start, position) pairs are already filled so we never emit a
-  // duplicate row when a generation range overlaps shifts that already exist.
-  const occupied = new Set();
+  // Seed availability + fairness from existing shifts. `existingByPosition`
+  // records the [start,end) intervals already filled per position so we never
+  // emit a duplicate seat when a generation range overlaps shifts that already
+  // exist - counted by "how many rows cover time t" so it works for both hourly
+  // regular rows and continuous time-restricted windows.
+  const existingByPosition = new Map();
   for (const shift of existingShifts) {
-    if (shift.position != null) occupied.add(`${shift.start}|${shift.position}`);
+    if (shift.position != null) {
+      if (!existingByPosition.has(shift.position)) existingByPosition.set(shift.position, []);
+      existingByPosition.get(shift.position).push({ start: shift.start, end: shift.end });
+    }
     const st = state.get(shift.guard);
     if (st) {
       const hours = (shift.end - shift.start) / 3600000;
@@ -124,48 +165,93 @@ export function generateShifts({
       st.history.shifts.push({ end: shift.end, hours });
     }
   }
+  const existingCoverAt = (positionId, t) => {
+    const intervals = existingByPosition.get(positionId);
+    if (!intervals) return 0;
+    let n = 0;
+    for (const iv of intervals) if (iv.start <= t && t < iv.end) n++;
+    return n;
+  };
 
   const newShifts = [];
+  // For a time-restricted position, how far its currently-assigned window
+  // reaches - so we don't re-demand it on every slot inside the window.
+  const coveredUntil = new Map();
 
   for (let t = start; t < end; t += shiftMs) {
-    const shiftEnd = t + shiftMs;
-    const activePositions = normalizedPositions
-      .filter((p) => isPositionActiveAt(p, t))
-      .filter((p) => !occupied.has(`${t}|${p.id}`));
-    if (activePositions.length === 0) continue;
+    // A "demand" is one seat to fill at this slot: which position, until when
+    // (`blockEnd`), how many seats (`need`), and the eligible pool (`assigned`
+    // Set or null for "anyone").
+    const demands = [];
+    for (const p of normalizedPositions) {
+      if (!isPositionActiveAt(p, t)) continue;
 
-    if (guards.length < activePositions.length) {
+      if (p.timeRestricted) {
+        // One continuous shift per window: only demand at the window's opening,
+        // and reserve the whole contiguous active block.
+        if ((coveredUntil.get(p.id) ?? 0) > t) continue;
+        let blockEnd = t + shiftMs;
+        while (blockEnd < end && isPositionActiveAt(p, blockEnd)) blockEnd += shiftMs;
+        coveredUntil.set(p.id, blockEnd);
+        const need = p.headcount - existingCoverAt(p.id, t);
+        if (need > 0) demands.push({ position: p, blockEnd, need, assigned: p.assigned });
+      } else {
+        const need = p.headcount - existingCoverAt(p.id, t);
+        if (need > 0) demands.push({ position: p, blockEnd: t + shiftMs, need, assigned: p.assigned });
+      }
+    }
+    if (demands.length === 0) continue;
+
+    const totalNeed = demands.reduce((sum, d) => sum + d.need, 0);
+    if (guards.length < totalNeed) {
       throw new Error('Not enough guards to fill positions');
     }
 
-    // Only guards not actually on duty at `t` are eligible (no double-booking).
-    // Among them, prefer rested guards, then lightest load in the fairness
-    // window, then longest since last on duty, then round-robin order.
-    const eligible = [...state.values()].filter((s) => s.busyUntil <= t);
-    if (eligible.length < activePositions.length) {
-      throw new Error(`Not enough available guards at ${new Date(t).toISOString()} (others are on existing shifts)`);
-    }
-    eligible.sort((a, b) => {
-      const aRested = a.restedAt <= t ? 0 : 1;
-      const bRested = b.restedAt <= t ? 0 : 1;
-      if (aRested !== bRested) return aRested - bRested;
-      const aLoad = loadAt(a.history, t, windowMs);
-      const bLoad = loadAt(b.history, t, windowMs);
-      if (aLoad !== bLoad) return aLoad - bLoad;
-      if (a.busyUntil !== b.busyUntil) return a.busyUntil - b.busyUntil;
-      return a.seq - b.seq;
-    });
+    // Assign most-constrained demands first (smallest eligible pool, assigned
+    // before unrestricted) so a restricted post isn't starved by a greedy pick
+    // that a wide-open post could have taken instead.
+    const poolSize = (d) => (d.assigned ? d.assigned.size : guards.length + 1);
+    demands.sort((a, b) => poolSize(a) - poolSize(b));
 
-    const chosen = eligible.slice(0, activePositions.length);
-    for (let i = 0; i < activePositions.length; i++) {
-      const position = activePositions[i];
-      const st = chosen[i];
-      newShifts.push({ start: t, end: shiftEnd, position: position.id, guard: st.name });
-      st.busyUntil = shiftEnd;
-      st.restedAt = shiftEnd + restMs;
-      st.history.total += shiftHours;
-      st.history.shifts.push({ end: shiftEnd, hours: shiftHours });
-      st.seq = seq++;
+    const usedThisSlot = new Set();
+    for (const demand of demands) {
+      // Only guards not on duty at `t` (no double-booking), not already picked
+      // this slot, and - for a restricted post - on its assigned list.
+      const candidates = [...state.values()].filter(
+        (s) =>
+          s.busyUntil <= t &&
+          !usedThisSlot.has(s.name) &&
+          (demand.assigned == null || demand.assigned.has(s.name)),
+      );
+      if (candidates.length < demand.need) {
+        const scope = demand.assigned ? 'assigned ' : '';
+        throw new Error(
+          `Not enough available ${scope}guards for position ${demand.position.name} at ${new Date(t).toISOString()}`,
+        );
+      }
+      // Prefer rested guards, then lightest load in the fairness window, then
+      // longest since last on duty, then round-robin order.
+      candidates.sort((a, b) => {
+        const aRested = a.restedAt <= t ? 0 : 1;
+        const bRested = b.restedAt <= t ? 0 : 1;
+        if (aRested !== bRested) return aRested - bRested;
+        const aLoad = loadAt(a.history, t, windowMs);
+        const bLoad = loadAt(b.history, t, windowMs);
+        if (aLoad !== bLoad) return aLoad - bLoad;
+        if (a.busyUntil !== b.busyUntil) return a.busyUntil - b.busyUntil;
+        return a.seq - b.seq;
+      });
+
+      const blockHours = (demand.blockEnd - t) / 3600000;
+      for (const st of candidates.slice(0, demand.need)) {
+        newShifts.push({ start: t, end: demand.blockEnd, position: demand.position.id, guard: st.name });
+        st.busyUntil = demand.blockEnd;
+        st.restedAt = demand.blockEnd + restMs;
+        st.history.total += blockHours;
+        st.history.shifts.push({ end: demand.blockEnd, hours: blockHours });
+        st.seq = seq++;
+        usedThisSlot.add(st.name);
+      }
     }
   }
 

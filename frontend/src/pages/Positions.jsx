@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import List from '@mui/material/List';
@@ -13,6 +13,7 @@ import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import TextField from '@mui/material/TextField';
+import FormGroup from '@mui/material/FormGroup';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
 import Chip from '@mui/material/Chip';
@@ -21,13 +22,22 @@ import { pb } from '../lib/pocketbase.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { useLocale } from '../lib/LocaleContext.jsx';
 
-const BLANK = { name: '', time_restricted: false, window_start: '22:00', window_end: '06:00', active: true };
+const BLANK = {
+  name: '',
+  time_restricted: false,
+  window_start: '22:00',
+  window_end: '06:00',
+  active: true,
+  headcount: 1,
+  guards: [],
+};
 
 export default function Positions() {
   const { isCommander } = useAuth();
   const { t } = useLocale();
 
   const [positions, setPositions] = useState([]);
+  const [users, setUsers] = useState([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(BLANK);
@@ -35,9 +45,12 @@ export default function Positions() {
 
   const load = () => pb.collection('positions').getFullList({ sort: 'name' }).then(setPositions);
 
+  const userById = useMemo(() => new Map(users.map((u) => [u.id, u.name])), [users]);
+
   useEffect(() => {
     if (!isCommander) return;
     load();
+    pb.collection('users').getFullList({ filter: 'active = true', sort: 'name' }).then(setUsers);
   }, [isCommander]);
 
   if (!isCommander) {
@@ -63,10 +76,18 @@ export default function Positions() {
       window_start: position.window_start || '22:00',
       window_end: position.window_end || '06:00',
       active: position.active,
+      headcount: position.headcount || 1,
+      guards: position.guards || [],
     });
     setError(null);
     setDialogOpen(true);
   };
+
+  const toggleGuard = (id) =>
+    setForm((f) => ({
+      ...f,
+      guards: f.guards.includes(id) ? f.guards.filter((g) => g !== id) : [...f.guards, id],
+    }));
 
   const save = async () => {
     try {
@@ -76,6 +97,8 @@ export default function Positions() {
         window_start: form.time_restricted ? form.window_start : '',
         window_end: form.time_restricted ? form.window_end : '',
         active: form.active,
+        headcount: Math.max(1, Number(form.headcount) || 1),
+        guards: form.guards,
       };
       if (editingId) {
         await pb.collection('positions').update(editingId, body);
@@ -122,13 +145,26 @@ export default function Positions() {
           >
             <ListItemText
               primary={
-                <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
                   {position.name}
                   {position.time_restricted && (
                     <Chip size="small" label={`${position.window_start}-${position.window_end}`} />
                   )}
-                  {!position.active && <Chip size="small" variant="outlined" label={t('positions.active')} />}
+                  {position.headcount > 1 && <Chip size="small" label={`×${position.headcount}`} />}
+                  <Chip
+                    size="small"
+                    variant="outlined"
+                    color={position.active ? 'success' : 'default'}
+                    label={position.active ? t('positions.active') : t('positions.inactive')}
+                  />
                 </Box>
+              }
+              secondary={
+                position.guards?.length
+                  ? `${t('positions.assignedGuards')}: ${position.guards
+                      .map((id) => userById.get(id) || id)
+                      .join(', ')}`
+                  : undefined
               }
             />
           </ListItem>
@@ -146,6 +182,14 @@ export default function Positions() {
             autoFocus
             fullWidth
           />
+          <TextField
+            label={t('positions.headcount')}
+            type="number"
+            value={form.headcount}
+            onChange={(e) => setForm((f) => ({ ...f, headcount: e.target.value }))}
+            InputProps={{ inputProps: { min: 1 } }}
+            fullWidth
+          />
           <FormControlLabel
             control={
               <Checkbox
@@ -156,22 +200,41 @@ export default function Positions() {
             label={t('positions.timeRestricted')}
           />
           {form.time_restricted && (
-            <Box sx={{ display: 'flex', gap: 2 }}>
-              <TextField
-                label={t('positions.windowStart')}
-                type="time"
-                value={form.window_start}
-                onChange={(e) => setForm((f) => ({ ...f, window_start: e.target.value }))}
-                InputLabelProps={{ shrink: true }}
-              />
-              <TextField
-                label={t('positions.windowEnd')}
-                type="time"
-                value={form.window_end}
-                onChange={(e) => setForm((f) => ({ ...f, window_end: e.target.value }))}
-                InputLabelProps={{ shrink: true }}
-              />
-            </Box>
+            <>
+              <Box sx={{ display: 'flex', gap: 2 }}>
+                <TextField
+                  label={t('positions.windowStart')}
+                  type="time"
+                  value={form.window_start}
+                  onChange={(e) => setForm((f) => ({ ...f, window_start: e.target.value }))}
+                  InputLabelProps={{ shrink: true }}
+                />
+                <TextField
+                  label={t('positions.windowEnd')}
+                  type="time"
+                  value={form.window_end}
+                  onChange={(e) => setForm((f) => ({ ...f, window_end: e.target.value }))}
+                  InputLabelProps={{ shrink: true }}
+                />
+              </Box>
+              <Box>
+                <Typography variant="subtitle2">{t('positions.assignedGuards')}</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {t('positions.assignedGuardsHelp')}
+                </Typography>
+                <FormGroup>
+                  {users.map((u) => (
+                    <FormControlLabel
+                      key={u.id}
+                      control={
+                        <Checkbox checked={form.guards.includes(u.id)} onChange={() => toggleGuard(u.id)} />
+                      }
+                      label={u.name}
+                    />
+                  ))}
+                </FormGroup>
+              </Box>
+            </>
           )}
           <FormControlLabel
             control={
