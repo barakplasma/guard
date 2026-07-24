@@ -128,6 +128,39 @@ check('time-restricted position (patrol, 22:00-06:00) is one continuous shift, s
   assertEqual((patrolSlots[0].end - patrolSlots[0].start) / HOUR, 8);
 });
 
+check('time-restricted window opening mid-slot is still fully staffed', () => {
+  const patrol = { name: 'Patrol', timeRestricted: true, windowStart: '20:00', windowEnd: '06:00' };
+  const start = localTime(2024, 0, 1, 0, 0);
+  const end = localTime(2024, 0, 1, 21, 0);
+  const shifts = generateShifts({ start, end, shiftMinutes: 90, positions: [patrol], guards: ['Alice', 'Bob'] });
+  const sorted = shifts.slice().sort((a, b) => a.start - b.start);
+  assertEqual(sorted.length, 2);
+  assertEqual(new Date(sorted[1].start).getHours(), 20);
+  assertEqual(new Date(sorted[1].end).getHours(), 21);
+});
+
+check('time-restricted: an off-grid existing shift splits the block at its real edges', () => {
+  const patrol = { name: 'Patrol', timeRestricted: true, windowStart: '22:00', windowEnd: '06:00' };
+  const start = localTime(2024, 0, 1, 22, 0);
+  const end = localTime(2024, 0, 2, 6, 0);
+  const existingShifts = [
+    { start: localTime(2024, 0, 1, 22, 15), end: localTime(2024, 0, 1, 23, 15), guard: 'Alice', position: 'Patrol' },
+  ];
+  const shifts = generateShifts({
+    start,
+    end,
+    shiftMinutes: 60,
+    positions: [patrol],
+    guards: ['Alice', 'Bob', 'Carol'],
+    existingShifts,
+  });
+  const sorted = shifts.slice().sort((a, b) => a.start - b.start);
+  assertEqual(sorted.length, 2);
+  assertEqual((sorted[0].end - sorted[0].start) / (60 * 1000), 15);
+  assertEqual(new Date(sorted[1].start).getHours(), 23);
+  assertEqual(new Date(sorted[1].start).getMinutes(), 15);
+});
+
 check('time-restricted: an existing partial-window shift only suppresses the slots it covers', () => {
   const patrol = { name: 'Patrol', timeRestricted: true, windowStart: '22:00', windowEnd: '06:00' };
   const start = localTime(2024, 0, 1, 22, 0);
