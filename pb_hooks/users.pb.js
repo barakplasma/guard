@@ -11,20 +11,34 @@ onRecordCreateRequest((e) => {
 
 // Privilege guard on update. The users updateRule lets a commander edit other
 // users (needed to set min_sleep_hours - see 1700000009) and lets a user edit
-// their own record, but neither may touch the privilege fields: only the
-// superuser (Admin UI) may change a user's `role` or `active`. Without this a
-// commander (or a self-editing guard) could promote themselves to commander or
-// reactivate a disabled account through the normal users API. (Password/email
-// are already protected by PocketBase's own oldPassword/verification checks.)
+// their own record. Two protections:
+//   1. `role`/`active` are superuser-only, even on your own record - otherwise a
+//      commander (or a self-editing guard) could self-promote or reactivate a
+//      disabled account through the normal users API.
+//   2. When editing SOMEONE ELSE'S record (only commanders can, per the rule),
+//      the only field allowed to change is `min_sleep_hours`. Without this a
+//      commander could PATCH another user's `password` and take over the account
+//      (PocketBase doesn't require the old password when an authorized user
+//      updates a different record), or change their email/verified state.
 onRecordUpdateRequest((e) => {
-  const isSuperuser = !!e.auth && e.auth.collection().name === '_superusers';
-  if (!isSuperuser) {
+  const info = e.requestInfo();
+  if (!info.hasSuperuserAuth()) {
     const original = e.record.original();
     if (e.record.get('role') !== original.get('role')) {
       throw new ForbiddenError("Only a superuser can change a user's role.");
     }
     if (e.record.get('active') !== original.get('active')) {
       throw new ForbiddenError("Only a superuser can change a user's active status.");
+    }
+
+    const editingSomeoneElse = !e.auth || e.auth.id !== e.record.id;
+    if (editingSomeoneElse) {
+      const body = info.body || {};
+      for (const field of Object.keys(body)) {
+        if (field !== 'min_sleep_hours') {
+          throw new ForbiddenError('Commanders may only change min_sleep_hours on other users.');
+        }
+      }
     }
   }
   e.next();

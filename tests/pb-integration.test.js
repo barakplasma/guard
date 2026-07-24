@@ -192,6 +192,26 @@ test('a commander can set another user\'s min_sleep_hours, a guard cannot edit o
     body: { role: 'commander' },
   });
   assert.equal(selfPromote, 403);
+
+  // A commander editing another user may ONLY touch min_sleep_hours - not the
+  // password (which would be an account takeover, since PocketBase doesn't
+  // require the old password for an authorized cross-user update) nor the email.
+  const { status: pwTakeover } = await api(`/api/collections/users/records/${driver.id}`, {
+    method: 'PATCH',
+    token: commanderToken,
+    body: { password: 'hijacked12345', passwordConfirm: 'hijacked12345' },
+  });
+  assert.equal(pwTakeover, 403);
+  // The driver's original password still works (the takeover was blocked).
+  const driverToken = await login('sleep.driver@example.com', 'testpass123');
+  assert.ok(driverToken);
+
+  const { status: emailChange } = await api(`/api/collections/users/records/${driver.id}`, {
+    method: 'PATCH',
+    token: commanderToken,
+    body: { email: 'attacker@example.com' },
+  });
+  assert.equal(emailChange, 403);
 });
 
 test('a guard cannot create a schedule (commander-only createRule)', { skip: !HAS_PB }, async () => {
