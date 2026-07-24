@@ -1,7 +1,7 @@
 # Image published from this repository's Dockerfile.
 image:
   repository: ghcr.io/barakplasma/guard-app
-  tag: latest
+  tag: main
   pullPolicy: Always
 
 # Add the GHCR pull secret if the image is private.

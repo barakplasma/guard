@@ -69,6 +69,6 @@ frontend before it is displayed.
 ### Container image
 
 GitHub Actions builds the Dockerfile for `linux/amd64` and `linux/arm64`.
-Pull requests verify that the image builds; pushes to `main` publish `latest`
-and `sha-*` tags to `ghcr.io/barakplasma/guard-app`, while `v*` tags also publish
-matching semantic-version tags.
+Pull requests verify that the image builds; pushes to `main` publish `main` and
+`sha-*` tags to `ghcr.io/barakplasma/guard-app`, while `v*` tags also publish
+matching semantic-version tags. Argo deploys digest changes behind the `main` tag.
