@@ -14,7 +14,8 @@ const nightStart = localTime(2024, 0, 1, 22, 0); // 22:00
 const nightEnd = localTime(2024, 0, 2, 6, 0); // 06:00 next day (8h window)
 
 test('a free person could sleep the whole night window', () => {
-  const [row] = sleepReport({ nightStart, nightEnd, shifts: [], people: [{ name: 'Alice' }] });
+  const [row] = sleepReport({ nightStart, nightEnd, shifts: [], people: [{ id: 'u_alice' }] });
+  assert.equal(row.id, 'u_alice');
   assert.equal(row.longestSleepHours, 8);
   assert.equal(row.totalFreeHours, 8);
   assert.equal(row.sleepStart, nightStart);
@@ -25,10 +26,10 @@ test('a free person could sleep the whole night window', () => {
 test('longest contiguous block is the largest gap between shifts, not total free time', () => {
   // Two 1h shifts split the night into three gaps: 22-00 (2h), 01-03 (2h), 04-06 (2h)
   const shifts = [
-    { guard: 'Bob', start: localTime(2024, 0, 2, 0, 0), end: localTime(2024, 0, 2, 1, 0) },
-    { guard: 'Bob', start: localTime(2024, 0, 2, 3, 0), end: localTime(2024, 0, 2, 4, 0) },
+    { guard: 'u_bob', start: localTime(2024, 0, 2, 0, 0), end: localTime(2024, 0, 2, 1, 0) },
+    { guard: 'u_bob', start: localTime(2024, 0, 2, 3, 0), end: localTime(2024, 0, 2, 4, 0) },
   ];
-  const [row] = sleepReport({ nightStart, nightEnd, shifts, people: [{ name: 'Bob' }] });
+  const [row] = sleepReport({ nightStart, nightEnd, shifts, people: [{ id: 'u_bob' }] });
   assert.equal(row.longestSleepHours, 2); // biggest single block, not the 6h total
   assert.equal(row.totalFreeHours, 6);
 });
@@ -37,30 +38,49 @@ test('shifts are clipped to the window and overlaps merged', () => {
   // A shift that starts before the window and overlaps another: 20:00-23:30 and
   // 23:00-01:00 merge to busy 22:00-01:00 inside the window; free 01:00-06:00 = 5h.
   const shifts = [
-    { guard: 'Cara', start: localTime(2024, 0, 1, 20, 0), end: localTime(2024, 0, 1, 23, 30) },
-    { guard: 'Cara', start: localTime(2024, 0, 1, 23, 0), end: localTime(2024, 0, 2, 1, 0) },
+    { guard: 'u_cara', start: localTime(2024, 0, 1, 20, 0), end: localTime(2024, 0, 1, 23, 30) },
+    { guard: 'u_cara', start: localTime(2024, 0, 1, 23, 0), end: localTime(2024, 0, 2, 1, 0) },
   ];
-  const [row] = sleepReport({ nightStart, nightEnd, shifts, people: [{ name: 'Cara' }] });
+  const [row] = sleepReport({ nightStart, nightEnd, shifts, people: [{ id: 'u_cara' }] });
   assert.equal(row.longestSleepHours, 5);
   assert.equal(row.sleepStart, localTime(2024, 0, 2, 1, 0));
   assert.equal(row.sleepEnd, nightEnd);
 });
 
-test('minSleepHours flags a driver who cannot get enough contiguous sleep', () => {
-  // A patrol block 00:00-04:00 leaves gaps of 2h (22-00) and 2h (04-06); a
-  // driver needing 6h fails, a regular guard with no minimum passes.
-  const shifts = [{ guard: 'Dan', start: localTime(2024, 0, 2, 0, 0), end: localTime(2024, 0, 2, 4, 0) }];
+test('report and edits are keyed by id, so two people sharing a display name stay distinct', () => {
+  // Both users are named "Sam" but have different ids; a shift on one must not
+  // count against the other.
+  const shifts = [{ guard: 'u_sam1', start: nightStart, end: nightEnd }];
   const rows = sleepReport({
     nightStart,
     nightEnd,
     shifts,
     people: [
-      { name: 'Dan', minSleepHours: 6 },
-      { name: 'Eve' },
+      { id: 'u_sam1' },
+      { id: 'u_sam2' },
     ],
   });
-  const dan = rows.find((r) => r.name === 'Dan');
-  const eve = rows.find((r) => r.name === 'Eve');
+  const sam1 = rows.find((r) => r.id === 'u_sam1');
+  const sam2 = rows.find((r) => r.id === 'u_sam2');
+  assert.equal(sam1.longestSleepHours, 0); // fully booked
+  assert.equal(sam2.longestSleepHours, 8); // free, unaffected by the namesake
+});
+
+test('minSleepHours flags a driver who cannot get enough contiguous sleep', () => {
+  // A patrol block 00:00-04:00 leaves gaps of 2h (22-00) and 2h (04-06); a
+  // driver needing 6h fails, a regular guard with no minimum passes.
+  const shifts = [{ guard: 'u_dan', start: localTime(2024, 0, 2, 0, 0), end: localTime(2024, 0, 2, 4, 0) }];
+  const rows = sleepReport({
+    nightStart,
+    nightEnd,
+    shifts,
+    people: [
+      { id: 'u_dan', minSleepHours: 6 },
+      { id: 'u_eve' },
+    ],
+  });
+  const dan = rows.find((r) => r.id === 'u_dan');
+  const eve = rows.find((r) => r.id === 'u_eve');
   assert.equal(dan.longestSleepHours, 2);
   assert.equal(dan.meetsMinimum, false);
   assert.equal(eve.longestSleepHours, 8);
@@ -68,8 +88,8 @@ test('minSleepHours flags a driver who cannot get enough contiguous sleep', () =
 });
 
 test('a fully-booked night yields zero sleep', () => {
-  const shifts = [{ guard: 'Fin', start: nightStart, end: nightEnd }];
-  const [row] = sleepReport({ nightStart, nightEnd, shifts, people: [{ name: 'Fin', minSleepHours: 6 }] });
+  const shifts = [{ guard: 'u_fin', start: nightStart, end: nightEnd }];
+  const [row] = sleepReport({ nightStart, nightEnd, shifts, people: [{ id: 'u_fin', minSleepHours: 6 }] });
   assert.equal(row.longestSleepHours, 0);
   assert.equal(row.totalFreeHours, 0);
   assert.equal(row.sleepStart, null);

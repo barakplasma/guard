@@ -54,7 +54,8 @@ export default function Stats() {
         shiftRecords.map((s) => ({
           start: new Date(s.start).getTime(),
           end: new Date(s.end).getTime(),
-          guard: s.expand?.guard?.name,
+          guard: s.expand?.guard?.name, // for the name-keyed hours stats
+          guardId: s.expand?.guard?.id, // for the id-keyed sleep report
         })),
       );
       setUsers(userRecords);
@@ -64,14 +65,18 @@ export default function Stats() {
 
   const stats = useMemo(() => computeStats(shifts), [shifts]);
 
+  const idToName = useMemo(() => new Map(users.map((u) => [u.id, u.name])), [users]);
+
+  // Keyed by user id, not display name: names aren't unique, so a name-keyed
+  // report would merge namesakes and (worse) persist an edit to the wrong user.
   const sleep = useMemo(() => {
     if (!users.length) return [];
     const { start, end } = nightBounds(night, nightStartTime, nightEndTime);
     return sleepReport({
       nightStart: start,
       nightEnd: end,
-      shifts,
-      people: users.map((u) => ({ name: u.name, minSleepHours: u.min_sleep_hours })),
+      shifts: shifts.map((s) => ({ start: s.start, end: s.end, guard: s.guardId })),
+      people: users.map((u) => ({ id: u.id, minSleepHours: u.min_sleep_hours })),
     });
   }, [users, shifts, night, nightStartTime, nightEndTime]);
 
@@ -89,7 +94,6 @@ export default function Stats() {
 
   const entries = [...stats.hoursPerGuard.entries()].sort((a, b) => b[1] - a[1]);
   const max = entries.length ? entries[0][1] : 1;
-  const minSleepById = new Map(users.map((u) => [u.name, u.id]));
 
   return (
     <Box sx={{ maxWidth: 720, mx: 'auto', p: 2 }}>
@@ -151,7 +155,7 @@ export default function Stats() {
 
       {sleep.map((row) => (
         <Box
-          key={row.name}
+          key={row.id}
           sx={{
             display: 'flex',
             alignItems: 'center',
@@ -163,7 +167,7 @@ export default function Stats() {
           }}
         >
           <Typography variant="body2" sx={{ flexGrow: 1, minWidth: 100 }}>
-            {row.name}
+            {idToName.get(row.id) || row.id}
           </Typography>
           <Chip
             size="small"
@@ -182,8 +186,8 @@ export default function Stats() {
               type="number"
               size="small"
               value={row.minSleepHours}
-              onChange={(e) => updateMinSleep(minSleepById.get(row.name), e.target.value)}
-              onBlur={(e) => persistMinSleep(minSleepById.get(row.name), e.target.value)}
+              onChange={(e) => updateMinSleep(row.id, e.target.value)}
+              onBlur={(e) => persistMinSleep(row.id, e.target.value)}
               InputProps={{ inputProps: { min: 0, step: 0.5 } }}
               sx={{ width: 110 }}
             />

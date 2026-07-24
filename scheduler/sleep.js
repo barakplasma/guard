@@ -13,22 +13,27 @@
  */
 
 /**
+ * People and shifts are matched by a stable `id` (each shift's `guard` is that
+ * id), NOT by display name - names aren't unique, so keying by name would merge
+ * two people who share one and mis-attribute their sleep. Callers map ids to
+ * display names for rendering.
+ *
  * @param {object} params
  * @param {number} params.nightStart - ms epoch, inclusive
  * @param {number} params.nightEnd - ms epoch, exclusive (must be > nightStart)
- * @param {{guard:string,start:number,end:number}[]} params.shifts
- * @param {{name:string,minSleepHours?:number}[]} params.people
- * @returns {{name:string,minSleepHours:number,longestSleepHours:number,totalFreeHours:number,
+ * @param {{guard:string,start:number,end:number}[]} params.shifts - `guard` is the person id
+ * @param {{id:string,minSleepHours?:number}[]} params.people
+ * @returns {{id:string,minSleepHours:number,longestSleepHours:number,totalFreeHours:number,
  *            sleepStart:number|null,sleepEnd:number|null,meetsMinimum:boolean}[]}
  */
 export function sleepReport({ nightStart, nightEnd, shifts, people }) {
   if (!(nightEnd > nightStart)) throw new Error('Night start must be before night end.');
 
-  // Group each person's shifts, clipped to the window.
-  const busyByGuard = new Map();
-  for (const person of people) busyByGuard.set(person.name, []);
+  // Group each person's shifts, clipped to the window, keyed by person id.
+  const busyById = new Map();
+  for (const person of people) busyById.set(person.id, []);
   for (const shift of shifts) {
-    const list = busyByGuard.get(shift.guard);
+    const list = busyById.get(shift.guard);
     if (!list) continue; // shift for someone not in the report
     const s = Math.max(shift.start, nightStart);
     const e = Math.min(shift.end, nightEnd);
@@ -37,7 +42,7 @@ export function sleepReport({ nightStart, nightEnd, shifts, people }) {
 
   return people.map((person) => {
     const minSleepHours = person.minSleepHours > 0 ? person.minSleepHours : 0;
-    const busy = mergeIntervals(busyByGuard.get(person.name));
+    const busy = mergeIntervals(busyById.get(person.id));
 
     // Free gaps = the window minus the merged busy intervals.
     let longestMs = 0;
@@ -69,7 +74,7 @@ export function sleepReport({ nightStart, nightEnd, shifts, people }) {
 
     const longestSleepHours = longestMs / 3600000;
     return {
-      name: person.name,
+      id: person.id,
       minSleepHours,
       longestSleepHours,
       totalFreeHours: totalFreeMs / 3600000,
