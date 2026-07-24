@@ -186,9 +186,15 @@ export default function Generate() {
     let scheduleRecord;
     try {
       validateNoDoubleBooking(preview.shifts);
+      const overwriteStart = new Date(toEpoch(start)).toISOString();
+      const overwriteEnd = new Date(toEpoch(end)).toISOString();
+      const overlapping = await pb.collection('shifts').getFullList({
+        filter: `start < "${overwriteEnd}" && end > "${overwriteStart}"`,
+      });
+      await Promise.all(overlapping.map((shift) => pb.collection('shifts').delete(shift.id)));
       scheduleRecord = await pb.collection('schedules').create({
-        start: new Date(toEpoch(start)).toISOString(),
-        end: new Date(toEpoch(end)).toISOString(),
+        start: overwriteStart,
+        end: overwriteEnd,
         shift_minutes: Number(shiftMinutes),
         positions: selectedPositions,
         created_by: pb.authStore.record.id,
