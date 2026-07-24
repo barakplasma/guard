@@ -7,6 +7,7 @@ import TextField from '@mui/material/TextField';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Switch from '@mui/material/Switch';
 import Divider from '@mui/material/Divider';
+import CircularProgress from '@mui/material/CircularProgress';
 import Paper from '@mui/material/Paper';
 import Stack from '@mui/material/Stack';
 import Button from '@mui/material/Button';
@@ -55,16 +56,17 @@ export default function Roster() {
   const [noteText, setNoteText] = useState('');
   const [guardFilter, setGuardFilter] = useState('all');
   const [showPast, setShowPast] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(Date.now());
   const [copied, setCopied] = useState(false);
 
   const load = async () => {
-    const records = await pb.collection('shifts').getFullList({
-      sort: 'start',
-      expand: 'guard,position',
-    });
-    setShifts(records);
-    setNotes(await pb.collection('roster_notes').getFullList({ sort: 'at' }));
+    setLoading(true);
+    try {
+      const records = await pb.collection('shifts').getFullList({ sort: 'start', expand: 'guard,position' });
+      setShifts(records);
+      setNotes(await pb.collection('roster_notes').getFullList({ sort: 'at' }));
+    } finally { setLoading(false); }
   };
 
   useEffect(() => {
@@ -180,9 +182,10 @@ export default function Roster() {
         </Box>
       )}
 
-      {grouped.length === 0 && <Typography color="text.secondary">{t('roster.empty')}</Typography>}
+      {loading && <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}><CircularProgress size={28} aria-label={t('roster.loading')} /></Box>}
+      {!loading && grouped.length === 0 && <Typography color="text.secondary">{t('roster.empty')}</Typography>}
 
-      {grouped.map((day) => (
+      {!loading && grouped.map((day) => (
         <Box key={day.label} sx={{ mb: 3 }}>
           <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>{day.label}</Typography>
           <Divider sx={{ mb: 1.5 }} />
