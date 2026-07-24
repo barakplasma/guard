@@ -16,6 +16,27 @@ import { pb } from '../lib/pocketbase.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { useLocale } from '../lib/LocaleContext.jsx';
 import { generateShifts, computeStats } from '../lib/scheduler.js';
+import { z } from 'zod';
+
+const generatedShiftSchema = z.object({
+  start: z.number().finite(), end: z.number().finite(),
+  guard: z.string().min(1), position: z.string().min(1),
+}).superRefine((shift, ctx) => {
+  if (shift.end <= shift.start) ctx.addIssue({ code: 'custom', message: 'Shift end must be after start.' });
+});
+
+const validateNoDoubleBooking = (shifts) => {
+  const parsed = z.array(generatedShiftSchema).parse(shifts).sort((a, b) => a.start - b.start || a.end - b.end);
+  const byGuard = new Map();
+  for (const shift of parsed) {
+    const prior = byGuard.get(shift.guard);
+    if (prior && prior.end > shift.start) {
+      throw new Error(`Double booking detected for ${shift.guard} (${new Date(shift.start).toLocaleString()}).`);
+    }
+    byGuard.set(shift.guard, shift);
+  }
+  return parsed;
+};
 
 function toEpoch(datetimeLocalValue) {
   return new Date(datetimeLocalValue).getTime();
@@ -148,6 +169,8 @@ export default function Generate() {
         fairnessWindowMinutes,
       });
 
+      validateNoDoubleBooking([...existingForScheduler, ...newShifts]);
+
       const stats = computeStats([...existingForScheduler, ...newShifts]);
       setPreview({ shifts: newShifts, stats });
     } catch (err) {
@@ -162,6 +185,7 @@ export default function Generate() {
     setError(null);
     let scheduleRecord;
     try {
+      validateNoDoubleBooking(preview.shifts);
       scheduleRecord = await pb.collection('schedules').create({
         start: new Date(toEpoch(start)).toISOString(),
         end: new Date(toEpoch(end)).toISOString(),
