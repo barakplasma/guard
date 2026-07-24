@@ -1,4 +1,5 @@
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 import AppBar from '@mui/material/AppBar';
 import Toolbar from '@mui/material/Toolbar';
 import Typography from '@mui/material/Typography';
@@ -17,14 +18,30 @@ import BarChartIcon from '@mui/icons-material/BarChart';
 import Box from '@mui/material/Box';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { useLocale } from '../lib/LocaleContext.jsx';
+import { pb } from '../lib/pocketbase.js';
 
 const ROUTES = ['/roster', '/generate', '/positions', '/guards', '/availability', '/me', '/stats'];
 
 export default function Layout() {
   const { user, isCommander, logout } = useAuth();
   const { t, toggleLang } = useLocale();
+  const [tempLink, setTempLink] = useState(null);
   const location = useLocation();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!isCommander) {
+      setTempLink(null);
+      return undefined;
+    }
+    let cancelled = false;
+    pb.send('/api/guard/temp-login-link').then(({ code }) => {
+      if (!cancelled) setTempLink(`${window.location.origin}${window.location.pathname}#/temp-login/${code}`);
+    }).catch(() => {
+      if (!cancelled) setTempLink(null);
+    });
+    return () => { cancelled = true; };
+  }, [isCommander]);
 
   const currentTab = ROUTES.find((route) => location.pathname.startsWith(route)) || '/roster';
 
@@ -47,6 +64,11 @@ export default function Layout() {
       </AppBar>
 
       <Box sx={{ flexGrow: 1, pb: 7 }}>
+        {isCommander && tempLink && (
+          <Box sx={{ px: 2, py: 1, bgcolor: 'action.hover', fontSize: '0.85rem' }}>
+            {t('tempRoster.shareLink')}: <a href={tempLink}>{tempLink}</a>
+          </Box>
+        )}
         <Outlet />
       </Box>
 

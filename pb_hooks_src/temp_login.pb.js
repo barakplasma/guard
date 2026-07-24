@@ -1,3 +1,13 @@
+routerAdd('GET', '/api/guard/temp-login-link', (e) => {
+  if (!e.auth || e.auth.getString('role') !== 'commander') {
+    return e.json(403, { message: 'Commander access required.' });
+  }
+  const settings = e.app.findFirstRecordByData('app_settings', 'key', 'main');
+  const code = settings.getString('temp_login_code');
+  if (!/^\d{4}$/.test(code)) return e.json(404, { message: 'Not found.' });
+  return e.json(200, { code });
+});
+
 routerAdd('GET', '/api/guard/temp-login/{code}', (e) => {
   const rawSubmitted = e.request.pathValue('code');
   if (!/^\d{4}$/.test(rawSubmitted)) return e.json(404, { message: 'Not found.' });
