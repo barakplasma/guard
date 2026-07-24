@@ -40,7 +40,7 @@ jobs:
           # package is owned outside this repository and rejects GITHUB_TOKEN.
           images: ghcr.io/${{ github.repository }}-app
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=main,enable={{is_default_branch}}
             type=sha,prefix=sha-
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
