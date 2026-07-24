@@ -9,9 +9,12 @@ import Switch from '@mui/material/Switch';
 import Divider from '@mui/material/Divider';
 import Paper from '@mui/material/Paper';
 import Stack from '@mui/material/Stack';
+import Button from '@mui/material/Button';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import { pb } from '../lib/pocketbase.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { useLocale } from '../lib/LocaleContext.jsx';
+import { copyRosterText, rosterAsText } from '../lib/rosterExport.js';
 
 const POSITION_COLORS = ['primary', 'secondary', 'success', 'warning', 'info', 'error'];
 
@@ -50,6 +53,7 @@ export default function Roster() {
   const [guardFilter, setGuardFilter] = useState('all');
   const [showPast, setShowPast] = useState(false);
   const [now, setNow] = useState(Date.now());
+  const [copied, setCopied] = useState(false);
 
   const load = async () => {
     const records = await pb.collection('shifts').getFullList({
@@ -112,29 +116,46 @@ export default function Roster() {
     }));
   }, [visible, lang]);
 
+  const handleCopy = async () => {
+    await copyRosterText(rosterAsText(grouped, lang));
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1800);
+  };
+
   return (
-    <Box sx={{ maxWidth: 720, mx: 'auto', p: 2 }}>
-      <Typography variant="h5" gutterBottom>
-        {t('roster.title')}
-      </Typography>
-      <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', mb: 2, flexWrap: 'wrap' }}>
+    <Box sx={{ maxWidth: 720, mx: 'auto', p: { xs: 1.25, sm: 2 } }}>
+      <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1} sx={{ mb: 1 }}>
+        <Typography variant="h5">{t('roster.title')}</Typography>
+        <Button
+          size="small"
+          variant="outlined"
+          startIcon={<ContentCopyIcon />}
+          onClick={handleCopy}
+          disabled={grouped.length === 0}
+          sx={{ flexShrink: 0 }}
+        >
+          {copied
+            ? (lang === 'he' ? 'הועתק' : 'Copied')
+            : (lang === 'he' ? 'העתקה כטקסט' : 'Copy as text')}
+        </Button>
+      </Stack>
+
+      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mb: 2, flexWrap: 'wrap' }}>
         <TextField
           select
           size="small"
           label={t('roster.filterAll')}
           value={guardFilter}
-          onChange={(e) => setGuardFilter(e.target.value)}
-          sx={{ minWidth: 180 }}
+          onChange={(event) => setGuardFilter(event.target.value)}
+          sx={{ minWidth: { xs: '100%', sm: 180 } }}
         >
           <MenuItem value="all">{t('roster.filterAll')}</MenuItem>
           {allGuards.map(([id, name]) => (
-            <MenuItem key={id} value={id}>
-              {name}
-            </MenuItem>
+            <MenuItem key={id} value={id}>{name}</MenuItem>
           ))}
         </TextField>
         <FormControlLabel
-          control={<Switch checked={showPast} onChange={(e) => setShowPast(e.target.checked)} />}
+          control={<Switch checked={showPast} onChange={(event) => setShowPast(event.target.checked)} />}
           label={t('roster.pastToggle')}
         />
       </Box>
@@ -143,9 +164,7 @@ export default function Roster() {
 
       {grouped.map((day) => (
         <Box key={day.label} sx={{ mb: 3 }}>
-          <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-            {day.label}
-          </Typography>
+          <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>{day.label}</Typography>
           <Divider sx={{ mb: 1.5 }} />
           <Stack spacing={1.25}>
             {day.items.map((slot) => {
