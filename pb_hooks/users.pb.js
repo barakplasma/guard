@@ -23,11 +23,11 @@ onRecordCreateRequest((e) => {
 //     commander/superuser call (you can't self-reactivate a disabled account).
 const COMMANDER_EDITABLE_ON_OTHERS = new Set(['min_sleep_hours', 'active']);
 onRecordUpdateRequest((e) => {
-  const info = e.requestInfo();
-  if (!info.hasSuperuserAuth()) {
+  if (!e.hasSuperuserAuth()) {
     const editingSomeoneElse = !e.auth || e.auth.id !== e.record.id;
     if (editingSomeoneElse) {
-      for (const field of Object.keys(info.body || {})) {
+      const body = e.requestInfo().body || {};
+      for (const field of Object.keys(body)) {
         if (!COMMANDER_EDITABLE_ON_OTHERS.has(field)) {
           throw new ForbiddenError('Commanders may only change min_sleep_hours or active on other users.');
         }
