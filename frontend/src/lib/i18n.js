@@ -5,6 +5,7 @@ const dictionaries = {
     'nav.roster': 'Roster',
     'nav.generate': 'Generate',
     'nav.positions': 'Positions',
+    'nav.guards': 'Guards',
     'nav.me': 'My shifts',
     'nav.stats': 'Stats',
     'nav.logout': 'Log out',
@@ -77,12 +78,23 @@ const dictionaries = {
     'positions.cancel': 'Cancel',
     'positions.empty': 'No positions defined yet.',
     'positions.error': 'Could not save position: {error}',
+    'guards.title': 'Guards',
+    'guards.forbidden': 'Only commanders can manage guard vacations.',
+    'guards.vacationHelp': 'Guards are automatically excluded from shifts that overlap their vacation.',
+    'guards.vacationStart': 'Vacation starts',
+    'guards.vacationEnd': 'Vacation ends',
+    'guards.saveVacation': 'Save vacation',
+    'guards.clearVacation': 'Clear vacation',
+    'guards.saving': 'Saving...',
+    'guards.vacationBothRequired': 'Set both vacation start and end, or clear both.',
+    'guards.vacationInvalid': 'Vacation end must be after its start.',
   },
   he: {
     'app.title': 'סידור שמירות',
     'nav.roster': 'סידור',
     'nav.generate': 'יצירת סידור',
     'nav.positions': 'עמדות',
+    'nav.guards': 'שומרים',
     'nav.me': 'המשמרות שלי',
     'nav.stats': 'סטטיסטיקה',
     'nav.logout': 'התנתקות',
@@ -155,6 +167,16 @@ const dictionaries = {
     'positions.cancel': 'ביטול',
     'positions.empty': 'עדיין לא הוגדרו עמדות.',
     'positions.error': 'שמירת העמדה נכשלה: {error}',
+    'guards.title': 'שומרים',
+    'guards.forbidden': 'רק מפקדים יכולים לנהל חופשות של שומרים.',
+    'guards.vacationHelp': 'שומרים לא ישובצו אוטומטית במשמרות החופפות לחופשה שלהם.',
+    'guards.vacationStart': 'תחילת חופשה',
+    'guards.vacationEnd': 'סיום חופשה',
+    'guards.saveVacation': 'שמירת חופשה',
+    'guards.clearVacation': 'ניקוי חופשה',
+    'guards.saving': 'שומר...',
+    'guards.vacationBothRequired': 'יש להגדיר גם התחלה וגם סיום לחופשה, או לנקות את שניהם.',
+    'guards.vacationInvalid': 'סיום החופשה חייב להיות אחרי תחילתה.',
   },
 };
 
@@ -170,7 +192,7 @@ export function translate(lang, key, params) {
 }
 
 export function detectDefaultLang() {
-  return navigator.language?.startsWith('he') ? 'he' : 'en';
+  return 'he';
 }
 
 export function dirFor(lang) {

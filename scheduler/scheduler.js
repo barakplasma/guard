@@ -88,6 +88,8 @@ function loadAt(history, t, windowMs) {
  * @param {{id?:string,name:string,timeRestricted?:boolean,windowStart?:string,windowEnd?:string,peopleCount?:number,eligibleGuards?:string[]}[]} params.positions
  * @param {string[]} params.guards
  * @param {{start:number,end:number,guard:string,position?:string}[]} [params.existingShifts]
+ * @param {Record<string, {start:number,end:number}[]>} [params.unavailablePeriods] - vacation
+ * periods by guard name. A guard is skipped only for shifts that overlap one of their periods.
  * @param {number} [params.restMinutes=0] - minimum rest between a guard's shifts (anti-back-to-back).
  *   Guards who haven't rested this long are only used as a last resort to avoid leaving a post empty.
  * @param {number|null} [params.fairnessWindowMinutes=null] - if set, balance load over a trailing
@@ -101,6 +103,7 @@ export function generateShifts({
   positions,
   guards,
   existingShifts = [],
+  unavailablePeriods = {},
   restMinutes = 0,
   fairnessWindowMinutes = null,
 }) {
@@ -113,6 +116,13 @@ export function generateShifts({
     throw new Error('Fairness window must be positive.');
   }
   const normalizedPositions = normalizePositions(positions);
+
+  for (const [guard, periods] of Object.entries(unavailablePeriods)) {
+    if (!Array.isArray(periods)) throw new Error(`Unavailable periods for ${guard} must be an array.`);
+    for (const period of periods) {
+      if (!(period?.end > period?.start)) throw new Error(`Unavailable period for ${guard} must have an end after its start.`);
+    }
+  }
 
   const shiftMs = shiftMinutes * 60 * 1000;
   const restMs = restMinutes * 60 * 1000;
@@ -175,6 +185,7 @@ export function generateShifts({
       for (let i = 0; i < position.remainingPeople; i += 1) {
         const candidates = [...state.values()]
           .filter((guard) => guard.busyUntil <= t && !assignedThisSlot.has(guard.name))
+          .filter((guard) => !(unavailablePeriods[guard.name] || []).some((period) => period.start < shiftEnd && period.end > t))
           .filter((guard) => position.eligibleGuards.length === 0 || position.eligibleGuards.includes(guard.name))
           .sort((a, b) => {
             const aRested = a.restedAt <= t ? 0 : 1;

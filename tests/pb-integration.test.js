@@ -100,8 +100,21 @@ async function loginAdmin(email, password) {
   return json.token;
 }
 
+async function approve(token, userId, fields = {}) {
+  const { status, json } = await api(`/api/collections/users/records/${userId}`, {
+    method: 'PATCH',
+    token,
+    body: { active: true, ...fields },
+  });
+  assert.equal(status, 200, `approve user failed: ${JSON.stringify(json)}`);
+}
+
 async function createPosition(token, body) {
-  const { status, json } = await api('/api/collections/positions/records', { method: 'POST', token, body });
+  const { status, json } = await api('/api/collections/positions/records', {
+    method: 'POST',
+    token,
+    body: { people_count: 1, ...body },
+  });
   assert.equal(status, 200, `create position failed: ${JSON.stringify(json)}`);
   return json;
 }
@@ -135,14 +148,15 @@ test.after(() => {
   if (dataDir) rmSync(dataDir, { recursive: true, force: true });
 });
 
-test('signup always lands as an active guard, never commander', { skip: !HAS_PB }, async () => {
+test('signup lands as an inactive guard pending commander approval', { skip: !HAS_PB }, async () => {
   const record = await signup('guard.role.test@example.com', 'testpass123', 'Guard Role Test');
   assert.equal(record.role, 'guard');
-  assert.equal(record.active, true);
+  assert.equal(record.active, false);
 });
 
 test('a guard cannot create a schedule (commander-only createRule)', { skip: !HAS_PB }, async () => {
-  await signup('guard.perm.test@example.com', 'testpass123', 'Guard Perm Test');
+  const guard = await signup('guard.perm.test@example.com', 'testpass123', 'Guard Perm Test');
+  await approve(await loginAdmin(ADMIN_EMAIL, ADMIN_PASSWORD), guard.id);
   const token = await login('guard.perm.test@example.com', 'testpass123');
 
   const { status } = await api('/api/collections/schedules/records', {
@@ -160,7 +174,8 @@ test('a guard cannot create a schedule (commander-only createRule)', { skip: !HA
 });
 
 test('a guard cannot create a position (commander-only createRule), but can list them', { skip: !HAS_PB }, async () => {
-  await signup('guard.pos.test@example.com', 'testpass123', 'Guard Pos Test');
+  const guard = await signup('guard.pos.test@example.com', 'testpass123', 'Guard Pos Test');
+  await approve(await loginAdmin(ADMIN_EMAIL, ADMIN_PASSWORD), guard.id);
   const token = await login('guard.pos.test@example.com', 'testpass123');
 
   const { status: createStatus } = await api('/api/collections/positions/records', {
@@ -172,6 +187,26 @@ test('a guard cannot create a position (commander-only createRule), but can list
 
   const { status: listStatus } = await api('/api/collections/positions/records', { token });
   assert.equal(listStatus, 200);
+});
+
+test('a commander can set a guard vacation period', { skip: !HAS_PB }, async () => {
+  const commander = await signup('vacation.commander@example.com', 'testpass123', 'Vacation Commander');
+  const guard = await signup('vacation.guard@example.com', 'testpass123', 'Vacation Guard');
+  const adminToken = await loginAdmin(ADMIN_EMAIL, ADMIN_PASSWORD);
+  await approve(adminToken, commander.id, { role: 'commander' });
+  await approve(adminToken, guard.id);
+  const commanderToken = await login('vacation.commander@example.com', 'testpass123');
+
+  const vacationStart = '2027-07-01 08:00:00.000Z';
+  const vacationEnd = '2027-07-03 18:00:00.000Z';
+  const { status, json } = await api(`/api/collections/users/records/${guard.id}`, {
+    method: 'PATCH',
+    token: commanderToken,
+    body: { vacation_start: vacationStart, vacation_end: vacationEnd },
+  });
+  assert.equal(status, 200, JSON.stringify(json));
+  assert.equal(new Date(json.vacation_start).getTime(), new Date(vacationStart).getTime());
+  assert.equal(new Date(json.vacation_end).getTime(), new Date(vacationEnd).getTime());
 });
 
 test('unauthenticated requests see an empty shift list, not an error', { skip: !HAS_PB }, async () => {
@@ -198,12 +233,9 @@ for (const positionCount of [1, 2, 3]) {
 
     const adminToken = await loginAdmin(ADMIN_EMAIL, ADMIN_PASSWORD);
     const commanderName = guardNames[0];
-    const { status: promoteStatus } = await api(`/api/collections/users/records/${guardIds.get(commanderName)}`, {
-      method: 'PATCH',
-      token: adminToken,
-      body: { role: 'commander' },
-    });
-    assert.equal(promoteStatus, 200);
+    for (const name of guardNames) {
+      await approve(adminToken, guardIds.get(name), name === commanderName ? { role: 'commander' } : {});
+    }
     const commanderToken = await login(`${commanderName.toLowerCase()}.${suffix}@example.com`, 'testpass123');
 
     const positionNames = ['South', 'Gate', 'Patrol'].slice(0, positionCount);
@@ -327,11 +359,9 @@ test('swap accept moves the guard, and only the recipient may accept', { skip: !
   const guardC = await signup('swap.c@example.com', 'testpass123', 'Swap C');
 
   const adminToken = await loginAdmin(ADMIN_EMAIL, ADMIN_PASSWORD);
-  await api(`/api/collections/users/records/${guardA.id}`, {
-    method: 'PATCH',
-    token: adminToken,
-    body: { role: 'commander' },
-  });
+  await approve(adminToken, guardA.id, { role: 'commander' });
+  await approve(adminToken, guardB.id);
+  await approve(adminToken, guardC.id);
   const commanderToken = await login('swap.a@example.com', 'testpass123');
   const position = await createPosition(commanderToken, { name: 'Gate (swap test)', active: true });
 
@@ -399,11 +429,7 @@ test('a time-restricted position (patrol) only generates + persists shifts insid
   }
 
   const adminToken = await loginAdmin(ADMIN_EMAIL, ADMIN_PASSWORD);
-  await api(`/api/collections/users/records/${guardIds.get('Erez')}`, {
-    method: 'PATCH',
-    token: adminToken,
-    body: { role: 'commander' },
-  });
+  await approve(adminToken, guardIds.get('Erez'), { role: 'commander' });
   const commanderToken = await login('erez.patrol@example.com', 'testpass123');
 
   const gate = await createPosition(commanderToken, { name: 'Gate (patrol test)', active: true });

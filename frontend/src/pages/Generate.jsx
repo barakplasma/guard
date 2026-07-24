@@ -97,6 +97,9 @@ export default function Generate() {
       const startMs = toEpoch(start);
       const endMs = toEpoch(end);
       const guardNames = selectedGuards.map((id) => guardIdToName.get(id));
+      const unavailablePeriods = Object.fromEntries(users
+        .filter((user) => user.vacation_start && user.vacation_end)
+        .map((user) => [user.name, [{ start: new Date(user.vacation_start).getTime(), end: new Date(user.vacation_end).getTime() }]]));
       const positionDescriptors = selectedPositions.map((id) => {
         const p = positionById.get(id);
         return {
@@ -129,6 +132,7 @@ export default function Generate() {
         positions: positionDescriptors,
         guards: guardNames,
         existingShifts: existingForScheduler,
+        unavailablePeriods,
         restMinutes: Number(restMinutes),
         fairnessWindowMinutes,
       });
@@ -220,6 +224,14 @@ export default function Generate() {
           value={shiftMinutes}
           onChange={(e) => setShiftMinutes(e.target.value)}
         />
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+          {[30, 60, 90, 120, 180].map((minutes) => (
+            <Button key={minutes} size="small" variant={Number(shiftMinutes) === minutes ? 'contained' : 'outlined'}
+              onClick={() => setShiftMinutes(minutes)}>
+              {minutes}m
+            </Button>
+          ))}
+        </Box>
         <TextField
           label={t('generate.restMinutes')}
           type="number"

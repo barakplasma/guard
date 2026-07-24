@@ -226,6 +226,24 @@ test('existing shift at a (slot, position) is not regenerated as a duplicate row
   assert.equal(shifts[0].position, 'A');
 });
 
+test('a guard on vacation is skipped only for overlapping shifts', () => {
+  const start = localTime(2024, 0, 1, 8, 0);
+  const shifts = generateShifts({
+    start,
+    end: start + 3 * HOUR,
+    shiftMinutes: 60,
+    positions: [POS_A],
+    guards: ['Alice', 'Bob'],
+    unavailablePeriods: {
+      Alice: [{ start: start + HOUR, end: start + 2 * HOUR }],
+    },
+  });
+
+  assert.equal(shifts.length, 3);
+  assert.equal(shifts[1].guard, 'Bob');
+  assert.ok(shifts.filter((shift) => shift.start !== start + HOUR).some((shift) => shift.guard === 'Alice'));
+});
+
 test('rest/window validation errors', () => {
   assert.throws(
     () => generateShifts({ start: 0, end: 10, shiftMinutes: 60, positions: [POS_A], guards: ['A'], restMinutes: -1 }),

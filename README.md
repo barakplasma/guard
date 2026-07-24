@@ -22,3 +22,29 @@ Hetzner VPS node (hostname `k3s`), not on a phone/hotspot as `DESIGN.md`'s origi
   into `pb_public/`, runs `./pocketbase migrate up`, and upserts the superuser — safe to re-run.
   `pb_hooks/*.js` hot-reload on change without a restart; new files under `pb_migrations/` need
   `./pocketbase migrate up` (or a service restart) to apply.
+
+### k3s / Helm
+
+The Helm chart at `charts/guard` packages the application, its persistent PocketBase data volume,
+service, and Cloudflare Tunnel ingress. It uses the same defaults as the manifests in `k8s/`; by
+default it exposes the app at `https://guard.526462738.xyz`, matching Readeck's tunnel setup.
+
+Create the required namespace secrets before installing (omit the image-pull secret if the image is
+public):
+
+```bash
+kubectl create namespace guard
+kubectl -n guard create secret generic guard-superuser \
+  --from-literal=SUPERUSER_EMAIL=you@example.com \
+  --from-literal=SUPERUSER_PASSWORD='choose-a-long-password'
+# kubectl -n guard create secret docker-registry ghcr-pull ...
+```
+
+Install or upgrade the release:
+
+```bash
+helm upgrade --install guard ./charts/guard --namespace guard
+```
+
+The chart expects its `guard-superuser` and optional `ghcr-pull` Secrets to already exist. Override
+the image, hostname, storage, or disable the ingress in a values file as needed.

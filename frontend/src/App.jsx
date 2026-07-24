@@ -8,6 +8,7 @@ import Generate from './pages/Generate.jsx';
 import Positions from './pages/Positions.jsx';
 import MyShifts from './pages/MyShifts.jsx';
 import Stats from './pages/Stats.jsx';
+import Guards from './pages/Guards.jsx';
 
 // Hash routing (no History API) so PocketBase can serve pb_public/ as a plain
 // static directory with no server-side rewrite config - see DESIGN.md section 5.
@@ -32,6 +33,7 @@ function AppRoutes() {
         <Route path="/roster" element={<Roster />} />
         <Route path="/generate" element={<Generate />} />
         <Route path="/positions" element={<Positions />} />
+        <Route path="/guards" element={<Guards />} />
         <Route path="/me" element={<MyShifts />} />
         <Route path="/stats" element={<Stats />} />
       </Route>
