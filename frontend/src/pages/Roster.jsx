@@ -50,6 +50,9 @@ export default function Roster() {
   const { user } = useAuth();
   const { t, lang } = useLocale();
   const [shifts, setShifts] = useState([]);
+  const [notes, setNotes] = useState([]);
+  const [noteAt, setNoteAt] = useState('');
+  const [noteText, setNoteText] = useState('');
   const [guardFilter, setGuardFilter] = useState('all');
   const [showPast, setShowPast] = useState(false);
   const [now, setNow] = useState(Date.now());
@@ -61,6 +64,7 @@ export default function Roster() {
       expand: 'guard,position',
     });
     setShifts(records);
+    setNotes(await pb.collection('roster_notes').getFullList({ sort: 'at' }));
   };
 
   useEffect(() => {
@@ -93,6 +97,14 @@ export default function Roster() {
     return true;
   }), [shifts, showPast, guardFilter, now]);
 
+  const addNote = async () => {
+    if (!noteAt || !noteText.trim() || user?.role !== 'commander') return;
+    await pb.collection('roster_notes').create({ at: new Date(noteAt).toISOString(), text: noteText.trim() });
+    setNoteAt(''); setNoteText(''); await load();
+  };
+
+  // Every position sharing a time-slot is now its own row, so group them back
+  // into one displayed line per slot: "18:00 - 19:00: דרומי - Alice, ש''ג - Bob".
   const grouped = useMemo(() => {
     const byDay = new Map();
     for (const shift of visible) {
@@ -160,6 +172,14 @@ export default function Roster() {
         />
       </Box>
 
+      {user?.role === 'commander' && (
+        <Box sx={{ display: 'flex', gap: 1, mb: 2, flexWrap: 'wrap', alignItems: 'center' }}>
+          <TextField size="small" type="datetime-local" label={t('roster.noteTime')} value={noteAt} onChange={(e) => setNoteAt(e.target.value)} InputLabelProps={{ shrink: true }} />
+          <TextField size="small" label={t('roster.noteText')} value={noteText} onChange={(e) => setNoteText(e.target.value)} sx={{ minWidth: 260 }} />
+          <Chip clickable color="primary" label={t('roster.addNote')} onClick={addNote} />
+        </Box>
+      )}
+
       {grouped.length === 0 && <Typography color="text.secondary">{t('roster.empty')}</Typography>}
 
       {grouped.map((day) => (
@@ -214,6 +234,7 @@ export default function Roster() {
           </Stack>
         </Box>
       ))}
+      {notes.length > 0 && <Box sx={{ mt: 2 }}><Typography variant="subtitle1" sx={{ fontWeight: 600 }}>{t('roster.notes')}</Typography><List dense>{notes.filter((n) => showPast || new Date(n.at).getTime() >= now).map((n) => <ListItem key={n.id}><ListItemText primary={formatRange(new Date(n.at), new Date(n.at), lang).split(' - ')[0]} secondary={n.text} /></ListItem>)}</List></Box>}
     </Box>
   );
 }
