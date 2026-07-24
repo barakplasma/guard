@@ -147,6 +147,31 @@ test('time-restricted position (patrol, 22:00-06:00) is one continuous shift, sa
   assert.equal((block.end - block.start) / HOUR, 8);
 });
 
+test('time-restricted block is clamped to the exact window when the slot grid is misaligned', () => {
+  const patrol = { name: 'Patrol', timeRestricted: true, windowStart: '22:00', windowEnd: '06:00' };
+  // A 20:30 start with 60-minute slots puts the grid on the half hour, out of
+  // step with the 22:00 window. The block must still be exactly 22:00-06:00,
+  // not 22:30-06:30 (no empty opening half hour, no staffing past close).
+  const start = localTime(2024, 0, 1, 20, 30);
+  const end = localTime(2024, 0, 2, 8, 30);
+
+  const shifts = generateShifts({
+    start,
+    end,
+    shiftMinutes: 60,
+    positions: [patrol],
+    guards: ['Alice', 'Bob', 'Carol'],
+  });
+
+  assert.equal(shifts.length, 1);
+  const block = shifts[0];
+  assert.equal(new Date(block.start).getHours(), 22);
+  assert.equal(new Date(block.start).getMinutes(), 0);
+  assert.equal(new Date(block.end).getHours(), 6);
+  assert.equal(new Date(block.end).getMinutes(), 0);
+  assert.equal((block.end - block.start) / HOUR, 8);
+});
+
 test('time-restricted: an existing partial-window shift only suppresses the slots it covers', () => {
   const patrol = { name: 'Patrol', timeRestricted: true, windowStart: '22:00', windowEnd: '06:00' };
   const start = localTime(2024, 0, 1, 22, 0);

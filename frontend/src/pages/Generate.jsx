@@ -68,11 +68,11 @@ export default function Generate() {
       if (!bySlot.has(key)) bySlot.set(key, { start: shift.start, end: shift.end, entries: [] });
       bySlot.get(key).entries.push({
         positionName: positionById.get(shift.position)?.name || shift.position,
-        guard: shift.guard,
+        guard: guardIdToName.get(shift.guard) || shift.guard,
       });
     }
     return [...bySlot.values()].sort((a, b) => a.start - b.start);
-  }, [preview, positionById]);
+  }, [preview, positionById, guardIdToName]);
 
   if (!isCommander) {
     return (
@@ -96,6 +96,10 @@ export default function Generate() {
     try {
       const startMs = toEpoch(start);
       const endMs = toEpoch(end);
+      // The scheduler is keyed by stable user IDs, not display names (names
+      // aren't unique - two namesakes would otherwise collapse and a shift could
+      // be saved against the wrong person). Assigned guards are already stored as
+      // IDs on the position, so they pass straight through.
       const positionDescriptors = selectedPositions.map((id) => {
         const p = positionById.get(id);
         return {
@@ -105,27 +109,21 @@ export default function Generate() {
           windowStart: p.window_start,
           windowEnd: p.window_end,
           headcount: p.headcount,
-          guards: (p.guards || []).map((gid) => guardIdToName.get(gid)).filter(Boolean),
+          guards: p.guards || [],
         };
       });
       // A position's assigned guards must be schedulable even if unchecked in
       // the general list, so the pool is the union of both (the scheduler
       // rejects assigned guards that aren't in the pool).
-      const guardNames = [
-        ...new Set([
-          ...selectedGuards.map((id) => guardIdToName.get(id)),
-          ...positionDescriptors.flatMap((p) => p.guards),
-        ]),
-      ].filter(Boolean);
+      const guardIds = [...new Set([...selectedGuards, ...positionDescriptors.flatMap((p) => p.guards)])];
 
       const existingShifts = await pb.collection('shifts').getFullList({
         filter: `end > "${new Date().toISOString()}"`,
-        expand: 'guard',
       });
       const existingForScheduler = existingShifts.map((s) => ({
         start: new Date(s.start).getTime(),
         end: new Date(s.end).getTime(),
-        guard: s.expand?.guard?.name,
+        guard: s.guard,
         position: s.position,
       }));
 
@@ -135,7 +133,7 @@ export default function Generate() {
         end: endMs,
         shiftMinutes: Number(shiftMinutes),
         positions: positionDescriptors,
-        guards: guardNames,
+        guards: guardIds,
         existingShifts: existingForScheduler,
         restMinutes: Number(restMinutes),
         fairnessWindowMinutes,
@@ -163,7 +161,6 @@ export default function Generate() {
         created_by: pb.authStore.record.id,
       });
 
-      const nameToId = new Map(users.map((u) => [u.name, u.id]));
       const batch = pb.createBatch();
       for (const shift of preview.shifts) {
         batch.collection('shifts').create({
@@ -171,7 +168,7 @@ export default function Generate() {
           position: shift.position,
           start: new Date(shift.start).toISOString(),
           end: new Date(shift.end).toISOString(),
-          guard: nameToId.get(shift.guard),
+          guard: shift.guard, // already a stable user id from the scheduler
         });
       }
       await batch.send();
@@ -298,9 +295,9 @@ export default function Generate() {
           </List>
           <Divider sx={{ my: 1 }} />
           <Typography variant="subtitle2">{t('generate.hoursPerGuard')}</Typography>
-          {[...preview.stats.hoursPerGuard.entries()].map(([name, hours]) => (
-            <Typography key={name} variant="body2">
-              {name}: {hours.toFixed(1)}h
+          {[...preview.stats.hoursPerGuard.entries()].map(([id, hours]) => (
+            <Typography key={id} variant="body2">
+              {guardIdToName.get(id) || id}: {hours.toFixed(1)}h
             </Typography>
           ))}
           {preview.stats.variance !== null && (
