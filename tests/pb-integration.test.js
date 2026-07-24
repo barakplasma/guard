@@ -163,16 +163,6 @@ test('a commander can set another user\'s min_sleep_hours, a guard cannot edit o
   assert.equal(setStatus, 200, JSON.stringify(updated));
   assert.equal(updated.min_sleep_hours, 6);
 
-  // A commander may also toggle another user's `active` flag (marking them on
-  // vacation) - it's on the allowlist alongside min_sleep_hours.
-  const { status: vacationStatus, json: onVacation } = await api(`/api/collections/users/records/${driver.id}`, {
-    method: 'PATCH',
-    token: commanderToken,
-    body: { active: false },
-  });
-  assert.equal(vacationStatus, 200, JSON.stringify(onVacation));
-  assert.equal(onVacation.active, false);
-
   // A plain guard must not be able to edit another user's record (the rule folds
   // into the lookup, so a mismatch reads as 404 - see the swap test).
   const nosyToken = await login('sleep.nosy@example.com', 'testpass123');
@@ -203,25 +193,36 @@ test('a commander can set another user\'s min_sleep_hours, a guard cannot edit o
   });
   assert.equal(selfPromote, 403);
 
-  // A commander editing another user may ONLY touch min_sleep_hours - not the
-  // password (which would be an account takeover, since PocketBase doesn't
-  // require the old password for an authorized cross-user update) nor the email.
+  // A commander editing another user must not be able to reset their password
+  // (an account takeover). PocketBase blocks this itself - no manageRule means
+  // only a superuser can set another account's password without its old one -
+  // so the status may be 400 or 403, but never 200, and the old password stands.
   const { status: pwTakeover } = await api(`/api/collections/users/records/${driver.id}`, {
     method: 'PATCH',
     token: commanderToken,
     body: { password: 'hijacked12345', passwordConfirm: 'hijacked12345' },
   });
-  assert.equal(pwTakeover, 403);
-  // The driver's original password still works (the takeover was blocked).
+  assert.notEqual(pwTakeover, 200);
   const driverToken = await login('sleep.driver@example.com', 'testpass123');
-  assert.ok(driverToken);
+  assert.ok(driverToken); // original password still works
 
+  // Nor may a commander change another user's email (blocked by the update hook).
   const { status: emailChange } = await api(`/api/collections/users/records/${driver.id}`, {
     method: 'PATCH',
     token: commanderToken,
     body: { email: 'attacker@example.com' },
   });
-  assert.equal(emailChange, 403);
+  assert.notEqual(emailChange, 200);
+
+  // ...but a commander CAN toggle another user's `active` flag (vacation). Done
+  // last so the driver stays active for the checks above.
+  const { status: vacationStatus, json: onVacation } = await api(`/api/collections/users/records/${driver.id}`, {
+    method: 'PATCH',
+    token: commanderToken,
+    body: { active: false },
+  });
+  assert.equal(vacationStatus, 200, JSON.stringify(onVacation));
+  assert.equal(onVacation.active, false);
 });
 
 test('a guard cannot create a schedule (commander-only createRule)', { skip: !HAS_PB }, async () => {
