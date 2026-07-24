@@ -40,6 +40,10 @@ else
   echo "==> ./pocketbase already present, skipping download"
 fi
 
+echo "==> Building PocketBase hooks (bundle npm validation dependencies)"
+npm ci
+npm run build:hooks
+
 echo "==> Building frontend (npm ci && npm run build -> pb_public/)"
 (cd frontend && npm ci && npm run build)
 

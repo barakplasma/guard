@@ -165,6 +165,8 @@ cython_debug/
 pocketbase
 pb_data/
 pb_public/
+/node_modules/
+/pb_hooks/temp_login.pb.js
 frontend/node_modules/
 frontend/.env.local
 
@@ -173,4 +175,3 @@ frontend/.env.local
 # helpers, not a Python build output) - un-ignore it explicitly.
 !frontend/src/lib/
 !frontend/src/lib/**
-

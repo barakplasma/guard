@@ -100,8 +100,21 @@ async function loginAdmin(email, password) {
   return json.token;
 }
 
+async function approve(token, userId, fields = {}) {
+  const { status, json } = await api(`/api/collections/users/records/${userId}`, {
+    method: 'PATCH',
+    token,
+    body: { approved: true, active: true, ...fields },
+  });
+  assert.equal(status, 200, `approve user failed: ${JSON.stringify(json)}`);
+}
+
 async function createPosition(token, body) {
-  const { status, json } = await api('/api/collections/positions/records', { method: 'POST', token, body });
+  const { status, json } = await api('/api/collections/positions/records', {
+    method: 'POST',
+    token,
+    body,
+  });
   assert.equal(status, 200, `create position failed: ${JSON.stringify(json)}`);
   return json;
 }
@@ -135,14 +148,104 @@ test.after(() => {
   if (dataDir) rmSync(dataDir, { recursive: true, force: true });
 });
 
-test('signup always lands as an active guard, never commander', { skip: !HAS_PB }, async () => {
+test('signup lands as an inactive guard pending commander approval', { skip: !HAS_PB }, async () => {
   const record = await signup('guard.role.test@example.com', 'testpass123', 'Guard Role Test');
   assert.equal(record.role, 'guard');
-  assert.equal(record.active, true);
+  assert.equal(record.active, false);
+  assert.equal(record.approved, false);
+});
+
+test('a commander can set another user\'s min_sleep_hours, a guard cannot edit others', { skip: !HAS_PB }, async () => {
+  const boss = await signup('sleep.boss@example.com', 'testpass123', 'Sleep Boss');
+  const driver = await signup('sleep.driver@example.com', 'testpass123', 'Sleep Driver');
+  const nosy = await signup('sleep.nosy@example.com', 'testpass123', 'Sleep Nosy');
+
+  const adminToken = await loginAdmin(ADMIN_EMAIL, ADMIN_PASSWORD);
+  await approve(adminToken, boss.id, { role: 'commander' });
+  await approve(adminToken, driver.id);
+  await approve(adminToken, nosy.id);
+
+  // Commander sets the driver's minimum sleep to 6h.
+  const commanderToken = await login('sleep.boss@example.com', 'testpass123');
+  const { status: setStatus, json: updated } = await api(`/api/collections/users/records/${driver.id}`, {
+    method: 'PATCH',
+    token: commanderToken,
+    body: { min_sleep_hours: 6 },
+  });
+  assert.equal(setStatus, 200, JSON.stringify(updated));
+  assert.equal(updated.min_sleep_hours, 6);
+
+  // Account access is distinct from dated vacations: a commander may disable
+  // and later reactivate an approved account.
+  const { status: disableStatus, json: disabled } = await api(`/api/collections/users/records/${driver.id}`, {
+    method: 'PATCH',
+    token: commanderToken,
+    body: { active: false },
+  });
+  assert.equal(disableStatus, 200, JSON.stringify(disabled));
+  assert.equal(disabled.active, false);
+  assert.equal(disabled.approved, true);
+  const { status: reactivateStatus } = await api(`/api/collections/users/records/${driver.id}`, {
+    method: 'PATCH',
+    token: commanderToken,
+    body: { active: true },
+  });
+  assert.equal(reactivateStatus, 200);
+
+  // A plain guard must not be able to edit another user's record (the rule folds
+  // into the lookup, so a mismatch reads as 404 - see the swap test).
+  const nosyToken = await login('sleep.nosy@example.com', 'testpass123');
+  const { status: forbidden } = await api(`/api/collections/users/records/${driver.id}`, {
+    method: 'PATCH',
+    token: nosyToken,
+    body: { min_sleep_hours: 0 },
+  });
+  assert.equal(forbidden, 404);
+
+  // The widened rule must NOT let a commander escalate privileges: `role` is
+  // superuser-only (not on the commander allowlist), enforced by the update
+  // hook (403, not 200).
+  const { status: roleEscalation } = await api(`/api/collections/users/records/${driver.id}`, {
+    method: 'PATCH',
+    token: commanderToken,
+    body: { role: 'commander' },
+  });
+  assert.equal(roleEscalation, 403); // ForbiddenError from the update hook
+  const { json: stillGuard } = await api(`/api/collections/users/records/${driver.id}`, { token: commanderToken });
+  assert.equal(stillGuard.role, 'guard');
+
+  // Nor may a guard self-promote by editing their own record.
+  const { status: selfPromote } = await api(`/api/collections/users/records/${nosy.id}`, {
+    method: 'PATCH',
+    token: nosyToken,
+    body: { role: 'commander' },
+  });
+  assert.equal(selfPromote, 403);
+
+  // A commander editing another user may ONLY touch min_sleep_hours - not the
+  // password (which would be an account takeover, since PocketBase doesn't
+  // require the old password for an authorized cross-user update) nor the email.
+  const { status: pwTakeover } = await api(`/api/collections/users/records/${driver.id}`, {
+    method: 'PATCH',
+    token: commanderToken,
+    body: { password: 'hijacked12345', passwordConfirm: 'hijacked12345' },
+  });
+  assert.equal(pwTakeover, 403);
+  // The driver's original password still works (the takeover was blocked).
+  const driverToken = await login('sleep.driver@example.com', 'testpass123');
+  assert.ok(driverToken);
+
+  const { status: emailChange } = await api(`/api/collections/users/records/${driver.id}`, {
+    method: 'PATCH',
+    token: commanderToken,
+    body: { email: 'attacker@example.com' },
+  });
+  assert.equal(emailChange, 403);
 });
 
 test('a guard cannot create a schedule (commander-only createRule)', { skip: !HAS_PB }, async () => {
-  await signup('guard.perm.test@example.com', 'testpass123', 'Guard Perm Test');
+  const guard = await signup('guard.perm.test@example.com', 'testpass123', 'Guard Perm Test');
+  await approve(await loginAdmin(ADMIN_EMAIL, ADMIN_PASSWORD), guard.id);
   const token = await login('guard.perm.test@example.com', 'testpass123');
 
   const { status } = await api('/api/collections/schedules/records', {
@@ -160,7 +263,8 @@ test('a guard cannot create a schedule (commander-only createRule)', { skip: !HA
 });
 
 test('a guard cannot create a position (commander-only createRule), but can list them', { skip: !HAS_PB }, async () => {
-  await signup('guard.pos.test@example.com', 'testpass123', 'Guard Pos Test');
+  const guard = await signup('guard.pos.test@example.com', 'testpass123', 'Guard Pos Test');
+  await approve(await loginAdmin(ADMIN_EMAIL, ADMIN_PASSWORD), guard.id);
   const token = await login('guard.pos.test@example.com', 'testpass123');
 
   const { status: createStatus } = await api('/api/collections/positions/records', {
@@ -174,10 +278,56 @@ test('a guard cannot create a position (commander-only createRule), but can list
   assert.equal(listStatus, 200);
 });
 
+test('a commander can set a guard vacation period', { skip: !HAS_PB }, async () => {
+  const commander = await signup('vacation.commander@example.com', 'testpass123', 'Vacation Commander');
+  const guard = await signup('vacation.guard@example.com', 'testpass123', 'Vacation Guard');
+  const adminToken = await loginAdmin(ADMIN_EMAIL, ADMIN_PASSWORD);
+  await approve(adminToken, commander.id, { role: 'commander' });
+  await approve(adminToken, guard.id);
+  const commanderToken = await login('vacation.commander@example.com', 'testpass123');
+
+  const vacationStart = '2027-07-01 08:00:00.000Z';
+  const vacationEnd = '2027-07-03 18:00:00.000Z';
+  const { status, json } = await api(`/api/collections/users/records/${guard.id}`, {
+    method: 'PATCH',
+    token: commanderToken,
+    body: { vacation_start: vacationStart, vacation_end: vacationEnd },
+  });
+  assert.equal(status, 200, JSON.stringify(json));
+  assert.equal(new Date(json.vacation_start).getTime(), new Date(vacationStart).getTime());
+  assert.equal(new Date(json.vacation_end).getTime(), new Date(vacationEnd).getTime());
+});
+
 test('unauthenticated requests see an empty shift list, not an error', { skip: !HAS_PB }, async () => {
   const { status, json } = await api('/api/collections/shifts/records');
   assert.equal(status, 200);
   assert.deepEqual(json.items, []);
+});
+
+test('temp-login code exposes only the read-only roster and rejects stale codes', { skip: !HAS_PB }, async () => {
+  const adminToken = await loginAdmin(ADMIN_EMAIL, ADMIN_PASSWORD);
+  const { status: settingsStatus, json: settings } = await api(
+    '/api/collections/app_settings/records?filter=key%20%3D%20%22main%22',
+    { token: adminToken },
+  );
+  assert.equal(settingsStatus, 200, JSON.stringify(settings));
+  const code = settings.items[0].temp_login_code;
+  assert.match(code, /^\d{4}$/);
+
+  const { status: wrongStatus } = await api('/api/guard/temp-login/99999');
+  assert.equal(wrongStatus, 404);
+
+  const { status, json } = await api(`/api/guard/temp-login/${code}`);
+  assert.equal(status, 200, JSON.stringify(json));
+  assert.ok(Array.isArray(json));
+  for (const shift of json) {
+    assert.deepEqual(
+      Object.keys(shift).sort(),
+      ['end', 'guard', 'id', 'position', 'start'],
+    );
+    if (shift.guard) assert.deepEqual(Object.keys(shift.guard).sort(), ['id', 'name']);
+    if (shift.position) assert.deepEqual(Object.keys(shift.position).sort(), ['id', 'name']);
+  }
 });
 
 // "check multiple different guard positions roster": generate + persist a
@@ -198,12 +348,9 @@ for (const positionCount of [1, 2, 3]) {
 
     const adminToken = await loginAdmin(ADMIN_EMAIL, ADMIN_PASSWORD);
     const commanderName = guardNames[0];
-    const { status: promoteStatus } = await api(`/api/collections/users/records/${guardIds.get(commanderName)}`, {
-      method: 'PATCH',
-      token: adminToken,
-      body: { role: 'commander' },
-    });
-    assert.equal(promoteStatus, 200);
+    for (const name of guardNames) {
+      await approve(adminToken, guardIds.get(name), name === commanderName ? { role: 'commander' } : {});
+    }
     const commanderToken = await login(`${commanderName.toLowerCase()}.${suffix}@example.com`, 'testpass123');
 
     const positionNames = ['South', 'Gate', 'Patrol'].slice(0, positionCount);
@@ -276,17 +423,60 @@ for (const positionCount of [1, 2, 3]) {
   });
 }
 
+test('a position persists its staffing rules and creates one shift per required person', { skip: !HAS_PB }, async () => {
+  const guards = [];
+  for (const name of ['Staff Commander', 'Qualified One', 'Qualified Two']) {
+    guards.push(await signup(`${name.toLowerCase().replaceAll(' ', '.')}@staffing.example.com`, 'testpass123', name));
+  }
+
+  const adminToken = await loginAdmin(ADMIN_EMAIL, ADMIN_PASSWORD);
+  // This also keeps the test compatible with the approval gate when it is
+  // enabled: only active users may authenticate.
+  for (const [index, guard] of guards.entries()) {
+    const { status } = await api(`/api/collections/users/records/${guard.id}`, {
+      method: 'PATCH',
+      token: adminToken,
+      body: { active: true, ...(index === 0 ? { role: 'commander' } : {}) },
+    });
+    assert.equal(status, 200);
+  }
+
+  const commanderToken = await login('staff.commander@staffing.example.com', 'testpass123');
+  const patrol = await createPosition(commanderToken, {
+    name: 'Qualified patrol',
+    headcount: 2,
+    guards: [guards[1].id, guards[2].id],
+    active: true,
+  });
+  assert.equal(patrol.headcount, 2);
+  assert.deepEqual(patrol.guards.sort(), [guards[1].id, guards[2].id].sort());
+
+  const start = Date.UTC(2027, 8, 1, 8, 0, 0);
+  const plannedShifts = generateShifts({
+    start,
+    end: start + 60 * 60 * 1000,
+    shiftMinutes: 60,
+    positions: [{
+      id: patrol.id,
+      name: patrol.name,
+      headcount: patrol.headcount,
+      guards: ['Qualified One', 'Qualified Two'],
+    }],
+    guards: guards.map((guard) => guard.name),
+  });
+  assert.equal(plannedShifts.length, 2);
+  assert.deepEqual(plannedShifts.map((shift) => shift.guard).sort(), ['Qualified One', 'Qualified Two']);
+});
+
 test('swap accept moves the guard, and only the recipient may accept', { skip: !HAS_PB }, async () => {
   const guardA = await signup('swap.a@example.com', 'testpass123', 'Swap A');
   const guardB = await signup('swap.b@example.com', 'testpass123', 'Swap B');
   const guardC = await signup('swap.c@example.com', 'testpass123', 'Swap C');
 
   const adminToken = await loginAdmin(ADMIN_EMAIL, ADMIN_PASSWORD);
-  await api(`/api/collections/users/records/${guardA.id}`, {
-    method: 'PATCH',
-    token: adminToken,
-    body: { role: 'commander' },
-  });
+  await approve(adminToken, guardA.id, { role: 'commander' });
+  await approve(adminToken, guardB.id);
+  await approve(adminToken, guardC.id);
   const commanderToken = await login('swap.a@example.com', 'testpass123');
   const position = await createPosition(commanderToken, { name: 'Gate (swap test)', active: true });
 
@@ -354,11 +544,7 @@ test('a time-restricted position (patrol) only generates + persists shifts insid
   }
 
   const adminToken = await loginAdmin(ADMIN_EMAIL, ADMIN_PASSWORD);
-  await api(`/api/collections/users/records/${guardIds.get('Erez')}`, {
-    method: 'PATCH',
-    token: adminToken,
-    body: { role: 'commander' },
-  });
+  await approve(adminToken, guardIds.get('Erez'), { role: 'commander' });
   const commanderToken = await login('erez.patrol@example.com', 'testpass123');
 
   const gate = await createPosition(commanderToken, { name: 'Gate (patrol test)', active: true });
@@ -385,7 +571,8 @@ test('a time-restricted position (patrol) only generates + persists shifts insid
     guards: guardNames,
   });
   assert.equal(plannedShifts.filter((s) => s.position === gate.id).length, 12);
-  assert.equal(plannedShifts.filter((s) => s.position === patrol.id).length, 8);
+  // Patrol is one continuous 22:00->06:00 block per night, not eight hourly rows.
+  assert.equal(plannedShifts.filter((s) => s.position === patrol.id).length, 1);
 
   const { json: schedule } = await api('/api/collections/schedules/records', {
     method: 'POST',
@@ -418,9 +605,83 @@ test('a time-restricted position (patrol) only generates + persists shifts insid
     `/api/collections/shifts/records?filter=${encodeURIComponent(`schedule = "${schedule.id}" && position = "${patrol.id}"`)}&perPage=100`,
     { token: commanderToken },
   );
-  assert.equal(stored.items.length, 8);
+  assert.equal(stored.items.length, 1);
+  const patrolBlock = stored.items[0];
+  assert.equal(new Date(patrolBlock.start).getHours(), 22);
+  assert.equal(new Date(patrolBlock.end).getHours(), 6);
+  assert.equal((new Date(patrolBlock.end).getTime() - new Date(patrolBlock.start).getTime()) / (3600 * 1000), 8);
+});
+
+// A position with headcount 2 must persist two distinct-guard rows per slot -
+// round-tripped through the real collections, not just planned in memory.
+test('a headcount-2 position persists two distinct guards per slot', { skip: !HAS_PB }, async () => {
+  const guardNames = ['Hila', 'Ivan', 'Jord'];
+  const guardIds = new Map();
+  for (const name of guardNames) {
+    const record = await signup(`${name.toLowerCase()}.hc2@example.com`, 'testpass123', name);
+    guardIds.set(name, record.id);
+  }
+
+  const adminToken = await loginAdmin(ADMIN_EMAIL, ADMIN_PASSWORD);
+  for (const name of guardNames) {
+    await approve(adminToken, guardIds.get(name), name === 'Hila' ? { role: 'commander' } : {});
+  }
+  const commanderToken = await login('hila.hc2@example.com', 'testpass123');
+
+  const post = await createPosition(commanderToken, { name: 'Double (hc2)', active: true, headcount: 2 });
+
+  const start = new Date(2027, 8, 1, 0, 0, 0).getTime();
+  const end = start + 3 * 3600 * 1000; // 3 one-hour slots
+
+  const plannedShifts = generateShifts({
+    start,
+    end,
+    shiftMinutes: 60,
+    positions: [{ id: post.id, name: post.name, headcount: 2 }],
+    guards: guardNames,
+  });
+  assert.equal(plannedShifts.length, 6); // 3 slots x 2 seats
+
+  const { json: schedule } = await api('/api/collections/schedules/records', {
+    method: 'POST',
+    token: commanderToken,
+    body: {
+      start: new Date(start).toISOString(),
+      end: new Date(end).toISOString(),
+      shift_minutes: 60,
+      positions: [post.id],
+      created_by: guardIds.get('Hila'),
+    },
+  });
+
+  for (const shift of plannedShifts) {
+    const { status } = await api('/api/collections/shifts/records', {
+      method: 'POST',
+      token: commanderToken,
+      body: {
+        schedule: schedule.id,
+        position: shift.position,
+        start: new Date(shift.start).toISOString(),
+        end: new Date(shift.end).toISOString(),
+        guard: guardIds.get(shift.guard),
+      },
+    });
+    assert.equal(status, 200);
+  }
+
+  const { json: stored } = await api(
+    `/api/collections/shifts/records?filter=${encodeURIComponent(`schedule = "${schedule.id}"`)}&perPage=100`,
+    { token: commanderToken },
+  );
+  assert.equal(stored.items.length, 6);
+  const bySlot = new Map();
   for (const item of stored.items) {
-    const hour = new Date(item.start).getHours();
-    assert.ok(hour >= 22 || hour < 6, `patrol shift at hour ${hour} is outside its 22:00-06:00 window`);
+    const key = new Date(item.start).getTime();
+    if (!bySlot.has(key)) bySlot.set(key, new Set());
+    bySlot.get(key).add(item.guard);
+  }
+  assert.equal(bySlot.size, 3);
+  for (const guardsInSlot of bySlot.values()) {
+    assert.equal(guardsInSlot.size, 2); // two different guards on the same slot
   }
 });

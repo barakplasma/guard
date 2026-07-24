@@ -3,6 +3,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test"
+    "build:hooks": "node scripts/build-hooks.mjs",
+    "test": "npm run build:hooks && node --test"
+  },
+  "devDependencies": {
+    "fast-check": "^4.9.0"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
   }
 }
