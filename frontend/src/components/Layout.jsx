@@ -66,7 +66,7 @@ export default function Layout() {
       <Box sx={{ flexGrow: 1, pb: 8 }}>
         {isCommander && tempLink && (
           <Box sx={{ px: 2, py: 1, bgcolor: 'action.hover', fontSize: '0.85rem' }}>
-            {t('tempRoster.shareLink')}: <a href={tempLink}>{tempLink}</a>
+            {t('tempRoster.shareLink')}: <a href={tempLink}>{t('tempRoster.open')}</a>
           </Box>
         )}
         <Outlet />
