@@ -11,12 +11,27 @@ import { pb } from '../lib/pocketbase.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { useLocale } from '../lib/LocaleContext.jsx';
 
+function relationId(value) {
+  if (Array.isArray(value)) return relationId(value[0]);
+  if (value && typeof value === 'object') return value.id;
+  return value || null;
+}
+
 function isOnVacation(user, now) {
   if (!user.vacation_start || !user.vacation_end) return false;
   return new Date(user.vacation_start).getTime() <= now && now < new Date(user.vacation_end).getTime();
 }
 
-function GuardList({ title, guards, emptyText, chip }) {
+function formatDateTime(value, lang) {
+  return new Intl.DateTimeFormat(lang === 'he' ? 'he-IL' : 'en-IL', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value));
+}
+
+function GuardList({ title, guards, emptyText, chip, secondary }) {
   return (
     <Paper sx={{ p: 2 }}>
       <Typography variant="h6">{title}</Typography>
@@ -26,7 +41,7 @@ function GuardList({ title, guards, emptyText, chip }) {
         <List dense disablePadding>
           {guards.map((guard) => (
             <ListItem key={guard.id} secondaryAction={chip ? <Chip size="small" {...chip(guard)} /> : null}>
-              <ListItemText primary={guard.name} secondary={guard.email} />
+              <ListItemText primary={guard.name || '—'} secondary={secondary?.(guard) || null} />
             </ListItem>
           ))}
         </List>
@@ -45,11 +60,10 @@ export default function Availability() {
 
   const load = useCallback(async () => {
     try {
-      const loadedAt = new Date().toISOString();
       const [userRecords, shiftRecords] = await Promise.all([
         pb.collection('users').getFullList({ filter: 'approved = true && active = true', sort: 'name' }),
         pb.collection('shifts').getFullList({
-          filter: `end > "${loadedAt}"`,
+          sort: '-end',
           expand: 'guard,position',
         }),
       ]);
@@ -77,37 +91,85 @@ export default function Availability() {
     };
   }, [isCommander, load]);
 
-  const groups = useMemo(() => {
-    const onDutyIds = new Set(shifts
-      .filter((shift) => new Date(shift.start).getTime() <= now && now < new Date(shift.end).getTime())
-      .map((shift) => shift.guard));
-    return {
-      available: users.filter((user) => !isOnVacation(user, now) && !onDutyIds.has(user.id)),
-      onDuty: users.filter((user) => !isOnVacation(user, now) && onDutyIds.has(user.id)),
-      vacation: users.filter((user) => isOnVacation(user, now)),
-    };
-  }, [users, shifts, now]);
+  const currentAssignments = useMemo(() => {
+    const assignments = new Map();
+    for (const shift of shifts) {
+      const start = new Date(shift.start).getTime();
+      const end = new Date(shift.end).getTime();
+      if (!(start <= now && now < end)) continue;
+      const guardId = relationId(shift.guard) || shift.expand?.guard?.id;
+      if (!guardId) continue;
+      const existing = assignments.get(guardId) || { positions: [], end: shift.end };
+      const position = shift.expand?.position?.name || '?';
+      if (!existing.positions.includes(position)) existing.positions.push(position);
+      if (new Date(shift.end) > new Date(existing.end)) existing.end = shift.end;
+      assignments.set(guardId, existing);
+    }
+    return assignments;
+  }, [shifts, now]);
 
-  const positionByGuard = useMemo(() => new Map(shifts
-    .filter((shift) => new Date(shift.start).getTime() <= now && now < new Date(shift.end).getTime())
-    .map((shift) => [
-      shift.guard,
-      shift.expand?.position?.name || t('availability.onDuty'),
-    ])), [shifts, now, t]);
+  const lastShiftByGuard = useMemo(() => {
+    const last = new Map();
+    for (const shift of shifts) {
+      const end = new Date(shift.end).getTime();
+      if (end > now) continue;
+      const guardId = relationId(shift.guard) || shift.expand?.guard?.id;
+      if (!guardId || last.has(guardId)) continue;
+      last.set(guardId, shift);
+    }
+    return last;
+  }, [shifts, now]);
+
+  const groups = useMemo(() => {
+    const byName = (a, b) => (a.name || '').localeCompare(b.name || '', lang === 'he' ? 'he' : 'en');
+    const byOldestLastShift = (a, b) => {
+      const aEnd = lastShiftByGuard.has(a.id)
+        ? new Date(lastShiftByGuard.get(a.id).end).getTime()
+        : Number.NEGATIVE_INFINITY;
+      const bEnd = lastShiftByGuard.has(b.id)
+        ? new Date(lastShiftByGuard.get(b.id).end).getTime()
+        : Number.NEGATIVE_INFINITY;
+      return aEnd - bEnd || byName(a, b);
+    };
+
+    return {
+      available: users
+        .filter((user) => !isOnVacation(user, now) && !currentAssignments.has(user.id))
+        .sort(byOldestLastShift),
+      onDuty: users
+        .filter((user) => !isOnVacation(user, now) && currentAssignments.has(user.id))
+        .sort(byName),
+      vacation: users.filter((user) => isOnVacation(user, now)).sort(byName),
+    };
+  }, [users, now, currentAssignments, lastShiftByGuard, lang]);
 
   if (!isCommander) {
     return <Box sx={{ p: 3 }}><Alert severity="warning">{t('availability.forbidden')}</Alert></Box>;
   }
 
   const vacationChip = (guard) => ({
-    label: new Intl.DateTimeFormat(lang === 'he' ? 'he-IL' : 'en-IL', {
-      day: '2-digit',
-      month: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    }).format(new Date(guard.vacation_end)),
+    label: formatDateTime(guard.vacation_end, lang),
     color: 'warning',
   });
+
+  const onDutySecondary = (guard) => {
+    const assignment = currentAssignments.get(guard.id);
+    if (!assignment) return null;
+    const until = new Intl.DateTimeFormat(lang === 'he' ? 'he-IL' : 'en-IL', {
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(new Date(assignment.end));
+    return lang === 'he'
+      ? `${assignment.positions.join(', ')} · עד ${until}`
+      : `${assignment.positions.join(', ')} · until ${until}`;
+  };
+
+  const availableSecondary = (guard) => {
+    const lastShift = lastShiftByGuard.get(guard.id);
+    if (!lastShift) return lang === 'he' ? 'טרם שובץ למשמרת' : 'No previous guard shift';
+    const formatted = formatDateTime(lastShift.end, lang);
+    return lang === 'he' ? `משמרת אחרונה הסתיימה: ${formatted}` : `Last guard shift ended: ${formatted}`;
+  };
 
   return (
     <Box sx={{ maxWidth: 720, mx: 'auto', p: 2 }}>
@@ -117,13 +179,28 @@ export default function Availability() {
       </Typography>
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
       <Box sx={{ display: 'grid', gap: 2 }}>
-        <GuardList title={t('availability.available')} guards={groups.available}
-          emptyText={t('availability.noneAvailable')} />
-        <GuardList title={t('availability.onDuty')} guards={groups.onDuty}
+        <GuardList
+          title={t('availability.onDuty')}
+          guards={groups.onDuty}
           emptyText={t('availability.noneOnDuty')}
-          chip={(guard) => ({ label: positionByGuard.get(guard.id), color: 'info' })} />
-        <GuardList title={t('availability.onVacation')} guards={groups.vacation}
-          emptyText={t('availability.noneOnVacation')} chip={vacationChip} />
+          secondary={onDutySecondary}
+          chip={(guard) => ({
+            label: currentAssignments.get(guard.id)?.positions.join(', ') || t('availability.onDuty'),
+            color: 'info',
+          })}
+        />
+        <GuardList
+          title={t('availability.available')}
+          guards={groups.available}
+          emptyText={t('availability.noneAvailable')}
+          secondary={availableSecondary}
+        />
+        <GuardList
+          title={t('availability.onVacation')}
+          guards={groups.vacation}
+          emptyText={t('availability.noneOnVacation')}
+          chip={vacationChip}
+        />
       </Box>
     </Box>
   );

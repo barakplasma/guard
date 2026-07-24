@@ -1,18 +1,28 @@
 import { useEffect, useMemo, useState } from 'react';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
-import List from '@mui/material/List';
-import ListItem from '@mui/material/ListItem';
-import ListItemText from '@mui/material/ListItemText';
 import Chip from '@mui/material/Chip';
 import MenuItem from '@mui/material/MenuItem';
 import TextField from '@mui/material/TextField';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Switch from '@mui/material/Switch';
 import Divider from '@mui/material/Divider';
+import Paper from '@mui/material/Paper';
+import Stack from '@mui/material/Stack';
+import Button from '@mui/material/Button';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import { pb } from '../lib/pocketbase.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { useLocale } from '../lib/LocaleContext.jsx';
+import { copyRosterText, rosterAsText } from '../lib/rosterExport.js';
+
+const POSITION_COLORS = ['primary', 'secondary', 'success', 'warning', 'info', 'error'];
+
+function positionColor(name) {
+  let hash = 0;
+  for (const character of name) hash = ((hash << 5) - hash + character.charCodeAt(0)) | 0;
+  return POSITION_COLORS[Math.abs(hash) % POSITION_COLORS.length];
+}
 
 function formatRange(start, end, lang) {
   const fmt = new Intl.DateTimeFormat(lang === 'he' ? 'he-IL' : 'en-IL', {
@@ -42,6 +52,8 @@ export default function Roster() {
   const [shifts, setShifts] = useState([]);
   const [guardFilter, setGuardFilter] = useState('all');
   const [showPast, setShowPast] = useState(false);
+  const [now, setNow] = useState(Date.now());
+  const [copied, setCopied] = useState(false);
 
   const load = async () => {
     const records = await pb.collection('shifts').getFullList({
@@ -53,6 +65,7 @@ export default function Roster() {
 
   useEffect(() => {
     load();
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
     let unsubscribe;
     pb.collection('shifts')
       .subscribe('*', () => load())
@@ -60,6 +73,7 @@ export default function Roster() {
         unsubscribe = fn;
       });
     return () => {
+      window.clearInterval(timer);
       unsubscribe?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -73,18 +87,12 @@ export default function Roster() {
     return [...names.entries()];
   }, [shifts]);
 
-  const now = Date.now();
+  const visible = useMemo(() => shifts.filter((shift) => {
+    if (!showPast && new Date(shift.end).getTime() <= now) return false;
+    if (guardFilter !== 'all' && shift.expand?.guard?.id !== guardFilter) return false;
+    return true;
+  }), [shifts, showPast, guardFilter, now]);
 
-  const visible = useMemo(() => {
-    return shifts.filter((shift) => {
-      if (!showPast && new Date(shift.end).getTime() < now) return false;
-      if (guardFilter !== 'all' && shift.expand?.guard?.id !== guardFilter) return false;
-      return true;
-    });
-  }, [shifts, showPast, guardFilter, now]);
-
-  // Every position sharing a time-slot is now its own row, so group them back
-  // into one displayed line per slot: "18:00 - 19:00: דרומי - Alice, ש''ג - Bob".
   const grouped = useMemo(() => {
     const byDay = new Map();
     for (const shift of visible) {
@@ -108,29 +116,46 @@ export default function Roster() {
     }));
   }, [visible, lang]);
 
+  const handleCopy = async () => {
+    await copyRosterText(rosterAsText(grouped, lang));
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1800);
+  };
+
   return (
-    <Box sx={{ maxWidth: 720, mx: 'auto', p: 2 }}>
-      <Typography variant="h5" gutterBottom>
-        {t('roster.title')}
-      </Typography>
-      <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', mb: 2, flexWrap: 'wrap' }}>
+    <Box sx={{ maxWidth: 720, mx: 'auto', p: { xs: 1.25, sm: 2 } }}>
+      <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1} sx={{ mb: 1 }}>
+        <Typography variant="h5">{t('roster.title')}</Typography>
+        <Button
+          size="small"
+          variant="outlined"
+          startIcon={<ContentCopyIcon />}
+          onClick={handleCopy}
+          disabled={grouped.length === 0}
+          sx={{ flexShrink: 0 }}
+        >
+          {copied
+            ? (lang === 'he' ? 'הועתק' : 'Copied')
+            : (lang === 'he' ? 'העתקה כטקסט' : 'Copy as text')}
+        </Button>
+      </Stack>
+
+      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mb: 2, flexWrap: 'wrap' }}>
         <TextField
           select
           size="small"
           label={t('roster.filterAll')}
           value={guardFilter}
-          onChange={(e) => setGuardFilter(e.target.value)}
-          sx={{ minWidth: 180 }}
+          onChange={(event) => setGuardFilter(event.target.value)}
+          sx={{ minWidth: { xs: '100%', sm: 180 } }}
         >
           <MenuItem value="all">{t('roster.filterAll')}</MenuItem>
           {allGuards.map(([id, name]) => (
-            <MenuItem key={id} value={id}>
-              {name}
-            </MenuItem>
+            <MenuItem key={id} value={id}>{name}</MenuItem>
           ))}
         </TextField>
         <FormControlLabel
-          control={<Switch checked={showPast} onChange={(e) => setShowPast(e.target.checked)} />}
+          control={<Switch checked={showPast} onChange={(event) => setShowPast(event.target.checked)} />}
           label={t('roster.pastToggle')}
         />
       </Box>
@@ -139,33 +164,54 @@ export default function Roster() {
 
       {grouped.map((day) => (
         <Box key={day.label} sx={{ mb: 3 }}>
-          <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-            {day.label}
-          </Typography>
-          <Divider sx={{ mb: 1 }} />
-          <List dense>
+          <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>{day.label}</Typography>
+          <Divider sx={{ mb: 1.5 }} />
+          <Stack spacing={1.25}>
             {day.items.map((slot) => {
               const start = new Date(slot.start).getTime();
               const end = new Date(slot.end).getTime();
               const isCurrent = start <= now && now < end;
-              const includesMe = slot.entries.some((e) => e.guardId === user?.id);
+              const includesMe = slot.entries.some((entry) => entry.guardId === user?.id);
               return (
-                <ListItem
+                <Paper
                   key={`${slot.start}-${slot.end}`}
+                  variant="outlined"
                   sx={{
-                    bgcolor: isCurrent ? 'action.selected' : includesMe ? 'action.hover' : undefined,
-                    borderRadius: 1,
+                    p: 1.5,
+                    borderWidth: isCurrent ? 2 : 1,
+                    borderColor: isCurrent ? 'primary.main' : includesMe ? 'secondary.main' : 'divider',
                   }}
                 >
-                  <ListItemText
-                    primary={formatRange(start, end, lang)}
-                    secondary={slot.entries.map((e) => `${e.positionName} - ${e.guardName}`).join(', ')}
-                  />
-                  {isCurrent && <Chip size="small" color="primary" label={t('roster.now')} />}
-                </ListItem>
+                  <Stack direction="row" alignItems="center" justifyContent="space-between" gap={1}>
+                    <Typography variant="body1" sx={{ fontWeight: 600 }}>
+                      {formatRange(start, end, lang)}
+                    </Typography>
+                    {isCurrent && <Chip size="small" color="primary" label={t('roster.now')} />}
+                  </Stack>
+                  <Stack spacing={0.75} sx={{ mt: 1 }}>
+                    {slot.entries.map((entry) => (
+                      <Stack
+                        key={`${entry.positionName}-${entry.guardId}`}
+                        direction="row"
+                        alignItems="center"
+                        spacing={1}
+                      >
+                        <Chip
+                          size="small"
+                          color={positionColor(entry.positionName)}
+                          label={entry.positionName}
+                          sx={{ minWidth: 88, fontWeight: 700 }}
+                        />
+                        <Typography variant="body1" sx={{ fontWeight: entry.guardId === user?.id ? 700 : 400 }}>
+                          {entry.guardName}
+                        </Typography>
+                      </Stack>
+                    ))}
+                  </Stack>
+                </Paper>
               );
             })}
-          </List>
+          </Stack>
         </Box>
       ))}
     </Box>

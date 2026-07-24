@@ -63,7 +63,7 @@ export default function Layout() {
         </Toolbar>
       </AppBar>
 
-      <Box sx={{ flexGrow: 1, pb: 7 }}>
+      <Box sx={{ flexGrow: 1, pb: 8 }}>
         {isCommander && tempLink && (
           <Box sx={{ px: 2, py: 1, bgcolor: 'action.hover', fontSize: '0.85rem' }}>
             {t('tempRoster.shareLink')}: <a href={tempLink}>{tempLink}</a>
@@ -76,7 +76,26 @@ export default function Layout() {
         showLabels
         value={currentTab}
         onChange={(_e, value) => navigate(value)}
-        sx={{ position: 'fixed', bottom: 0, insetInline: 0 }}
+        sx={{
+          position: 'fixed',
+          bottom: 0,
+          insetInline: 0,
+          zIndex: (theme) => theme.zIndex.appBar,
+          borderTop: 1,
+          borderColor: 'divider',
+          '& .MuiBottomNavigationAction-root': {
+            flex: '1 1 0',
+            minWidth: 0,
+            px: 0.25,
+          },
+          '& .MuiBottomNavigationAction-label': {
+            fontSize: '0.65rem',
+            whiteSpace: 'nowrap',
+          },
+          '& .MuiBottomNavigationAction-label.Mui-selected': {
+            fontSize: '0.7rem',
+          },
+        }}
       >
         <BottomNavigationAction label={t('nav.roster')} value="/roster" icon={<ListAltIcon />} />
         {isCommander && (
