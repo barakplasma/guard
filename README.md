@@ -70,5 +70,5 @@ frontend before it is displayed.
 
 GitHub Actions builds the Dockerfile for `linux/amd64` and `linux/arm64`.
 Pull requests verify that the image builds; pushes to `main` publish `latest`
-and `sha-*` tags to `ghcr.io/barakplasma/guard`, while `v*` tags also publish
+and `sha-*` tags to `ghcr.io/barakplasma/guard-app`, while `v*` tags also publish
 matching semantic-version tags.

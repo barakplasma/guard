@@ -36,7 +36,9 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}
+          # Use a repository-linked package name. The pre-existing `guard`
+          # package is owned outside this repository and rejects GITHUB_TOKEN.
+          images: ghcr.io/${{ github.repository }}-app
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,prefix=sha-

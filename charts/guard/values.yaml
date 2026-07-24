@@ -1,6 +1,6 @@
 # Image published from this repository's Dockerfile.
 image:
-  repository: ghcr.io/barakplasma/guard
+  repository: ghcr.io/barakplasma/guard-app
   tag: latest
   pullPolicy: Always
 
