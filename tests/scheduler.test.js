@@ -119,7 +119,7 @@ test('seeds availability from existingShifts', () => {
   );
 });
 
-test('time-restricted position (patrol, 22:00-06:00 overnight window) only appears in-window', () => {
+test('time-restricted position (patrol, 22:00-06:00) is one continuous shift, same guard all window', () => {
   const patrol = { name: 'Patrol', timeRestricted: true, windowStart: '22:00', windowEnd: '06:00' };
   const regular = { name: 'Gate' };
 
@@ -138,12 +138,229 @@ test('time-restricted position (patrol, 22:00-06:00 overnight window) only appea
   const gateSlots = shifts.filter((s) => s.position === 'Gate');
   const patrolSlots = shifts.filter((s) => s.position === 'Patrol');
 
-  assert.equal(gateSlots.length, 12); // staffed every slot
-  // in-window slots: 22,23,00,01,02,03,04,05 (8 slots); 20,21,06,07 excluded
-  assert.equal(patrolSlots.length, 8);
+  assert.equal(gateSlots.length, 12); // regular post still staffed every hourly slot
+  // Patrol is ONE 22:00->06:00 block, not eight hourly rows - can't switch mid-shift.
+  assert.equal(patrolSlots.length, 1);
+  const block = patrolSlots[0];
+  assert.equal(new Date(block.start).getHours(), 22);
+  assert.equal(new Date(block.end).getHours(), 6);
+  assert.equal((block.end - block.start) / HOUR, 8);
+});
 
-  const patrolHours = patrolSlots.map((s) => new Date(s.start).getHours());
-  assert.deepEqual(patrolHours.sort((a, b) => a - b), [0, 1, 2, 3, 4, 5, 22, 23].sort((a, b) => a - b));
+test('time-restricted block is clamped to the exact window when the slot grid is misaligned', () => {
+  const patrol = { name: 'Patrol', timeRestricted: true, windowStart: '22:00', windowEnd: '06:00' };
+  // A 20:30 start with 60-minute slots puts the grid on the half hour, out of
+  // step with the 22:00 window. The block must still be exactly 22:00-06:00,
+  // not 22:30-06:30 (no empty opening half hour, no staffing past close).
+  const start = localTime(2024, 0, 1, 20, 30);
+  const end = localTime(2024, 0, 2, 8, 30);
+
+  const shifts = generateShifts({
+    start,
+    end,
+    shiftMinutes: 60,
+    positions: [patrol],
+    guards: ['Alice', 'Bob', 'Carol'],
+  });
+
+  assert.equal(shifts.length, 1);
+  const block = shifts[0];
+  assert.equal(new Date(block.start).getHours(), 22);
+  assert.equal(new Date(block.start).getMinutes(), 0);
+  assert.equal(new Date(block.end).getHours(), 6);
+  assert.equal(new Date(block.end).getMinutes(), 0);
+  assert.equal((block.end - block.start) / HOUR, 8);
+});
+
+test('time-restricted window opening mid-slot is still fully staffed', () => {
+  // 90-min slots from 00:00 land at :00, 1:30, 3:00, ... - none inside the
+  // 20:00-21:00 tail of a 20:00-06:00 window. That tail must still be staffed,
+  // as its own occurrence, not missed because no grid point falls in it.
+  const patrol = { name: 'Patrol', timeRestricted: true, windowStart: '20:00', windowEnd: '06:00' };
+  const start = localTime(2024, 0, 1, 0, 0);
+  const end = localTime(2024, 0, 1, 21, 0);
+
+  const shifts = generateShifts({ start, end, shiftMinutes: 90, positions: [patrol], guards: ['Alice', 'Bob'] });
+
+  const sorted = shifts.slice().sort((a, b) => a.start - b.start);
+  assert.equal(sorted.length, 2); // [00:00-06:00] and [20:00-21:00]
+  assert.equal(new Date(sorted[0].start).getHours(), 0);
+  assert.equal(new Date(sorted[0].end).getHours(), 6);
+  assert.equal(new Date(sorted[1].start).getHours(), 20);
+  assert.equal(new Date(sorted[1].end).getHours(), 21);
+});
+
+test('time-restricted: an off-grid existing shift splits the block at its real edges', () => {
+  // Hourly grid, patrol 22:00-06:00, with an existing shift 22:15-23:15 whose
+  // edges fall between grid points. New blocks must fill exactly the uncovered
+  // parts (22:00-22:15 and 23:15-06:00) - no overstaffing of 22:15-23:00, no gap
+  // at 23:15-00:00.
+  const patrol = { name: 'Patrol', timeRestricted: true, windowStart: '22:00', windowEnd: '06:00' };
+  const start = localTime(2024, 0, 1, 22, 0);
+  const end = localTime(2024, 0, 2, 6, 0);
+  const existingShifts = [
+    { start: localTime(2024, 0, 1, 22, 15), end: localTime(2024, 0, 1, 23, 15), guard: 'Alice', position: 'Patrol' },
+  ];
+
+  const shifts = generateShifts({
+    start,
+    end,
+    shiftMinutes: 60,
+    positions: [patrol],
+    guards: ['Alice', 'Bob', 'Carol'],
+    existingShifts,
+  });
+
+  const sorted = shifts.slice().sort((a, b) => a.start - b.start);
+  assert.equal(sorted.length, 2);
+  assert.deepEqual([new Date(sorted[0].start).getHours(), new Date(sorted[0].start).getMinutes()], [22, 0]);
+  assert.deepEqual([new Date(sorted[0].end).getHours(), new Date(sorted[0].end).getMinutes()], [22, 15]);
+  assert.deepEqual([new Date(sorted[1].start).getHours(), new Date(sorted[1].start).getMinutes()], [23, 15]);
+  assert.deepEqual([new Date(sorted[1].end).getHours(), new Date(sorted[1].end).getMinutes()], [6, 0]);
+});
+
+test('time-restricted: an existing partial-window shift only suppresses the slots it covers', () => {
+  const patrol = { name: 'Patrol', timeRestricted: true, windowStart: '22:00', windowEnd: '06:00' };
+  const start = localTime(2024, 0, 1, 22, 0);
+  const end = localTime(2024, 0, 2, 6, 0);
+  // An existing patrol that only covers the first hour (22:00-23:00) - e.g. from
+  // an older/narrower window or a manually created shift. The remaining
+  // 23:00-06:00 must still be staffed, as one continuous block.
+  const existingShifts = [
+    { start: localTime(2024, 0, 1, 22, 0), end: localTime(2024, 0, 1, 23, 0), guard: 'Alice', position: 'Patrol' },
+  ];
+
+  const shifts = generateShifts({
+    start,
+    end,
+    shiftMinutes: 60,
+    positions: [patrol],
+    guards: ['Alice', 'Bob', 'Carol'],
+    existingShifts,
+  });
+
+  assert.equal(shifts.length, 1); // the uncovered remainder, one block
+  assert.equal(new Date(shifts[0].start).getHours(), 23);
+  assert.equal(new Date(shifts[0].end).getHours(), 6);
+  assert.equal((shifts[0].end - shifts[0].start) / HOUR, 7);
+});
+
+test('a position with headcount 2 staffs two distinct guards per slot', () => {
+  const start = localTime(2024, 0, 1, 0, 0);
+  const shifts = generateShifts({
+    start,
+    end: start + 4 * HOUR,
+    shiftMinutes: 60,
+    positions: [{ name: 'Gate', headcount: 2 }],
+    guards: ['Alice', 'Bob', 'Carol'],
+  });
+
+  assert.equal(shifts.length, 8); // 4 slots x 2 seats
+  const bySlot = new Map();
+  for (const s of shifts) {
+    if (!bySlot.has(s.start)) bySlot.set(s.start, new Set());
+    bySlot.get(s.start).add(s.guard);
+  }
+  for (const guards of bySlot.values()) {
+    assert.equal(guards.size, 2); // two different guards, never the same one twice
+  }
+});
+
+test('assigned guards: prefers its list and rotates among them when enough are available', () => {
+  const patrol = {
+    name: 'Patrol',
+    timeRestricted: true,
+    windowStart: '22:00',
+    windowEnd: '06:00',
+    guards: ['Bob', 'Carol'],
+  };
+  // Two nights so the assigned pool has to rotate; Alice must never appear.
+  const start = localTime(2024, 0, 1, 22, 0);
+  const end = localTime(2024, 0, 3, 6, 0);
+
+  const shifts = generateShifts({
+    start,
+    end,
+    shiftMinutes: 60,
+    positions: [patrol],
+    guards: ['Alice', 'Bob', 'Carol'],
+  });
+
+  const patrolGuards = shifts.map((s) => s.guard);
+  assert.equal(patrolGuards.length, 2); // one continuous block per night
+  // Both assigned guards are free, so the off-list fallback is never triggered.
+  assert.ok(!patrolGuards.includes('Alice'), 'Alice is off-list and not needed here');
+  assert.deepEqual([...patrolGuards].sort(), ['Bob', 'Carol']); // rotated for fairness
+});
+
+test('time-restricted post rotates guards day to day, even against global hour-fairness', () => {
+  const patrol = { name: 'Patrol', timeRestricted: true, windowStart: '22:00', windowEnd: '06:00' };
+  // Alice is carrying a big daytime load, so pure hour-fairness would keep
+  // handing patrol to the lighter Bob every night. Rotation must still put
+  // Alice on some nights so the post alternates.
+  const existingShifts = [{ start: localTime(2023, 11, 30, 8, 0), end: localTime(2023, 11, 30, 20, 0), guard: 'Alice' }];
+  const start = localTime(2024, 0, 1, 22, 0);
+  const end = localTime(2024, 0, 4, 6, 0); // three overnight windows
+
+  const shifts = generateShifts({
+    start,
+    end,
+    shiftMinutes: 60,
+    positions: [patrol],
+    guards: ['Alice', 'Bob'],
+    existingShifts,
+  });
+
+  const nightlyGuards = shifts.sort((a, b) => a.start - b.start).map((s) => s.guard);
+  assert.equal(nightlyGuards.length, 3); // one continuous block per night
+  // No guard does patrol two nights running.
+  for (let i = 1; i < nightlyGuards.length; i++) {
+    assert.notEqual(nightlyGuards[i], nightlyGuards[i - 1], `night ${i} repeats ${nightlyGuards[i]}`);
+  }
+  assert.ok(nightlyGuards.includes('Alice') && nightlyGuards.includes('Bob'), 'both guards take turns');
+});
+
+test('assigned guards: falls back to someone off-list when too few assigned are available', () => {
+  const patrol = {
+    name: 'Patrol',
+    timeRestricted: true,
+    windowStart: '22:00',
+    windowEnd: '06:00',
+    headcount: 2,
+    guards: ['Bob'], // only one assigned, but two needed at once
+  };
+  const start = localTime(2024, 0, 1, 22, 0);
+  const end = localTime(2024, 0, 2, 6, 0);
+
+  const shifts = generateShifts({
+    start,
+    end,
+    shiftMinutes: 60,
+    positions: [patrol],
+    guards: ['Alice', 'Bob', 'Carol'],
+  });
+
+  assert.equal(shifts.length, 2); // one continuous block, headcount 2, no throw
+  const guardsOnPatrol = shifts.map((s) => s.guard);
+  assert.ok(guardsOnPatrol.includes('Bob'), 'the sole assigned guard is used');
+  // The second seat is pulled from off-list (Alice or Carol).
+  const offList = guardsOnPatrol.filter((g) => g !== 'Bob');
+  assert.equal(offList.length, 1);
+  assert.ok(['Alice', 'Carol'].includes(offList[0]));
+});
+
+test('assigned guards must be part of the overall guard pool', () => {
+  assert.throws(
+    () =>
+      generateShifts({
+        start: localTime(2024, 0, 1, 0, 0),
+        end: localTime(2024, 0, 1, 2, 0),
+        shiftMinutes: 60,
+        positions: [{ name: 'Gate', guards: ['Zoe'] }],
+        guards: ['Alice', 'Bob'],
+      }),
+    /assigns guard "Zoe" who is not in the guard pool/,
+  );
 });
 
 test('restMinutes prevents back-to-back shifts (3 guards, 1 position rotates A/B/C)', () => {
@@ -270,8 +487,8 @@ test('a position creates one shift per required person and can restrict who fill
     end: start + HOUR,
     shiftMinutes: 60,
     positions: [
-      { name: 'Patrol', peopleCount: 2, eligibleGuards: ['Alice', 'Bob'] },
-      { name: 'Gate', peopleCount: 1 },
+      { name: 'Patrol', headcount: 2, guards: ['Alice', 'Bob'] },
+      { name: 'Gate', headcount: 1 },
     ],
     guards: ['Alice', 'Bob', 'Carol'],
   });
@@ -287,7 +504,7 @@ test('an overlapping multi-person position generates only its unfilled places', 
     start,
     end: start + HOUR,
     shiftMinutes: 60,
-    positions: [{ name: 'Patrol', peopleCount: 2 }],
+    positions: [{ name: 'Patrol', headcount: 2 }],
     guards: ['Alice', 'Bob', 'Carol'],
     existingShifts: [{ start, end: start + HOUR, position: 'Patrol', guard: 'Alice' }],
   });

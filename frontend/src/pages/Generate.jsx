@@ -68,11 +68,11 @@ export default function Generate() {
       if (!bySlot.has(key)) bySlot.set(key, { start: shift.start, end: shift.end, entries: [] });
       bySlot.get(key).entries.push({
         positionName: positionById.get(shift.position)?.name || shift.position,
-        guard: shift.guard,
+        guard: guardIdToName.get(shift.guard) || shift.guard,
       });
     }
     return [...bySlot.values()].sort((a, b) => a.start - b.start);
-  }, [preview, positionById]);
+  }, [preview, positionById, guardIdToName]);
 
   if (!isCommander) {
     return (
@@ -96,10 +96,18 @@ export default function Generate() {
     try {
       const startMs = toEpoch(start);
       const endMs = toEpoch(end);
-      const guardNames = selectedGuards.map((id) => guardIdToName.get(id));
-      const unavailablePeriods = Object.fromEntries(users
-        .filter((user) => user.vacation_start && user.vacation_end)
-        .map((user) => [user.name, [{ start: new Date(user.vacation_start).getTime(), end: new Date(user.vacation_end).getTime() }]]));
+      // The scheduler is keyed by stable user IDs, not display names (names
+      // aren't unique - two namesakes would otherwise collapse and a shift could
+      // be saved against the wrong person). Assigned guards are already stored as
+      // IDs on the position, so they pass straight through.
+      const unavailablePeriods = Object.fromEntries(
+        users
+          .filter((user) => user.vacation_start && user.vacation_end)
+          .map((user) => [user.id, [{
+            start: new Date(user.vacation_start).getTime(),
+            end: new Date(user.vacation_end).getTime(),
+          }]]),
+      );
       const positionDescriptors = selectedPositions.map((id) => {
         const p = positionById.get(id);
         return {
@@ -108,19 +116,22 @@ export default function Generate() {
           timeRestricted: p.time_restricted,
           windowStart: p.window_start,
           windowEnd: p.window_end,
-          peopleCount: p.people_count || 1,
-          eligibleGuards: (p.eligible_users || []).map((userId) => guardIdToName.get(userId)).filter(Boolean),
+          headcount: p.headcount,
+          guards: p.guards || [],
         };
       });
+      // A position's assigned guards must be schedulable even if unchecked in
+      // the general list, so the pool is the union of both (the scheduler
+      // rejects assigned guards that aren't in the pool).
+      const guardIds = [...new Set([...selectedGuards, ...positionDescriptors.flatMap((p) => p.guards)])];
 
       const existingShifts = await pb.collection('shifts').getFullList({
         filter: `end > "${new Date().toISOString()}"`,
-        expand: 'guard',
       });
       const existingForScheduler = existingShifts.map((s) => ({
         start: new Date(s.start).getTime(),
         end: new Date(s.end).getTime(),
-        guard: s.expand?.guard?.name,
+        guard: s.guard,
         position: s.position,
       }));
 
@@ -130,7 +141,7 @@ export default function Generate() {
         end: endMs,
         shiftMinutes: Number(shiftMinutes),
         positions: positionDescriptors,
-        guards: guardNames,
+        guards: guardIds,
         existingShifts: existingForScheduler,
         unavailablePeriods,
         restMinutes: Number(restMinutes),
@@ -159,7 +170,6 @@ export default function Generate() {
         created_by: pb.authStore.record.id,
       });
 
-      const nameToId = new Map(users.map((u) => [u.name, u.id]));
       const batch = pb.createBatch();
       for (const shift of preview.shifts) {
         batch.collection('shifts').create({
@@ -167,7 +177,7 @@ export default function Generate() {
           position: shift.position,
           start: new Date(shift.start).toISOString(),
           end: new Date(shift.end).toISOString(),
-          guard: nameToId.get(shift.guard),
+          guard: shift.guard, // already a stable user id from the scheduler
         });
       }
       await batch.send();
@@ -226,8 +236,12 @@ export default function Generate() {
         />
         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
           {[30, 60, 90, 120, 180].map((minutes) => (
-            <Button key={minutes} size="small" variant={Number(shiftMinutes) === minutes ? 'contained' : 'outlined'}
-              onClick={() => setShiftMinutes(minutes)}>
+            <Button
+              key={minutes}
+              size="small"
+              variant={Number(shiftMinutes) === minutes ? 'contained' : 'outlined'}
+              onClick={() => setShiftMinutes(minutes)}
+            >
               {minutes}m
             </Button>
           ))}
@@ -302,9 +316,9 @@ export default function Generate() {
           </List>
           <Divider sx={{ my: 1 }} />
           <Typography variant="subtitle2">{t('generate.hoursPerGuard')}</Typography>
-          {[...preview.stats.hoursPerGuard.entries()].map(([name, hours]) => (
-            <Typography key={name} variant="body2">
-              {name}: {hours.toFixed(1)}h
+          {[...preview.stats.hoursPerGuard.entries()].map(([id, hours]) => (
+            <Typography key={id} variant="body2">
+              {guardIdToName.get(id) || id}: {hours.toFixed(1)}h
             </Typography>
           ))}
           {preview.stats.variance !== null && (

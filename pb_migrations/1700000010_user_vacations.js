@@ -10,7 +10,7 @@ migrate(
 
     // Commanders manage the roster, including vacation periods. Guards may
     // still update their own profile as before.
-    users.updateRule = 'id = @request.auth.id || @request.auth.role = "commander"';
+    users.updateRule = "id = @request.auth.id || @request.auth.role = 'commander'";
     return app.save(users);
   },
   (app) => {

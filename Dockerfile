@@ -11,6 +11,14 @@ RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
+FROM node:22-alpine AS hooks
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY pb_hooks_src ./pb_hooks_src
+COPY scripts/build-hooks.mjs ./scripts/build-hooks.mjs
+RUN npm run build:hooks
+
 FROM alpine:3.20 AS pocketbase
 ARG PB_VERSION=0.30.2
 RUN apk add --no-cache curl unzip && \
@@ -28,6 +36,7 @@ WORKDIR /app
 COPY --from=pocketbase /out/pocketbase ./pocketbase
 COPY pb_migrations ./pb_migrations
 COPY pb_hooks ./pb_hooks
+COPY --from=hooks /app/pb_hooks/temp_login.pb.js ./pb_hooks/temp_login.pb.js
 COPY --from=frontend /app/pb_public ./pb_public
 COPY entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh

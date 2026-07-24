@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import List from '@mui/material/List';
@@ -13,16 +13,24 @@ import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import TextField from '@mui/material/TextField';
+import FormGroup from '@mui/material/FormGroup';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
-import FormGroup from '@mui/material/FormGroup';
 import Chip from '@mui/material/Chip';
 import Alert from '@mui/material/Alert';
 import { pb } from '../lib/pocketbase.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { useLocale } from '../lib/LocaleContext.jsx';
 
-const BLANK = { name: '', people_count: 1, eligible_users: [], time_restricted: false, window_start: '22:00', window_end: '06:00', active: true };
+const BLANK = {
+  name: '',
+  time_restricted: false,
+  window_start: '22:00',
+  window_end: '06:00',
+  active: true,
+  headcount: 1,
+  guards: [],
+};
 
 export default function Positions() {
   const { isCommander } = useAuth();
@@ -35,17 +43,14 @@ export default function Positions() {
   const [form, setForm] = useState(BLANK);
   const [error, setError] = useState(null);
 
-  const load = () => Promise.all([
-    pb.collection('positions').getFullList({ sort: 'name' }),
-    pb.collection('users').getFullList({ filter: 'active = true', sort: 'name' }),
-  ]).then(([positionRecords, userRecords]) => {
-    setPositions(positionRecords);
-    setUsers(userRecords);
-  });
+  const load = () => pb.collection('positions').getFullList({ sort: 'name' }).then(setPositions);
+
+  const userById = useMemo(() => new Map(users.map((u) => [u.id, u.name])), [users]);
 
   useEffect(() => {
     if (!isCommander) return;
     load();
+    pb.collection('users').getFullList({ filter: 'active = true', sort: 'name' }).then(setUsers);
   }, [isCommander]);
 
   if (!isCommander) {
@@ -67,36 +72,33 @@ export default function Positions() {
     setEditingId(position.id);
     setForm({
       name: position.name,
-      people_count: position.people_count || 1,
-      eligible_users: position.eligible_users || [],
       time_restricted: position.time_restricted,
       window_start: position.window_start || '22:00',
       window_end: position.window_end || '06:00',
       active: position.active,
+      headcount: position.headcount || 1,
+      guards: position.guards || [],
     });
     setError(null);
     setDialogOpen(true);
   };
 
+  const toggleGuard = (id) =>
+    setForm((f) => ({
+      ...f,
+      guards: f.guards.includes(id) ? f.guards.filter((g) => g !== id) : [...f.guards, id],
+    }));
+
   const save = async () => {
     try {
-      const peopleCount = Number(form.people_count);
-      if (!Number.isInteger(peopleCount) || peopleCount < 1 || peopleCount > users.length) {
-        setError(t('positions.peopleCountError', { count: users.length }));
-        return;
-      }
-      if (form.eligible_users.length > 0 && form.eligible_users.length < peopleCount) {
-        setError(t('positions.eligibleUsersCountError'));
-        return;
-      }
       const body = {
         name: form.name,
-        people_count: peopleCount,
-        eligible_users: form.eligible_users,
         time_restricted: form.time_restricted,
         window_start: form.time_restricted ? form.window_start : '',
         window_end: form.time_restricted ? form.window_end : '',
         active: form.active,
+        headcount: Math.max(1, Number(form.headcount) || 1),
+        guards: form.guards,
       };
       if (editingId) {
         await pb.collection('positions').update(editingId, body);
@@ -143,19 +145,26 @@ export default function Positions() {
           >
             <ListItemText
               primary={
-                <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
                   {position.name}
-                  <Chip size="small" label={t('positions.peopleCountValue', { count: position.people_count || 1 })} />
                   {position.time_restricted && (
                     <Chip size="small" label={`${position.window_start}-${position.window_end}`} />
                   )}
+                  {position.headcount > 1 && <Chip size="small" label={`×${position.headcount}`} />}
                   <Chip
                     size="small"
+                    variant="outlined"
                     color={position.active ? 'success' : 'default'}
-                    variant={position.active ? 'filled' : 'outlined'}
-                    label={position.active ? t('positions.statusActive') : t('positions.statusInactive')}
+                    label={position.active ? t('positions.active') : t('positions.inactive')}
                   />
                 </Box>
+              }
+              secondary={
+                position.guards?.length
+                  ? `${t('positions.assignedGuards')}: ${position.guards
+                      .map((id) => userById.get(id) || id)
+                      .join(', ')}`
+                  : undefined
               }
             />
           </ListItem>
@@ -174,32 +183,13 @@ export default function Positions() {
             fullWidth
           />
           <TextField
-            label={t('positions.peopleCount')}
+            label={t('positions.headcount')}
             type="number"
-            value={form.people_count}
-            onChange={(e) => setForm((f) => ({ ...f, people_count: e.target.value }))}
-            inputProps={{ min: 1, max: users.length }}
-            helperText={t('positions.peopleCountHelp', { count: users.length })}
+            value={form.headcount}
+            onChange={(e) => setForm((f) => ({ ...f, headcount: e.target.value }))}
+            InputProps={{ inputProps: { min: 1 } }}
             fullWidth
           />
-          <Box>
-            <Typography variant="subtitle2">{t('positions.eligibleUsers')}</Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-              {t('positions.eligibleUsersHelp')}
-            </Typography>
-            <FormGroup row>
-              {users.map((user) => (
-                <FormControlLabel
-                  key={user.id}
-                  control={<Checkbox checked={form.eligible_users.includes(user.id)} onChange={(e) => setForm((f) => ({
-                    ...f,
-                    eligible_users: e.target.checked ? [...f.eligible_users, user.id] : f.eligible_users.filter((id) => id !== user.id),
-                  }))} />}
-                  label={user.name}
-                />
-              ))}
-            </FormGroup>
-          </Box>
           <FormControlLabel
             control={
               <Checkbox
@@ -210,22 +200,41 @@ export default function Positions() {
             label={t('positions.timeRestricted')}
           />
           {form.time_restricted && (
-            <Box sx={{ display: 'flex', gap: 2 }}>
-              <TextField
-                label={t('positions.windowStart')}
-                type="time"
-                value={form.window_start}
-                onChange={(e) => setForm((f) => ({ ...f, window_start: e.target.value }))}
-                InputLabelProps={{ shrink: true }}
-              />
-              <TextField
-                label={t('positions.windowEnd')}
-                type="time"
-                value={form.window_end}
-                onChange={(e) => setForm((f) => ({ ...f, window_end: e.target.value }))}
-                InputLabelProps={{ shrink: true }}
-              />
-            </Box>
+            <>
+              <Box sx={{ display: 'flex', gap: 2 }}>
+                <TextField
+                  label={t('positions.windowStart')}
+                  type="time"
+                  value={form.window_start}
+                  onChange={(e) => setForm((f) => ({ ...f, window_start: e.target.value }))}
+                  InputLabelProps={{ shrink: true }}
+                />
+                <TextField
+                  label={t('positions.windowEnd')}
+                  type="time"
+                  value={form.window_end}
+                  onChange={(e) => setForm((f) => ({ ...f, window_end: e.target.value }))}
+                  InputLabelProps={{ shrink: true }}
+                />
+              </Box>
+              <Box>
+                <Typography variant="subtitle2">{t('positions.assignedGuards')}</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {t('positions.assignedGuardsHelp')}
+                </Typography>
+                <FormGroup>
+                  {users.map((u) => (
+                    <FormControlLabel
+                      key={u.id}
+                      control={
+                        <Checkbox checked={form.guards.includes(u.id)} onChange={() => toggleGuard(u.id)} />
+                      }
+                      label={u.name}
+                    />
+                  ))}
+                </FormGroup>
+              </Box>
+            </>
           )}
           <FormControlLabel
             control={

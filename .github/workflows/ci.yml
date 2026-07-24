@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref (e.g. a force-push to a PR branch).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Scheduler unit tests + the PocketBase integration suite. The integration
+  # tests skip themselves unless a ./pocketbase binary is present, so we
+  # download it here to exercise the real migrations, hooks, and auth rules
+  # instead of only the pure-JS scheduler.
+  tests:
+    runs-on: ubuntu-latest
+    env:
+      PB_VERSION: 0.30.2
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install test dependencies
+        run: npm ci
+
+      - name: Download PocketBase
+        run: |
+          set -euo pipefail
+          PB_ZIP="pocketbase_${PB_VERSION}_linux_amd64.zip"
+          curl -fLo "/tmp/${PB_ZIP}" \
+            "https://github.com/pocketbase/pocketbase/releases/download/v${PB_VERSION}/${PB_ZIP}"
+          curl -fLo /tmp/pb_checksums.txt \
+            "https://github.com/pocketbase/pocketbase/releases/download/v${PB_VERSION}/checksums.txt"
+          ( cd /tmp && grep "${PB_ZIP}\$" pb_checksums.txt | sha256sum -c - )
+          unzip -o "/tmp/${PB_ZIP}" pocketbase -d .
+          chmod +x ./pocketbase
+          ./pocketbase --version
+
+      - name: Run tests (scheduler + PocketBase integration)
+        run: node --test
+
+  # Frontend lint + production build (also the source of the shared scheduler
+  # re-export, so a green build confirms the app compiles against the changes).
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build

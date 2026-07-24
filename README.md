@@ -48,3 +48,27 @@ helm upgrade --install guard ./charts/guard --namespace guard
 
 The chart expects its `guard-superuser` and optional `ghcr-pull` Secrets to already exist. Override
 the image, hostname, storage, or disable the ingress in a values file as needed.
+
+### Temporary read-only roster link
+
+PocketBase creates a superuser-only `app_settings` record with a four-digit
+`temp_login_code`. Change that value in PocketBase Admin to rotate the
+unauthenticated read-only roster URL immediately. PocketBase also rotates it
+automatically every day at noon in the `Asia/Jerusalem` timezone.
+
+```text
+https://your-host/#/temp-login/1234
+```
+
+The page mirrors the guard roster (including past-shift and guard filters) but
+does not grant an authenticated session or access to any other collection API.
+Zod validates the PocketBase hook configuration while generating its
+closure-free JSVM file, and validates the endpoint payload again in the
+frontend before it is displayed.
+
+### Container image
+
+GitHub Actions builds the Dockerfile for `linux/amd64` and `linux/arm64`.
+Pull requests verify that the image builds; pushes to `main` publish `latest`
+and `sha-*` tags to `ghcr.io/barakplasma/guard`, while `v*` tags also publish
+matching semantic-version tags.
