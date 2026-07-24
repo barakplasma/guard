@@ -1,5 +1,5 @@
 routerAdd('GET', '/api/guard/temp-login-link', (e) => {
-  if (!e.auth || e.auth.getString('role') !== 'commander') {
+  if (!e.hasSuperuserAuth() && (!e.auth || e.auth.getString('role') !== 'commander')) {
     return e.json(403, { message: 'Commander access required.' });
   }
   const settings = e.app.findFirstRecordByData('app_settings', 'key', 'main');
