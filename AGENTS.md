@@ -44,4 +44,6 @@
 - Run `npm --prefix frontend run build`.
 - Build the Docker image before publishing changes that affect deployment.
 - `.github/workflows/image.yml` builds PR images and publishes multi-architecture GHCR images from `main` and version tags.
+- Deployment controllers and application images must support `linux/arm64` natively; do not rely on emulation on the VPS.
+- Do not use or suggest Keel for automatic deployments.
 - Never commit any `node_modules` directory.
