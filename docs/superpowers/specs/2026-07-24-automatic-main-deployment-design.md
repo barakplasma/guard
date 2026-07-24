@@ -11,7 +11,7 @@ Keep the deployment headless and avoid automated commits to the repository.
 - No Argo CD web UI, public ingress, Dex, or external Argo API.
 - No Keel.
 - No Git write-back for image updates.
-- No emulation on the VPS.
+- No emulation on the VPS. QEMU is allowed on GitHub Actions build runners.
 - No change to Guard application behavior or PocketBase data.
 
 ## Architecture
@@ -126,4 +126,3 @@ into small tasks:
   complete automatic rollout.
 - Confirm `guard.526462738.xyz` remains reachable through Cloudflare Access.
 - Run repository validation required by `AGENTS.md`.
-

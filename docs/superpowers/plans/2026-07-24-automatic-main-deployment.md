@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - All application and controller images must support `linux/arm64` natively.
-- Do not use emulation.
+- Do not use emulation on the VPS; QEMU is allowed on GitHub Actions build runners.
 - Do not use Keel.
 - Do not expose Argo CD or Image Updater through an Ingress.
 - Do not commit credentials.
