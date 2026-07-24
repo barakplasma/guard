@@ -8,11 +8,12 @@
 // Setting another person's minimum is a commander task, but the original users
 // updateRule was self-only (`id = @request.auth.id`), so this also widens it to
 // let commanders edit user records. The widening is locked down in
-// pb_hooks/users.pb.js: `role`/`active` are superuser-only, and when a commander
-// edits SOMEONE ELSE's record the only field allowed to change is
-// `min_sleep_hours` (so the rule can't be used to self-promote or to reset
-// another user's password/email). New migration (not an edit of
-// 1700000000_users.js) so `migrate up` applies it on a provisioned instance.
+// pb_hooks/users.pb.js: when a commander edits SOMEONE ELSE's record the only
+// fields allowed to change are `min_sleep_hours` and `active` (marking a person
+// on vacation) - not `role` (superuser-only), `password`, or `email` - so the
+// rule can't be used to self-promote or take over an account. New migration (not
+// an edit of 1700000000_users.js) so `migrate up` applies it on a provisioned
+// instance.
 migrate(
   (app) => {
     const collection = app.findCollectionByNameOrId('users');

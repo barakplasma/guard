@@ -163,6 +163,16 @@ test('a commander can set another user\'s min_sleep_hours, a guard cannot edit o
   assert.equal(setStatus, 200, JSON.stringify(updated));
   assert.equal(updated.min_sleep_hours, 6);
 
+  // A commander may also toggle another user's `active` flag (marking them on
+  // vacation) - it's on the allowlist alongside min_sleep_hours.
+  const { status: vacationStatus, json: onVacation } = await api(`/api/collections/users/records/${driver.id}`, {
+    method: 'PATCH',
+    token: commanderToken,
+    body: { active: false },
+  });
+  assert.equal(vacationStatus, 200, JSON.stringify(onVacation));
+  assert.equal(onVacation.active, false);
+
   // A plain guard must not be able to edit another user's record (the rule folds
   // into the lookup, so a mismatch reads as 404 - see the swap test).
   const nosyToken = await login('sleep.nosy@example.com', 'testpass123');
@@ -173,9 +183,9 @@ test('a commander can set another user\'s min_sleep_hours, a guard cannot edit o
   });
   assert.equal(forbidden, 404);
 
-  // The widened rule must NOT let a commander escalate privileges: changing
-  // another user's role (or active) is superuser-only, enforced by the update
-  // hook (400, not 200).
+  // The widened rule must NOT let a commander escalate privileges: `role` is
+  // superuser-only (not on the commander allowlist), enforced by the update
+  // hook (403, not 200).
   const { status: roleEscalation } = await api(`/api/collections/users/records/${driver.id}`, {
     method: 'PATCH',
     token: commanderToken,

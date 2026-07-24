@@ -5,6 +5,8 @@ import LinearProgress from '@mui/material/LinearProgress';
 import TextField from '@mui/material/TextField';
 import Chip from '@mui/material/Chip';
 import Divider from '@mui/material/Divider';
+import Switch from '@mui/material/Switch';
+import FormControlLabel from '@mui/material/FormControlLabel';
 import { pb } from '../lib/pocketbase.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { useLocale } from '../lib/LocaleContext.jsx';
@@ -48,7 +50,9 @@ export default function Stats() {
   useEffect(() => {
     Promise.all([
       pb.collection('shifts').getFullList({ expand: 'guard' }),
-      pb.collection('users').getFullList({ filter: 'active = true', sort: 'name' }),
+      // All users, incl. inactive - a commander manages vacation here, so the
+      // people on vacation must be visible to bring them back.
+      pb.collection('users').getFullList({ sort: 'name' }),
     ]).then(([shiftRecords, userRecords]) => {
       setShifts(
         shiftRecords.map((s) => ({
@@ -65,20 +69,22 @@ export default function Stats() {
 
   const stats = useMemo(() => computeStats(shifts), [shifts]);
 
-  const idToName = useMemo(() => new Map(users.map((u) => [u.id, u.name])), [users]);
+  const activeUsers = useMemo(() => users.filter((u) => u.active), [users]);
 
   // Keyed by user id, not display name: names aren't unique, so a name-keyed
   // report would merge namesakes and (worse) persist an edit to the wrong user.
+  // Only active people are on the roster, so only they get a sleep row.
   const sleep = useMemo(() => {
-    if (!users.length) return [];
+    if (!activeUsers.length) return [];
     const { start, end } = nightBounds(night, nightStartTime, nightEndTime);
     return sleepReport({
       nightStart: start,
       nightEnd: end,
       shifts: shifts.map((s) => ({ start: s.start, end: s.end, guard: s.guardId })),
-      people: users.map((u) => ({ id: u.id, minSleepHours: u.min_sleep_hours })),
+      people: activeUsers.map((u) => ({ id: u.id, minSleepHours: u.min_sleep_hours })),
     });
-  }, [users, shifts, night, nightStartTime, nightEndTime]);
+  }, [activeUsers, shifts, night, nightStartTime, nightEndTime]);
+  const sleepById = useMemo(() => new Map(sleep.map((r) => [r.id, r])), [sleep]);
 
   const updateMinSleep = (id, value) => {
     const hours = Math.max(0, Number(value) || 0);
@@ -88,6 +94,12 @@ export default function Stats() {
   const persistMinSleep = (id, value) => {
     const hours = Math.max(0, Number(value) || 0);
     pb.collection('users').update(id, { min_sleep_hours: hours }).catch(() => {});
+  };
+
+  // Mark a person active/on-vacation (commander only). Optimistic + persisted.
+  const toggleActive = (id, active) => {
+    setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, active } : u)));
+    pb.collection('users').update(id, { active }).catch(() => {});
   };
 
   if (!loaded) return null;
@@ -153,53 +165,74 @@ export default function Stats() {
         />
       </Box>
 
-      {sleep.map((row) => (
-        <Box
-          key={row.id}
-          sx={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 1,
-            flexWrap: 'wrap',
-            py: 1,
-            borderBottom: 1,
-            borderColor: 'divider',
-          }}
-        >
-          <Typography variant="body2" sx={{ flexGrow: 1, minWidth: 100 }}>
-            {idToName.get(row.id) || row.id}
-          </Typography>
-          <Chip
-            size="small"
-            color={row.meetsMinimum ? 'success' : 'error'}
-            label={t('stats.longestSleep', { hours: row.longestSleepHours.toFixed(1) })}
-          />
-          <Typography variant="caption" color="text.secondary">
-            {t('stats.totalFree', { hours: row.totalFreeHours.toFixed(1) })}
-          </Typography>
-          {!row.meetsMinimum && row.minSleepHours > 0 && (
-            <Chip size="small" variant="outlined" color="error" label={t('stats.underMinimum')} />
-          )}
-          {isCommander ? (
-            <TextField
-              label={t('stats.minSleep')}
-              type="number"
-              size="small"
-              value={row.minSleepHours}
-              onChange={(e) => updateMinSleep(row.id, e.target.value)}
-              onBlur={(e) => persistMinSleep(row.id, e.target.value)}
-              InputProps={{ inputProps: { min: 0, step: 0.5 } }}
-              sx={{ width: 110 }}
-            />
-          ) : (
-            row.minSleepHours > 0 && (
-              <Typography variant="caption" color="text.secondary">
-                {t('stats.minSleep')}: {row.minSleepHours}h
-              </Typography>
-            )
-          )}
-        </Box>
-      ))}
+      {users.map((u) => {
+        const row = u.active ? sleepById.get(u.id) : null;
+        return (
+          <Box
+            key={u.id}
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1,
+              flexWrap: 'wrap',
+              py: 1,
+              borderBottom: 1,
+              borderColor: 'divider',
+            }}
+          >
+            <Typography
+              variant="body2"
+              sx={{ flexGrow: 1, minWidth: 100 }}
+              color={u.active ? undefined : 'text.disabled'}
+            >
+              {u.name}
+            </Typography>
+
+            {row ? (
+              <>
+                <Chip
+                  size="small"
+                  color={row.meetsMinimum ? 'success' : 'error'}
+                  label={t('stats.longestSleep', { hours: row.longestSleepHours.toFixed(1) })}
+                />
+                <Typography variant="caption" color="text.secondary">
+                  {t('stats.totalFree', { hours: row.totalFreeHours.toFixed(1) })}
+                </Typography>
+                {!row.meetsMinimum && row.minSleepHours > 0 && (
+                  <Chip size="small" variant="outlined" color="error" label={t('stats.underMinimum')} />
+                )}
+                {isCommander ? (
+                  <TextField
+                    label={t('stats.minSleep')}
+                    type="number"
+                    size="small"
+                    value={row.minSleepHours}
+                    onChange={(e) => updateMinSleep(u.id, e.target.value)}
+                    onBlur={(e) => persistMinSleep(u.id, e.target.value)}
+                    InputProps={{ inputProps: { min: 0, step: 0.5 } }}
+                    sx={{ width: 110 }}
+                  />
+                ) : (
+                  row.minSleepHours > 0 && (
+                    <Typography variant="caption" color="text.secondary">
+                      {t('stats.minSleep')}: {row.minSleepHours}h
+                    </Typography>
+                  )
+                )}
+              </>
+            ) : (
+              <Chip size="small" variant="outlined" label={t('stats.onVacation')} />
+            )}
+
+            {isCommander && (
+              <FormControlLabel
+                control={<Switch size="small" checked={u.active} onChange={(e) => toggleActive(u.id, e.target.checked)} />}
+                label={t('stats.active')}
+              />
+            )}
+          </Box>
+        );
+      })}
     </Box>
   );
 }
