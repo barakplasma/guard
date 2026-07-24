@@ -45,7 +45,7 @@ jobs:
           ./pocketbase --version
 
       - name: Run tests (scheduler + PocketBase integration)
-        run: node --test
+        run: npm test
 
   # Frontend lint + production build (also the source of the shared scheduler
   # re-export, so a green build confirms the app compiles against the changes).

@@ -13,6 +13,8 @@
 - `approved = true` and `active = true` means Active.
 - `approved = true` and `active = false` means Disabled.
 - Vacation is independent of account access and uses `vacation_start`/`vacation_end`.
+- `/availability` shows approved active guards grouped as available now, on
+  duty now, or currently on vacation.
 - Commanders may manage approval, active state, vacation dates, and minimum sleep.
 - Only PocketBase superusers may change roles.
 

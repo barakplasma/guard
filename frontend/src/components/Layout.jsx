@@ -11,13 +11,14 @@ import ListAltIcon from '@mui/icons-material/ListAlt';
 import AddCircleIcon from '@mui/icons-material/AddCircle';
 import BadgeIcon from '@mui/icons-material/Badge';
 import GroupsIcon from '@mui/icons-material/Groups';
+import EventAvailableIcon from '@mui/icons-material/EventAvailable';
 import PersonIcon from '@mui/icons-material/Person';
 import BarChartIcon from '@mui/icons-material/BarChart';
 import Box from '@mui/material/Box';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { useLocale } from '../lib/LocaleContext.jsx';
 
-const ROUTES = ['/roster', '/generate', '/positions', '/guards', '/me', '/stats'];
+const ROUTES = ['/roster', '/generate', '/positions', '/guards', '/availability', '/me', '/stats'];
 
 export default function Layout() {
   const { user, isCommander, logout } = useAuth();
@@ -64,6 +65,9 @@ export default function Layout() {
         )}
         {isCommander && (
           <BottomNavigationAction label={t('nav.guards')} value="/guards" icon={<GroupsIcon />} />
+        )}
+        {isCommander && (
+          <BottomNavigationAction label={t('nav.availability')} value="/availability" icon={<EventAvailableIcon />} />
         )}
         <BottomNavigationAction label={t('nav.me')} value="/me" icon={<PersonIcon />} />
         <BottomNavigationAction label={t('nav.stats')} value="/stats" icon={<BarChartIcon />} />
