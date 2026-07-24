@@ -7,8 +7,11 @@
 //
 // Setting another person's minimum is a commander task, but the original users
 // updateRule was self-only (`id = @request.auth.id`), so this also widens it to
-// let commanders edit user records. New migration (not an edit of
-// 1700000000_users.js) so `migrate up` applies it on a provisioned instance.
+// let commanders edit user records. Privilege fields stay protected: pb_hooks/
+// users.pb.js forbids anyone but the superuser from changing `role`/`active` on
+// update, so widening the rule can't be used to self-promote. New migration
+// (not an edit of 1700000000_users.js) so `migrate up` applies it on a
+// provisioned instance.
 migrate(
   (app) => {
     const collection = app.findCollectionByNameOrId('users');

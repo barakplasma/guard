@@ -17,16 +17,20 @@ function todayStr() {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
 
-// Build the [start, end) night window from a local date + "HH:MM" bounds,
-// wrapping past midnight when the end is at/before the start (e.g. 22:00-06:00).
+// Build the [start, end) night window from a local date + "HH:MM" bounds.
+// An overnight window (end at/before start, e.g. 22:00-06:00) ends on the
+// following local calendar day. We advance the day field and let the Date
+// constructor resolve the wall-clock time, so the window is the intended
+// local hours even across a daylight-saving transition (adding a fixed 24h
+// would land an hour early/late on spring-forward/fall-back nights).
 function nightBounds(dateStr, startHHMM, endHHMM) {
   const [y, m, d] = dateStr.split('-').map(Number);
   const [sh, sm] = startHHMM.split(':').map(Number);
   const [eh, em] = endHHMM.split(':').map(Number);
-  const start = new Date(y, m - 1, d, sh, sm, 0, 0).getTime();
-  let end = new Date(y, m - 1, d, eh, em, 0, 0).getTime();
-  if (end <= start) end += 24 * 3600 * 1000;
-  return { start, end };
+  const endsNextDay = eh * 60 + em <= sh * 60 + sm;
+  const start = new Date(y, m - 1, d, sh, sm, 0, 0);
+  const end = new Date(y, m - 1, d + (endsNextDay ? 1 : 0), eh, em, 0, 0);
+  return { start: start.getTime(), end: end.getTime() };
 }
 
 export default function Stats() {

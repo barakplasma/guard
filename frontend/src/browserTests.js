@@ -128,6 +128,25 @@ check('time-restricted position (patrol, 22:00-06:00) is one continuous shift, s
   assertEqual((patrolSlots[0].end - patrolSlots[0].start) / HOUR, 8);
 });
 
+check('time-restricted: an existing partial-window shift only suppresses the slots it covers', () => {
+  const patrol = { name: 'Patrol', timeRestricted: true, windowStart: '22:00', windowEnd: '06:00' };
+  const start = localTime(2024, 0, 1, 22, 0);
+  const end = localTime(2024, 0, 2, 6, 0);
+  const existingShifts = [
+    { start: localTime(2024, 0, 1, 22, 0), end: localTime(2024, 0, 1, 23, 0), guard: 'Alice', position: 'Patrol' },
+  ];
+  const shifts = generateShifts({
+    start,
+    end,
+    shiftMinutes: 60,
+    positions: [patrol],
+    guards: ['Alice', 'Bob', 'Carol'],
+    existingShifts,
+  });
+  assertEqual(shifts.length, 1);
+  assertEqual((shifts[0].end - shifts[0].start) / HOUR, 7);
+});
+
 check('a position with headcount 2 staffs two distinct guards per slot', () => {
   const start = localTime(2024, 0, 1, 0, 0);
   const shifts = generateShifts({

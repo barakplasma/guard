@@ -172,6 +172,26 @@ test('a commander can set another user\'s min_sleep_hours, a guard cannot edit o
     body: { min_sleep_hours: 0 },
   });
   assert.equal(forbidden, 404);
+
+  // The widened rule must NOT let a commander escalate privileges: changing
+  // another user's role (or active) is superuser-only, enforced by the update
+  // hook (400, not 200).
+  const { status: roleEscalation } = await api(`/api/collections/users/records/${driver.id}`, {
+    method: 'PATCH',
+    token: commanderToken,
+    body: { role: 'commander' },
+  });
+  assert.equal(roleEscalation, 403); // ForbiddenError from the update hook
+  const { json: stillGuard } = await api(`/api/collections/users/records/${driver.id}`, { token: commanderToken });
+  assert.equal(stillGuard.role, 'guard');
+
+  // Nor may a guard self-promote by editing their own record.
+  const { status: selfPromote } = await api(`/api/collections/users/records/${nosy.id}`, {
+    method: 'PATCH',
+    token: nosyToken,
+    body: { role: 'commander' },
+  });
+  assert.equal(selfPromote, 403);
 });
 
 test('a guard cannot create a schedule (commander-only createRule)', { skip: !HAS_PB }, async () => {
