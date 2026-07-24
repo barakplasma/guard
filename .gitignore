@@ -169,6 +169,7 @@ pb_public/
 /pb_hooks/temp_login.pb.js
 frontend/node_modules/
 frontend/.env.local
+.worktrees/
 
 # The blanket `lib/` rule above (Python packaging section) matches at any
 # depth and would otherwise swallow frontend/src/lib/ (our React context/i18n
