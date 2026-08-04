@@ -1,0 +1,27 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["react", "unicorn"],
+  "env": {
+    "browser": true,
+    "es2024": true
+  },
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn"
+  },
+  "rules": {
+    "no-unused-vars": "error",
+    // Vite uses the automatic JSX runtime, so React needs no import.
+    "react/react-in-jsx-scope": "off",
+    // Sorting a freshly built local array in place is intentional here; the
+    // engine's determinism relies on those explicit comparators, not on
+    // avoiding mutation.
+    "unicorn/no-array-sort": "off"
+  },
+  "overrides": [
+    {
+      "files": ["tests/**", "*.config.js"],
+      "env": { "node": true }
+    }
+  ]
+}

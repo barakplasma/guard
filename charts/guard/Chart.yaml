@@ -1,6 +1,0 @@
-apiVersion: v2
-name: guard
-description: Guard roster web app (PocketBase and React frontend)
-type: application
-version: 0.1.0
-appVersion: "0.30.2"
