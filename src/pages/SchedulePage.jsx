@@ -9,7 +9,7 @@ import ConfirmDialog from '../components/ConfirmDialog.jsx';
 import { usePlan } from '../state/PlanContext.jsx';
 import { plan as runPlanner, WARN } from '../lib/planner.js';
 import { toPlannerInput } from '../lib/planSchema.js';
-import { groupAgenda, slotContainsInstant } from '../lib/agenda.js';
+import { findNowSlot, groupAgenda } from '../lib/agenda.js';
 import { formatDuration } from '../lib/format.js';
 import { sortByHebrewName } from '../lib/sort.js';
 import useNow from '../hooks/useNow.js';
@@ -89,10 +89,8 @@ export default function SchedulePage() {
   const days = useMemo(() => (result ? groupAgenda(result) : []), [result]);
   const sortedEmployees = useMemo(() => sortByHebrewName(doc.employees), [doc.employees]);
   const now = useNow();
-  const hasNowSlot = useMemo(
-    () => days.some((day) => day.slots.some((slot) => slotContainsInstant(slot, now))),
-    [days, now],
-  );
+  const nowSlot = useMemo(() => findNowSlot(days, now), [days, now]);
+  const nowSlotKey = nowSlot ? `${nowSlot.start}|${nowSlot.end}` : null;
   const [confirmClearPins, setConfirmClearPins] = useState(false);
 
   return (
@@ -101,7 +99,7 @@ export default function SchedulePage() {
 
       <Stack direction="row" spacing={1} useFlexGap sx={{ mb: 2, alignItems: 'center', flexWrap: 'wrap' }}>
         <Typography variant="h6" sx={{ flex: 1 }}>{t.schedule}</Typography>
-        {hasNowSlot && (
+        {nowSlotKey != null && (
           <Button size="small" onClick={jumpToNow} data-testid="jump-to-now">
             {t.jumpToNow}
           </Button>
@@ -154,6 +152,7 @@ export default function SchedulePage() {
               result={result}
               employees={sortedEmployees}
               now={now}
+              nowSlotKey={nowSlotKey}
               onSwap={(shift, employeeId) => pinShift(
                 shift.missionId, employeeId, shift.start, shift.end, shift.employeeId,
               )}

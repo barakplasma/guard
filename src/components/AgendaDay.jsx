@@ -8,7 +8,7 @@ import { t } from '../strings.js';
 
 /** One calendar day of the agenda: its time slots, and who is on/off duty in each. */
 export default function AgendaDay({
-  day, result, employees, now, onSwap, onClearPin,
+  day, result, employees, now, nowSlotKey, onSwap, onClearPin,
 }) {
   const nameOf = (id) => employees.find((e) => e.id === id)?.name ?? id;
   const isToday = now != null && dayKey(now) === day.day;
@@ -33,11 +33,17 @@ export default function AgendaDay({
           );
           const free = offDutyDuring(result, slot.start, slot.end).map(nameOf);
           const isNow = slotContainsInstant(slot, now);
+          // Only the single canonical "now" slot (picked in SchedulePage via
+          // findNowSlot) gets this id - a long-running mission and the current
+          // hour of a rotating one can both be "now" at once, and duplicate
+          // ids would make the jump-to-now button's getElementById() pick
+          // whichever happens to come first in the DOM, not the current shift.
+          const isNowAnchor = nowSlotKey != null && `${slot.start}|${slot.end}` === nowSlotKey;
 
           return (
             <Box
               key={`${slot.start}-${slot.end}`}
-              id={isNow ? 'now-slot' : undefined}
+              id={isNowAnchor ? 'now-slot' : undefined}
               data-testid={`slot-${slot.start}`}
               sx={isNow ? {
                 borderInlineStart: '4px solid',
