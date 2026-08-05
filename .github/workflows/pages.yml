@@ -5,8 +5,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Pages must serve from GitHub Actions; this is also enforced by the
-# configure-pages step below (enablement: true), so no manual Settings setup.
+# GitHub Pages requires a public repo on a free plan. This workflow will fail
+# with "Your current plan does not support GitHub Pages" until the repo is made
+# public (Settings -> General -> Danger Zone) or the plan supports private Pages.
 permissions:
   contents: read
   pages: write
@@ -38,8 +39,6 @@ jobs:
           BASE_PATH: /${{ github.event.repository.name }}/
 
       - uses: actions/configure-pages@v5
-        with:
-          enablement: true
 
       - uses: actions/upload-pages-artifact@v3
         with:
