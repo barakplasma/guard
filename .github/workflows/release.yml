@@ -136,15 +136,12 @@ jobs:
         run: |
           SHA_SHORT=$(echo "$SHA" | cut -c1-7)
           NOTES="Auto-built from main ($SHA_SHORT). Download the zip, unzip, serve with any static file server."
-          if ! gh release view latest 2>/dev/null; then
-            gh release create latest guard-static.zip \
-              --title "Latest" \
-              --notes "$NOTES" \
-              --target main
-          else
-            gh release upload latest guard-static.zip --clobber
-            gh release edit latest --notes "$NOTES" --target main
-          fi
+          # Delete and recreate so the tag actually moves to the current SHA.
+          gh release delete latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create latest guard-static.zip \
+            --title "Latest" \
+            --notes "$NOTES" \
+            --target "$SHA"
 
   oci:
     needs: e2e-browser
@@ -203,10 +200,10 @@ jobs:
           [ "$FALLBACK" = "200" ] || { echo "FAIL: SPA fallback returned $FALLBACK"; exit 1; }
           echo "PASS: SPA fallback works"
 
-          # 4. Static assets exist
-          ASSET=$(curl -fs http://localhost:8080 | grep -o '/assets/[^"]*\.js' | head -1)
+          # 4. Static assets exist (Vite emits relative ./assets/ URLs)
+          ASSET=$(curl -fs http://localhost:8080 | grep -oE '(\.?/)?assets/[^"]*\.js' | head -1 | sed 's/^\.\///')
           if [ -n "$ASSET" ]; then
-            ACODE=$(curl -fs -o /dev/null -w '%{http_code}' "http://localhost:8080${ASSET}")
+            ACODE=$(curl -fs -o /dev/null -w '%{http_code}' "http://localhost:8080/${ASSET}")
             [ "$ACODE" = "200" ] || { echo "FAIL: asset $ASSET returned $ACODE"; exit 1; }
             echo "PASS: assets served"
           else
