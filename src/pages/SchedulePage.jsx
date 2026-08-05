@@ -123,7 +123,7 @@ export default function SchedulePage() {
               result={result}
               employees={doc.employees}
               onSwap={(shift, employeeId) => pinShift(
-                shift.missionId, employeeId, shift.start, shift.end,
+                shift.missionId, employeeId, shift.start, shift.end, shift.employeeId,
               )}
               onClearPin={(shift) => clearPin(
                 shift.missionId, shift.employeeId, shift.start, shift.end,

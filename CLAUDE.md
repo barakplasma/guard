@@ -22,6 +22,13 @@ rescheduled fairly.
 Infeasible input (not enough people) returns `warnings` plus a partial plan. Only structurally
 invalid input throws — someone mid-edit needs to see what is short, not a stack trace.
 
+A pin with a null `start`/`end` inherits the mission's window, which inherits the plan's. So a
+whole-mission assignment and a per-shift one can describe the same time while looking nothing
+alike: **match pins by coverage, never by literal range**. Both bugs found in review came from
+that. Pin edits live in `src/lib/pins.js`, deliberately pure and outside the React context so the
+rule stays testable. On a remote mission a pin always means the whole mission — a partial range can
+survive a local→remote toggle, and honouring it literally leaves the rest of the window short.
+
 `tests/planner.invariants.test.js` is the real safety net: it asserts across ~1600 generated plans
 that nobody is ever double-booked, no mission is overstaffed, availability is respected, and the
 same input always gives the same output. Do not weaken it to make a change pass.

@@ -107,8 +107,17 @@ function normalizePins(pins, employeeById, missionById, warnings) {
     const employee = employeeById.get(p.employeeId);
     if (!mission || !employee) continue; // stale reference
 
-    const start = Math.max(p.start == null ? mission.start : p.start, mission.start);
-    const end = Math.min(p.end == null ? mission.end : p.end, mission.end);
+    // On a remote mission a pin always means the whole mission - that is what
+    // "remote" means. A partial range can survive a mission being switched from
+    // local to remote; honouring it literally would fill a seat for only part of
+    // the window and silently leave the rest short.
+    const remote = mission.type === 'remote';
+    const start = remote
+      ? mission.start
+      : Math.max(p.start == null ? mission.start : p.start, mission.start);
+    const end = remote
+      ? mission.end
+      : Math.min(p.end == null ? mission.end : p.end, mission.end);
     if (!(end > start)) {
       warnings.push({ code: WARN.PIN_UNAVAILABLE, missionId: mission.id, employeeId: employee.id });
       continue;

@@ -66,6 +66,7 @@ node tests/e2e.mjs
 | `src/lib/planner.js` | The scheduling engine. Pure, dependency-free, deterministic. |
 | `src/lib/planSchema.js` | The plan document: zod schema, defaults, normalization. |
 | `src/lib/urlState.js` | Compresses the document into the URL hash and back. |
+| `src/lib/pins.js` | Manual-assignment edits: swapping, clearing, mission rosters. |
 | `src/lib/agenda.js` | Groups shifts into the day → slot → mission tree the UI and exports share. |
 | `src/lib/exportCsv.js`, `exportText.js` | CSV and WhatsApp output. |
 | `src/pages/`, `src/components/` | The Hebrew RTL interface. |
@@ -85,6 +86,11 @@ A hand-made assignment ("pin") is stored in the plan document and fed back into 
 than patching the generated output. That is what makes the schedule a pure function of the
 document: re-planning, reloading, and sharing all reproduce exactly the same result, and swapping
 one person automatically frees the other to be rescheduled fairly elsewhere.
+
+A pin's `start`/`end` may be null, meaning "inherit the mission's window" — so the same stretch of
+time can be described two ways, and any edit keyed on the literal range will miss one of them. That
+is why `src/lib/pins.js` matches by *coverage*, and it is kept pure so the rule is directly
+testable.
 
 ### Scheduling order
 

@@ -4,10 +4,12 @@ import {
 import { useLocation, useNavigate } from 'react-router-dom';
 import { decodePlan, encodePlan, PARAM } from '../lib/urlState.js';
 import { emptyPlan, makeId, planSchema, prunePins } from '../lib/planSchema.js';
+import { applyClearPin, applyMissionAssignees, applySwap } from '../lib/pins.js';
 
 const PlanContext = createContext(null);
 
 export const usePlan = () => useContext(PlanContext);
+
 
 /**
  * The plan document lives in the URL and nowhere else - no localStorage, no
@@ -122,48 +124,22 @@ export function PlanProvider({ children }) {
     })),
 
     /** Whole-mission assignment: the Missions page person-picker. */
-    setMissionAssignees: (missionId, employeeIds) => update((d) => ({
-      ...d,
-      pins: [
-        // Drop this mission's whole-window pins, keep its per-shift ones.
-        ...d.pins.filter((p) => !(p.missionId === missionId && p.start == null && p.end == null)),
-        ...employeeIds.map((employeeId) => ({ missionId, employeeId, start: null, end: null })),
-      ],
-    })),
+    setMissionAssignees: (missionId, employeeIds) => update(
+      (d) => applyMissionAssignees(d, missionId, employeeIds),
+    ),
 
     /**
-     * Swap who covers one specific shift. Recorded as a pin over that exact
-     * range, replacing any pin already covering it for the same mission, so
-     * repeated swaps on one row don't pile up.
+     * Swap who covers one specific shift, and clear the pin behind a shift.
+     * Both live in `lib/pins.js` - see there for why coverage, not an exact
+     * range match, is what these have to key on.
      */
-    pinShift: (missionId, employeeId, start, end) => update((d) => ({
-      ...d,
-      pins: [
-        ...d.pins.filter((p) => !(p.missionId === missionId && p.start === start && p.end === end)),
-        { missionId, employeeId, start, end },
-      ],
-    })),
+    pinShift: (missionId, employeeId, start, end, replacingEmployeeId) => update(
+      (d) => applySwap(d, { missionId, employeeId, start, end, replacingEmployeeId }),
+    ),
 
-    /**
-     * Clear the pin behind a displayed shift. The row only knows its concrete
-     * range, but the pin may be a whole-mission one (null range) - so match any
-     * pin for this person+mission that covers the row, not just an exact range
-     * match, or the clear button silently does nothing on remote missions.
-     */
-    clearPin: (missionId, employeeId, start, end) => update((d) => {
-      const mission = d.missions.find((m) => m.id === missionId);
-      const covers = (p) => {
-        const ps = p.start ?? mission?.start ?? d.start;
-        const pe = p.end ?? mission?.end ?? d.end;
-        return ps <= start && pe >= end;
-      };
-      return {
-        ...d,
-        pins: d.pins.filter(
-          (p) => !(p.missionId === missionId && p.employeeId === employeeId && covers(p)),
-        ),
-      };
-    }),
+    clearPin: (missionId, employeeId, start, end) => update(
+      (d) => applyClearPin(d, { missionId, employeeId, start, end }),
+    ),
 
     clearAllPins: () => update((d) => ({ ...d, pins: [] })),
   }), [update]);

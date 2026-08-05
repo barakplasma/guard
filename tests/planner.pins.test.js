@@ -237,3 +237,67 @@ test('re-pinning the person the planner already chose changes nothing but the fl
   assert.equal(pinnedFirst.pinned, true);
   assert.equal(after.shifts.length, before.shifts.length);
 });
+
+/* --- regressions ----------------------------------------------------- */
+
+test('a partial pin on a remote mission covers the whole mission, not part of it', () => {
+  const start = START;
+  const end = start + 2 * HOUR;
+  // A per-shift pin made while the mission was local, then switched to remote.
+  const result = plan({
+    start,
+    end,
+    shiftMinutes: 60,
+    employees: people(3),
+    missions: [{ id: 'm', name: 'M', type: 'remote', start, end, count: 1 }],
+    pins: [{ missionId: 'm', employeeId: 'e1', start, end: start + HOUR }],
+  });
+
+  const own = result.shifts.filter((s) => s.missionId === 'm');
+  assert.equal(own.length, 1);
+  assert.equal(own[0].start, start, 'the pin is widened to the whole remote mission');
+  assert.equal(own[0].end, end);
+  // The seat is genuinely filled end to end, so nothing is silently short.
+  assert.ok(!result.warnings.some((w) => w.code === WARN.UNDERSTAFFED));
+});
+
+test('a partial remote pin that outruns availability is dropped, not half-honoured', () => {
+  const start = START;
+  const end = start + 2 * HOUR;
+  const result = plan({
+    start,
+    end,
+    shiftMinutes: 60,
+    employees: [
+      { id: 'e1', name: 'Early', end: start + HOUR },
+      { id: 'e2', name: 'Full' },
+    ],
+    missions: [{ id: 'm', name: 'M', type: 'remote', start, end, count: 1 }],
+    pins: [{ missionId: 'm', employeeId: 'e1', start, end: start + HOUR }],
+  });
+
+  assert.ok(result.warnings.some((w) => w.code === WARN.PIN_UNAVAILABLE && w.employeeId === 'e1'));
+  const own = result.shifts.filter((s) => s.missionId === 'm');
+  assert.equal(own.length, 1);
+  assert.equal(own[0].employeeId, 'e2', 'the mission is staffed by someone who can cover it all');
+});
+
+test('a swap over a whole-mission pin replaces the assignee rather than competing', () => {
+  const start = START;
+  const end = start + 2 * HOUR;
+  // What PlanContext.pinShift must produce: the displaced person's covering pin
+  // removed, the replacement written for the row's range.
+  const result = plan({
+    start,
+    end,
+    shiftMinutes: 60,
+    employees: people(3),
+    missions: [{ id: 'm', name: 'M', type: 'remote', start, end, count: 1 }],
+    pins: [{ missionId: 'm', employeeId: 'e2', start, end }],
+  });
+
+  const own = result.shifts.filter((s) => s.missionId === 'm');
+  assert.equal(own.length, 1);
+  assert.equal(own[0].employeeId, 'e2');
+  assert.ok(!result.warnings.some((w) => w.code === WARN.PIN_OVERFLOW));
+});
