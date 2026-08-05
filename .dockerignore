@@ -1,0 +1,14 @@
+node_modules
+npm-debug.log
+.git
+.github
+.worktrees
+tests
+*.md
+dev-dist
+screenshots
+pb_data
+pb_hooks
+pb_public
+taildrop
+pocketbase
