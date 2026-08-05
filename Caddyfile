@@ -1,0 +1,17 @@
+# Caddy serves the pre-built static shift planner.
+#
+# Default (no DOMAIN env var): plain HTTP on :80 — perfect behind a reverse
+# proxy, for local testing, or on a network that terminates TLS upstream.
+#
+# Automatic HTTPS — set DOMAIN to your hostname:
+#   docker run -e DOMAIN=guard.example.com -p 80:80 -p 443:443 ...
+# Caddy then provisions and renews Let's Encrypt certificates on its own.
+#
+# The {$VAR:default} syntax is Caddy environment substitution.
+
+{$DOMAIN::80} {
+	root * /srv
+	encode gzip zstd
+	try_files {path} /index.html
+	file_server
+}

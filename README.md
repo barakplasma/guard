@@ -26,6 +26,37 @@ Ten employees, a remote mission needing four, and a local mission needing two: t
 to the remote mission for its whole duration, and the remaining six rotate through the local one,
 each working the same total time with the longest possible gap between turns.
 
+## Self-hosting
+
+Three options, all built automatically by CI on every push to `main`:
+
+### 1. GitHub Pages
+
+Live at **https://barakplasma.github.io/guard/** — nothing to do, it's already deployed.
+
+### 2. Download and serve (no container runtime)
+
+Grab `guard-static.zip` from the [latest release](../../releases/latest), unzip,
+and serve the folder with any static file server:
+
+```bash
+unzip guard-static.zip -d guard && cd guard
+python3 -m http.server 8080
+# or: npx serve , or: caddy file-server --listen :8080
+```
+
+### 3. OCI image (Caddy, automatic HTTPS)
+
+```bash
+# HTTP only (behind a reverse proxy, or local testing):
+docker run -p 80:80 ghcr.io/barakplasma/guard:latest
+
+# Automatic HTTPS with your domain:
+docker run -e DOMAIN=guard.example.com -p 80:80 -p 443:443 ghcr.io/barakplasma/guard:latest
+```
+
+Caddy provisions and renews Let's Encrypt certificates on its own.
+
 ## Running it
 
 ```bash
@@ -39,12 +70,17 @@ npm run lint
 
 `dist/` is plain static files — host it anywhere, or open `dist/index.html` from disk.
 
-### Deployment
+### CI/CD
 
-`.github/workflows/pages.yml` builds and publishes to GitHub Pages on every push to `main`.
-**One-time setup:** in the repository's *Settings → Pages*, set the source to **GitHub Actions**.
-The build sets `BASE_PATH` to the repository name so assets resolve under the project sub-path;
-for any other host, build with `BASE_PATH` set accordingly (it defaults to a relative `./`).
+Every push to `main` runs `.github/workflows/release.yml`, which:
+1. Builds and runs unit tests.
+2. Runs browser e2e tests against the built app (Playwright).
+3. Publishes to three channels in parallel: GitHub Pages, a rolling Release zip, and
+   the Caddy OCI image on GHCR.
+4. Verifies each channel after it ships (HTTP smoke tests against the container and
+   the Pages URL).
+
+PR validation (lint + tests + build) runs in `ci.yml`.
 
 ### Browser end-to-end check
 
