@@ -37,6 +37,11 @@ export function groupAgenda(result) {
   return [...days.values()].sort((a, b) => a.day - b.day);
 }
 
+/** Whether `now` falls inside `slot`'s [start, end) range. */
+export function slotContainsInstant(slot, now) {
+  return now != null && slot.start <= now && now < slot.end;
+}
+
 /**
  * Who is free during a given slot. Derived from the engine's timeline: a person
  * counts as off duty only if they are off duty for the *whole* slot, so the

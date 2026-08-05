@@ -171,6 +171,27 @@ test('a mission that starts mid-slot is clamped, not rounded', () => {
   assert.equal(cursor, start + 150 * MIN);
 });
 
+test("one mission's off-grid edge does not fragment an unrelated mission's shifts", () => {
+  const start = START;
+  const end = start + 2 * HOUR;
+  const result = plan({
+    start,
+    end,
+    shiftMinutes: 60,
+    employees: people(6),
+    missions: [
+      // Ends 30 minutes into the second hour - an edge that belongs only to it.
+      { id: 'r', name: 'Bridge', type: 'remote', start, end: start + 90 * MIN, count: 1 },
+      { id: 'l', name: 'Local', type: 'local', start, end, count: 1 },
+    ],
+  });
+
+  const local = result.shifts.filter((s) => s.missionId === 'l').sort((a, b) => a.start - b.start);
+  assert.equal(local.length, 2, 'the clean two-hour grid is not fragmented by the other mission');
+  assert.deepEqual(local.map((s) => s.start), [start, start + HOUR]);
+  assert.deepEqual(local.map((s) => s.end), [start + HOUR, end]);
+});
+
 test('understaffing warns and returns a partial plan instead of throwing', () => {
   const start = START;
   const end = start + 2 * HOUR;

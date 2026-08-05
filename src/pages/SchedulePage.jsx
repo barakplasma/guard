@@ -1,15 +1,18 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   Alert, Box, Button, Paper, Stack, Table, TableBody, TableCell,
   TableHead, TableRow, Typography,
 } from '@mui/material';
 import AgendaDay from '../components/AgendaDay.jsx';
 import ShareBar from '../components/ShareBar.jsx';
+import ConfirmDialog from '../components/ConfirmDialog.jsx';
 import { usePlan } from '../state/PlanContext.jsx';
 import { plan as runPlanner, WARN } from '../lib/planner.js';
 import { toPlannerInput } from '../lib/planSchema.js';
-import { groupAgenda } from '../lib/agenda.js';
+import { groupAgenda, slotContainsInstant } from '../lib/agenda.js';
 import { formatDuration } from '../lib/format.js';
+import { sortByHebrewName } from '../lib/sort.js';
+import useNow from '../hooks/useNow.js';
 import { t } from '../strings.js';
 
 /**
@@ -28,6 +31,8 @@ function useSchedule(doc) {
     }
   }, [doc]);
 }
+
+const jumpToNow = () => document.getElementById('now-slot')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
 function warningText(warning, doc) {
   const employee = doc.employees.find((e) => e.id === warning.employeeId)?.name ?? warning.employeeId;
@@ -82,19 +87,45 @@ export default function SchedulePage() {
   const { result, error } = useSchedule(doc);
 
   const days = useMemo(() => (result ? groupAgenda(result) : []), [result]);
+  const sortedEmployees = useMemo(() => sortByHebrewName(doc.employees), [doc.employees]);
+  const now = useNow();
+  const hasNowSlot = useMemo(
+    () => days.some((day) => day.slots.some((slot) => slotContainsInstant(slot, now))),
+    [days, now],
+  );
+  const [confirmClearPins, setConfirmClearPins] = useState(false);
 
   return (
     <Box>
       {decodeFailed && <Alert severity="warning" sx={{ mb: 2 }}>{t.badLink}</Alert>}
 
-      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }} flexWrap="wrap" useFlexGap>
+      <Stack direction="row" spacing={1} useFlexGap sx={{ mb: 2, alignItems: 'center', flexWrap: 'wrap' }}>
         <Typography variant="h6" sx={{ flex: 1 }}>{t.schedule}</Typography>
+        {hasNowSlot && (
+          <Button size="small" onClick={jumpToNow} data-testid="jump-to-now">
+            {t.jumpToNow}
+          </Button>
+        )}
         {doc.pins.length > 0 && (
-          <Button size="small" onClick={clearAllPins} data-testid="clear-all-pins">
+          <Button size="small" onClick={() => setConfirmClearPins(true)} data-testid="clear-all-pins">
             {t.clearAllPins}
           </Button>
         )}
       </Stack>
+
+      <ConfirmDialog
+        open={confirmClearPins}
+        title={t.confirmClearPinsTitle}
+        body={t.confirmClearPinsBody}
+        onCancel={() => setConfirmClearPins(false)}
+        onConfirm={() => {
+          clearAllPins();
+          setConfirmClearPins(false);
+        }}
+        confirmLabel={t.clearAllPins}
+        confirmTestId="confirm-clear-all-pins"
+        cancelTestId="cancel-clear-all-pins"
+      />
 
       {error && <Alert severity="info" sx={{ mb: 2 }}>{error}</Alert>}
 
@@ -121,7 +152,8 @@ export default function SchedulePage() {
               key={day.day}
               day={day}
               result={result}
-              employees={doc.employees}
+              employees={sortedEmployees}
+              now={now}
               onSwap={(shift, employeeId) => pinShift(
                 shift.missionId, employeeId, shift.start, shift.end, shift.employeeId,
               )}

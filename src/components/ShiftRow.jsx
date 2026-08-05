@@ -13,12 +13,23 @@ import { t } from '../strings.js';
  */
 export default function ShiftRow({ shift, employees, busyElsewhere, onSwap, onClearPin }) {
   return (
-    <Stack direction="row" spacing={1} alignItems="center">
+    <Stack
+      direction="row"
+      spacing={1}
+      sx={{
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        maxWidth: '100%',
+        ...(shift.pinned && {
+          borderInlineStart: '3px solid', borderColor: 'primary.main', pl: 1,
+        }),
+      }}
+    >
       <Select
         value={shift.employeeId}
         onChange={(e) => onSwap(e.target.value)}
         size="small"
-        sx={{ minWidth: 150 }}
+        sx={{ minWidth: { xs: 120, sm: 150 } }}
         data-testid={`shift-select-${shift.missionId}-${shift.start}-${shift.employeeId}`}
       >
         {employees.map((e) => {
@@ -49,6 +60,7 @@ export default function ShiftRow({ shift, employees, busyElsewhere, onSwap, onCl
             size="small"
             aria-label={t.clearPin}
             onClick={onClearPin}
+            sx={{ p: 1 }}
             data-testid={`clear-pin-${shift.missionId}-${shift.start}`}
           >
             <CloseIcon fontSize="small" />

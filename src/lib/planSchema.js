@@ -58,10 +58,15 @@ export function makeId(prefix, existing = []) {
 }
 
 /** Round `date` down to the start of its hour, in local time. */
-function topOfHour(date) {
+export function topOfHour(date) {
   const d = new Date(date);
   d.setMinutes(0, 0, 0);
   return d.getTime();
+}
+
+/** The start of the hour *after* `date`'s - unconditionally, even right at :00. */
+export function nextTopOfHour(date) {
+  return topOfHour(date) + 60 * 60 * 1000;
 }
 
 /** A sensible starting document: tonight, hourly shifts, nothing else filled in. */

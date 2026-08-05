@@ -27,6 +27,8 @@ function Nav() {
       onChange={(_, v) => go(v)}
       textColor="inherit"
       indicatorColor="secondary"
+      variant="fullWidth"
+      sx={{ flex: { xs: '1 1 100%', sm: '0 1 auto' } }}
     >
       <Tab label={t.navEmployees} data-testid="tab-employees" />
       <Tab label={t.navMissions} data-testid="tab-missions" />
@@ -47,9 +49,16 @@ function DefaultRedirect() {
 function Shell() {
   return (
     <PlanProvider>
-      <AppBar position="static">
+      <AppBar position="sticky" sx={{ top: 0 }}>
         <Toolbar sx={{ gap: 2, flexWrap: 'wrap' }}>
-          <Typography variant="h6" component="h1">{t.appTitle}</Typography>
+          <Typography
+            variant="h6"
+            component="h1"
+            noWrap
+            sx={{ overflow: 'hidden', textOverflow: 'ellipsis', fontSize: { xs: '1rem', sm: '1.25rem' } }}
+          >
+            {t.appTitle}
+          </Typography>
           <Nav />
         </Toolbar>
       </AppBar>

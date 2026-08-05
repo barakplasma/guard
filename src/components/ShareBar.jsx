@@ -40,7 +40,7 @@ export default function ShareBar({ doc, result }) {
 
   return (
     <>
-      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center">
+      <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
         <Button startIcon={<LinkIcon />} onClick={onCopyLink} data-testid="copy-link">
           {t.copyLink}
         </Button>

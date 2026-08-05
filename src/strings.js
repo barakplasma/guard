@@ -13,6 +13,9 @@ export const t = {
   planStart: 'תחילת התקופה',
   planEnd: 'סוף התקופה',
   shiftLength: 'אורך משמרת (דקות)',
+  startOptions: 'התחלה מהירה',
+  startNow: 'עכשיו',
+  startNextHour: 'השעה הבאה',
 
   // employees
   employees: 'עובדים',
@@ -25,7 +28,13 @@ export const t = {
   availableFrom: 'זמין מ־',
   availableUntil: 'זמין עד',
   noEmployees: 'עדיין לא הוגדרו עובדים.',
+  emptyEmployeesHint: 'התחילו בהדבקת רשימת שמות למטה, שם בכל שורה.',
   remove: 'הסר',
+  cancel: 'ביטול',
+  confirmRemoveEmployeeTitle: 'הסרת עובד?',
+  confirmRemoveEmployeeBody: (name, pinCount) => (pinCount > 0
+    ? `להסיר את ${name}? ${pinCount} שיבוצים ידניים שלו יבוטלו.`
+    : `להסיר את ${name}?`),
 
   // missions
   missions: 'משימות',
@@ -42,6 +51,11 @@ export const t = {
   assignedPeople: 'משובצים קבועים',
   assignedHelp: 'אנשים שישובצו למשימה הזו לכל אורכה. השאר ריק לשיבוץ אוטומטי.',
   noMissions: 'עדיין לא הוגדרו משימות.',
+  emptyMissionsHint: 'לחצו על "הוסף משימה" כדי להתחיל.',
+  confirmRemoveMissionTitle: 'הסרת משימה?',
+  confirmRemoveMissionBody: (name, pinCount) => (pinCount > 0
+    ? `להסיר את "${name}"? ${pinCount} שיבוצים ידניים בה יבוטלו.`
+    : `להסיר את "${name}"?`),
 
   // schedule
   schedule: 'סידור',
@@ -54,9 +68,14 @@ export const t = {
   pinned: 'שיבוץ ידני',
   clearPin: 'בטל שיבוץ ידני',
   clearAllPins: 'נקה שיבוצים ידניים',
+  confirmClearPinsTitle: 'ניקוי כל השיבוצים הידניים?',
+  confirmClearPinsBody: 'כל השיבוצים הידניים בסידור יבוטלו. לא ניתן לבטל פעולה זו.',
   emptySchedule: 'אין משמרות. הוסיפו עובדים ומשימות ולחצו על "תכנן".',
   needEmployees: 'צריך לפחות עובד אחד כדי לתכנן.',
   needMissions: 'צריך לפחות משימה אחת כדי לתכנן.',
+  now: 'כעת',
+  today: 'היום',
+  jumpToNow: 'קפוץ לעכשיו',
 
   // summary
   summary: 'סיכום',

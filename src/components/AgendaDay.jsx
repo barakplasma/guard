@@ -2,19 +2,25 @@ import {
   Box, Chip, Divider, Paper, Stack, Typography,
 } from '@mui/material';
 import ShiftRow from './ShiftRow.jsx';
-import { formatDay, formatRange } from '../lib/format.js';
-import { offDutyDuring } from '../lib/agenda.js';
+import { dayKey, formatDay, formatRange } from '../lib/format.js';
+import { offDutyDuring, slotContainsInstant } from '../lib/agenda.js';
 import { t } from '../strings.js';
 
 /** One calendar day of the agenda: its time slots, and who is on/off duty in each. */
-export default function AgendaDay({ day, result, employees, onSwap, onClearPin }) {
+export default function AgendaDay({
+  day, result, employees, now, onSwap, onClearPin,
+}) {
   const nameOf = (id) => employees.find((e) => e.id === id)?.name ?? id;
+  const isToday = now != null && dayKey(now) === day.day;
 
   return (
     <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
-      <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1 }}>
-        {formatDay(day.day)}
-      </Typography>
+      <Stack direction="row" spacing={1} sx={{ mb: 1, alignItems: 'center' }}>
+        <Typography variant="subtitle1" fontWeight={700}>
+          {formatDay(day.day)}
+        </Typography>
+        {isToday && <Chip size="small" label={t.today} color="primary" variant="outlined" />}
+      </Stack>
 
       <Stack divider={<Divider flexItem />} spacing={1.5}>
         {day.slots.map((slot) => {
@@ -26,12 +32,26 @@ export default function AgendaDay({ day, result, employees, onSwap, onClearPin }
               .map((s) => s.employeeId),
           );
           const free = offDutyDuring(result, slot.start, slot.end).map(nameOf);
+          const isNow = slotContainsInstant(slot, now);
 
           return (
-            <Box key={`${slot.start}-${slot.end}`} data-testid={`slot-${slot.start}`}>
-              <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
-                {formatRange(slot.start, slot.end)}
-              </Typography>
+            <Box
+              key={`${slot.start}-${slot.end}`}
+              id={isNow ? 'now-slot' : undefined}
+              data-testid={`slot-${slot.start}`}
+              sx={isNow ? {
+                borderInlineStart: '4px solid',
+                borderColor: 'primary.main',
+                bgcolor: 'action.hover',
+                pl: 1,
+              } : undefined}
+            >
+              <Stack direction="row" spacing={1} sx={{ mb: 0.5, alignItems: 'center' }}>
+                <Typography variant="body2" fontWeight={700}>
+                  {formatRange(slot.start, slot.end)}
+                </Typography>
+                {isNow && <Chip size="small" label={t.now} color="primary" />}
+              </Stack>
 
               <Stack spacing={1}>
                 {slot.missions.map((mission) => (
@@ -39,7 +59,7 @@ export default function AgendaDay({ day, result, employees, onSwap, onClearPin }
                     key={mission.missionId}
                     direction={{ xs: 'column', sm: 'row' }}
                     spacing={1}
-                    alignItems={{ sm: 'center' }}
+                    sx={{ alignItems: { xs: 'flex-start', sm: 'center' } }}
                   >
                     <Chip
                       size="small"
@@ -47,7 +67,7 @@ export default function AgendaDay({ day, result, employees, onSwap, onClearPin }
                       color={mission.type === 'remote' ? 'secondary' : 'default'}
                       sx={{ minWidth: 110 }}
                     />
-                    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                    <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
                       {mission.entries.map((shift) => (
                         <ShiftRow
                           key={`${shift.missionId}-${shift.employeeId}-${shift.start}`}

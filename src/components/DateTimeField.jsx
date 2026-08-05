@@ -9,7 +9,9 @@ import { fromLocalInput, toLocalInput } from '../lib/format.js';
  * forwards the legacy `inputProps`, and merging in the caller would clobber the
  * shrunk label a datetime input always needs.
  */
-export default function DateTimeField({ label, value, onChange, testId, ...rest }) {
+export default function DateTimeField({
+  label, value, onChange, testId, sx, ...rest
+}) {
   return (
     <TextField
       label={label}
@@ -20,6 +22,7 @@ export default function DateTimeField({ label, value, onChange, testId, ...rest 
         inputLabel: { shrink: true },
         htmlInput: testId ? { 'data-testid': testId } : undefined,
       }}
+      sx={{ width: { xs: '100%', md: 'auto' }, ...sx }}
       {...rest}
     />
   );

@@ -1,11 +1,24 @@
-import { Paper, Stack, TextField } from '@mui/material';
+import { useState } from 'react';
+import {
+  Button, Menu, MenuItem, Paper, Stack, TextField,
+} from '@mui/material';
+import ScheduleIcon from '@mui/icons-material/Schedule';
 import DateTimeField from './DateTimeField.jsx';
 import { usePlan } from '../state/PlanContext.jsx';
+import { topOfHour, nextTopOfHour } from '../lib/planSchema.js';
 import { t } from '../strings.js';
 
 /** Plan-wide settings: the window everything else defaults to, and the rotation length. */
 export default function SettingsBar() {
-  const { doc, setField } = usePlan();
+  const { doc, setField, update } = usePlan();
+  const [anchorEl, setAnchorEl] = useState(null);
+
+  // Moving the start keeps the plan's duration, so `end` doesn't detach from it.
+  const jumpStart = (newStart) => {
+    const delta = doc.end - doc.start;
+    update((d) => ({ ...d, start: newStart, end: newStart + delta }));
+    setAnchorEl(null);
+  };
 
   return (
     <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
@@ -24,6 +37,22 @@ export default function SettingsBar() {
           onChange={(v) => v != null && setField('start', v)}
           testId="plan-start"
         />
+        <Button
+          startIcon={<ScheduleIcon />}
+          onClick={(e) => setAnchorEl(e.currentTarget)}
+          aria-label={t.startOptions}
+          data-testid="start-now-menu"
+        >
+          {t.startOptions}
+        </Button>
+        <Menu anchorEl={anchorEl} open={Boolean(anchorEl)} onClose={() => setAnchorEl(null)}>
+          <MenuItem data-testid="start-now" onClick={() => jumpStart(topOfHour(Date.now()))}>
+            {t.startNow}
+          </MenuItem>
+          <MenuItem data-testid="start-next-hour" onClick={() => jumpStart(nextTopOfHour(Date.now()))}>
+            {t.startNextHour}
+          </MenuItem>
+        </Menu>
         <DateTimeField
           label={t.planEnd}
           value={doc.end}
