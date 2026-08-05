@@ -6,7 +6,6 @@ import {
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
 import AddIcon from '@mui/icons-material/Add';
 import DateTimeField from '../components/DateTimeField.jsx';
-import SettingsBar from '../components/SettingsBar.jsx';
 import { usePlan } from '../state/PlanContext.jsx';
 import { t } from '../strings.js';
 
@@ -140,8 +139,6 @@ export default function MissionsPage() {
 
   return (
     <Box>
-      <SettingsBar />
-
       <Stack direction="row" alignItems="center" sx={{ mb: 2 }}>
         <Typography variant="h6" sx={{ flex: 1 }}>{t.missions}</Typography>
         <Button variant="contained" startIcon={<AddIcon />} onClick={addMission} data-testid="add-mission">
