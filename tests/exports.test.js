@@ -34,8 +34,31 @@ test('CSV has a header row and one row per shift', () => {
   const result = schedule();
   const lines = shiftsToCsv(result).replace(/^﻿/, '').trimEnd().split('\r\n');
   assert.equal(lines.length, result.shifts.length + 1);
-  assert.equal(lines[0], 'משימה,סוג,תאריך,התחלה,סיום,עובד,שיבוץ ידני');
-  assert.ok(lines[1].startsWith('שער,מקומית,'));
+  assert.equal(lines[0], 'תאריך,שעת התחלה,שעת סיום,שם השומר,שם המשימה,סוג,שיבוץ ידני');
+  assert.deepEqual(lines[1].split(','), ['05.01.2026', '08:00', '09:00', 'אבי', 'שער', 'מקומית', '']);
+});
+
+test('CSV emits a separate row for every simultaneous mission assignment', () => {
+  const result = plan({
+    start: START,
+    end: START + HOUR,
+    shiftMinutes: 60,
+    employees: [
+      { id: 'e1', name: 'אבי' },
+      { id: 'e2', name: 'דנה' },
+    ],
+    missions: [{ id: 'm1', name: 'שער כפול', type: 'local', count: 2 }],
+  });
+  const lines = shiftsToCsv(result).replace(/^﻿/, '').trimEnd().split('\r\n');
+
+  assert.equal(result.shifts.length, 2);
+  assert.equal(lines.length, 3);
+  const assignmentRows = lines.slice(1).map((line) => line.split(','));
+  assert.deepEqual(assignmentRows.map((row) => [row[0], row[1], row[2], row[4]]), [
+    ['05.01.2026', '08:00', '09:00', 'שער כפול'],
+    ['05.01.2026', '08:00', '09:00', 'שער כפול'],
+  ]);
+  assert.deepEqual(new Set(assignmentRows.map((row) => row[3])), new Set(['אבי', 'דנה']));
 });
 
 test('CSV escapes quotes and commas', () => {
@@ -60,8 +83,9 @@ test('CSV marks manual assignments', () => {
     missions: [{ id: 'm1', name: 'שער', type: 'local', count: 1 }],
     pins: [{ missionId: 'm1', employeeId: 'e2' }],
   });
-  const csv = shiftsToCsv(result);
-  assert.ok(csv.includes('דנה,כן'), 'the pinned row is flagged');
+  const rows = shiftsToCsv(result).replace(/^﻿/, '').trimEnd().split('\r\n');
+  const pinnedRow = rows.slice(1).map((row) => row.split(',')).find((row) => row[3] === 'דנה');
+  assert.equal(pinnedRow?.[6], 'כן', 'the pinned row is flagged');
 });
 
 /* --- WhatsApp -------------------------------------------------------- */

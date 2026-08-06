@@ -1,6 +1,6 @@
 import { formatDate, formatTime } from './format.js';
 
-const HEADERS = ['משימה', 'סוג', 'תאריך', 'התחלה', 'סיום', 'עובד', 'שיבוץ ידני'];
+const HEADERS = ['תאריך', 'שעת התחלה', 'שעת סיום', 'שם השומר', 'שם המשימה', 'סוג', 'שיבוץ ידני'];
 
 const TYPE_LABEL = { remote: 'מרוחקת', local: 'מקומית' };
 
@@ -20,12 +20,12 @@ export function shiftsToCsv(result) {
   const rows = [HEADERS];
   for (const s of result.shifts) {
     rows.push([
-      s.missionName,
-      TYPE_LABEL[s.type] ?? s.type,
       formatDate(s.start),
       formatTime(s.start),
       formatTime(s.end),
       s.employeeName,
+      s.missionName,
+      TYPE_LABEL[s.type] ?? s.type,
       s.pinned ? 'כן' : '',
     ]);
   }
