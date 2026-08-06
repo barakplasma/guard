@@ -1,81 +1,112 @@
-import { groupAgenda } from './agenda.js';
+import { createEvents } from 'ics';
 
-const CRLF = '\r\n';
-const FOLD_LIMIT = 75;
-const pad = (n) => String(n).padStart(2, '0');
+/**
+ * A short, deterministic fingerprint of the plan's actual output. Mission and
+ * employee ids are only unique *within* one plan (fresh documents both start
+ * numbering at "m1"/"e1"), so two unrelated plans covering the same instant
+ * would otherwise mint identical UIDs - and calendar clients treat UID as
+ * event identity, so importing the second plan could silently overwrite or
+ * merge with the first. Hashing the full assignment list ties every UID to
+ * the plan that produced it, while staying stable across re-exports of the
+ * same, unchanged plan.
+ */
+function fnv1a(str) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(36);
+}
 
-/** Escape text per RFC 5545 §3.3.11 - backslash, semicolon, comma, newline. */
-function escapeText(value) {
-  return String(value ?? '')
-    .replace(/\\/g, '\\\\')
-    .replace(/;/g, '\\;')
-    .replace(/,/g, '\\,')
-    .replace(/\n/g, '\\n');
+function planFingerprint(result) {
+  // Names, not just ids, because two unrelated plans can easily share both
+  // ids (fresh documents both start numbering at "m1"/"e1") *and* an absolute
+  // time window (the same recurring slot, week over week) - names are what
+  // actually distinguishes them in that case.
+  const key = result.shifts
+    .map((s) => `${s.missionId}|${s.missionName}|${s.employeeId}|${s.employeeName}|${s.start}|${s.end}`)
+    .join(';');
+  return fnv1a(key);
+}
+
+const overlaps = (aStart, aEnd, bStart, bEnd) => aStart < bEnd && bStart < aEnd;
+
+const sameRoster = (a, b) => a.length === b.length
+  && new Set(a.map((r) => r.employeeId)).size === new Set([...a, ...b].map((r) => r.employeeId)).size;
+
+/**
+ * Slice one mission's own rows into maximal, non-overlapping intervals with a
+ * stable roster - at every boundary where someone starts or stops, whoever is
+ * covering that instant is recomputed, so two coworkers with staggered start
+ * times (a pin covering the whole mission plus an auto-assigned neighbour who
+ * is only available for part of it) each show up exactly where they overlap
+ * rather than in two disjoint, single-person events. Adjacent slices with an
+ * identical roster are merged back together, mirroring the engine's own
+ * mergeRows so a single steady roster still yields one event, not several.
+ */
+function missionSlices(rows) {
+  const boundaries = [...new Set(rows.flatMap((r) => [r.start, r.end]))].sort((a, b) => a - b);
+  const slices = [];
+  for (let i = 1; i < boundaries.length; i++) {
+    const segStart = boundaries[i - 1];
+    const segEnd = boundaries[i];
+    const covering = rows.filter((r) => r.start <= segStart && r.end >= segEnd);
+    if (covering.length === 0) continue;
+    slices.push({ start: segStart, end: segEnd, rows: covering });
+  }
+
+  const merged = [];
+  for (const slice of slices) {
+    const prev = merged[merged.length - 1];
+    if (prev && prev.end === slice.start && sameRoster(prev.rows, slice.rows)) {
+      prev.end = slice.end;
+    } else {
+      merged.push({ ...slice });
+    }
+  }
+  return merged;
 }
 
 /**
- * Fold a content line at 75 octets (CRLF + single space continuation), never
- * splitting inside a multi-byte UTF-8 sequence - required because mission and
- * employee names are Hebrew, where every character is multiple octets.
+ * One event description for the `ics` library. Times are passed as raw
+ * epoch-ms with `*InputType/*OutputType: 'utc'`, which `ics` reads with
+ * `Date#getUTC*` - exactly the timezone-independent absolute instant the rest
+ * of the app already stores, so DTSTART/DTEND come out correct regardless of
+ * which timezone generates or opens the file.
  */
-function foldLine(line) {
-  const bytes = new TextEncoder().encode(line);
-  if (bytes.length <= FOLD_LIMIT) return line;
-
-  const decoder = new TextDecoder();
-  const parts = [];
-  let i = 0;
-  let limit = FOLD_LIMIT;
-  while (i < bytes.length) {
-    let end = Math.min(i + limit, bytes.length);
-    while (end > i && (bytes[end] & 0xc0) === 0x80) end--;
-    parts.push(decoder.decode(bytes.slice(i, end)));
-    i = end;
-    limit = FOLD_LIMIT - 1; // continuation lines lose one octet to the leading space
-  }
-  return parts.map((p, idx) => (idx === 0 ? p : ` ${p}`)).join(CRLF);
+function toIcsEvent({ uid, dtstamp, start, end, title, description }) {
+  return {
+    uid,
+    // `timestamp` drives DTSTAMP; it isn't in `ics`'s public TS type but is a
+    // real, honoured field - without it every export would carry the real
+    // wall-clock time, breaking byte-for-byte reproducibility of re-exports.
+    timestamp: dtstamp,
+    title,
+    description: description || undefined,
+    start,
+    end,
+    startInputType: 'utc',
+    startOutputType: 'utc',
+    endInputType: 'utc',
+    endOutputType: 'utc',
+  };
 }
 
-/** epoch ms -> "YYYYMMDDTHHMMSSZ", timezone-independent like the rest of the app's storage. */
-function formatIcsDateUTC(ms) {
-  const d = new Date(ms);
-  return `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}`
-    + `T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}Z`;
-}
-
-function buildEvent({ uid, dtstamp, start, end, summary, description }) {
-  const lines = [
-    'BEGIN:VEVENT',
-    `UID:${uid}`,
-    `DTSTAMP:${formatIcsDateUTC(dtstamp)}`,
-    `DTSTART:${formatIcsDateUTC(start)}`,
-    `DTEND:${formatIcsDateUTC(end)}`,
-    `SUMMARY:${escapeText(summary)}`,
-  ];
-  if (description) lines.push(`DESCRIPTION:${escapeText(description)}`);
-  lines.push('END:VEVENT');
-  return lines;
-}
-
-function buildCalendar(calName, eventGroups) {
-  const lines = [
-    'BEGIN:VCALENDAR',
-    'VERSION:2.0',
-    'PRODID:-//guard//shift-planner//HE',
-    'CALSCALE:GREGORIAN',
-    'METHOD:PUBLISH',
-  ];
-  if (calName) lines.push(`X-WR-CALNAME:${escapeText(calName)}`);
-  for (const group of eventGroups) lines.push(...group);
-  lines.push('END:VCALENDAR');
-  return lines.map(foldLine).join(CRLF) + CRLF;
+function buildCalendar(calName, events) {
+  const { error, value } = createEvents(events, calName ? { calName } : {});
+  if (error) throw error;
+  return value;
 }
 
 /**
  * ICS calendar for one employee: one VEVENT per shift of theirs, titled with the
- * mission name. The description lists whoever else is on the same mission during
- * that same shift, so "who am I working with" survives an import into a phone
- * calendar with no access to the app.
+ * mission name. The description lists whoever else is on the same mission at any
+ * point during that shift - found by genuine time overlap against every other row
+ * on the mission, not by matching the shift's exact (start, end) pair. A pin can
+ * cover a mission for a custom range while an auto-generated neighbour only fills
+ * part of it (say, someone's availability starts mid-shift), so two coworkers on
+ * the same mission at the same moment can easily have different row boundaries.
  *
  * @param {object} result - the planner engine's output
  * @param {object} options
@@ -85,34 +116,37 @@ function buildCalendar(calName, eventGroups) {
  * @param {number} [options.now] - DTSTAMP instant; defaults to the real clock
  */
 export function employeeIcs(result, { employeeId, employeeName, title = '', now = Date.now() } = {}) {
-  const events = [];
-  for (const day of groupAgenda(result)) {
-    for (const slot of day.slots) {
-      for (const mission of slot.missions) {
-        const mine = mission.entries.find((e) => e.employeeId === employeeId);
-        if (!mine) continue;
-        const others = mission.entries
-          .filter((e) => e.employeeId !== employeeId)
-          .map((e) => e.employeeName)
-          .join(', ');
-        events.push(buildEvent({
-          uid: `${mine.missionId}-${employeeId}-${mine.start}@guard.shifts`,
-          dtstamp: now,
-          start: mine.start,
-          end: mine.end,
-          summary: mine.missionName,
-          description: others,
-        }));
-      }
-    }
-  }
+  const planId = planFingerprint(result);
+  const mine = result.shifts
+    .filter((s) => s.employeeId === employeeId)
+    .sort((a, b) => a.start - b.start || a.end - b.end);
+
+  const events = mine.map((shift) => {
+    const others = result.shifts
+      .filter((s) => s.missionId === shift.missionId && s.employeeId !== employeeId
+        && overlaps(s.start, s.end, shift.start, shift.end))
+      .map((s) => s.employeeName);
+    return toIcsEvent({
+      uid: `${planId}-${shift.missionId}-${employeeId}-${shift.start}@guard.shifts`,
+      dtstamp: now,
+      start: shift.start,
+      end: shift.end,
+      title: shift.missionName,
+      description: [...new Set(others)].join(', '),
+    });
+  });
+
   const calName = title.trim() ? `${title.trim()} — ${employeeName}` : employeeName;
   return buildCalendar(calName, events);
 }
 
 /**
- * ICS calendar for a manager: one VEVENT per mission per shift, titled with the
- * mission name, listing everyone assigned to it in the description.
+ * ICS calendar for a manager: one VEVENT per mission per continuously-staffed
+ * interval, listing everyone assigned to it in the description. Missions are
+ * sliced independently of each other (and of the shared shift-length grid), so
+ * a mission whose own assignments have staggered boundaries still produces
+ * accurate, non-overlapping events instead of duplicated ones that each
+ * undercount who was actually on duty.
  *
  * @param {object} result - the planner engine's output
  * @param {object} [options]
@@ -120,22 +154,30 @@ export function employeeIcs(result, { employeeId, employeeName, title = '', now 
  * @param {number} [options.now] - DTSTAMP instant; defaults to the real clock
  */
 export function overviewIcs(result, { title = '', now = Date.now() } = {}) {
-  const events = [];
-  for (const day of groupAgenda(result)) {
-    for (const slot of day.slots) {
-      for (const mission of slot.missions) {
-        const people = mission.entries.map((e) => e.employeeName).join(', ');
-        events.push(buildEvent({
-          uid: `${mission.missionId}-${slot.start}-${slot.end}@guard.shifts`,
-          dtstamp: now,
-          start: slot.start,
-          end: slot.end,
-          summary: mission.missionName,
-          description: people,
-        }));
-      }
-    }
+  const planId = planFingerprint(result);
+  const byMission = new Map();
+  for (const s of result.shifts) {
+    if (!byMission.has(s.missionId)) byMission.set(s.missionId, []);
+    byMission.get(s.missionId).push(s);
   }
+
+  const slices = [];
+  for (const [missionId, rows] of byMission) {
+    for (const slice of missionSlices(rows)) slices.push({ missionId, ...slice });
+  }
+  // Chronological order, same as the on-screen agenda - the file has no
+  // ordering requirement, but a readable one is nicer to skim.
+  slices.sort((a, b) => a.start - b.start || a.end - b.end
+    || (a.missionId < b.missionId ? -1 : a.missionId > b.missionId ? 1 : 0));
+
+  const events = slices.map((slice) => toIcsEvent({
+    uid: `${planId}-${slice.missionId}-${slice.start}-${slice.end}@guard.shifts`,
+    dtstamp: now,
+    start: slice.start,
+    end: slice.end,
+    title: slice.rows[0].missionName,
+    description: slice.rows.map((r) => r.employeeName).join(', '),
+  }));
   return buildCalendar(title.trim() || 'סידור משמרות', events);
 }
 

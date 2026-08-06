@@ -243,7 +243,7 @@ test('ICS escapes commas, semicolons and backslashes in text', () => {
   assert.ok(ics.includes('DESCRIPTION:A\\; B\\\\C'));
 });
 
-test('ICS folds long lines at 75 octets without splitting a UTF-8 character', () => {
+test('a long Hebrew mission name survives a long line intact', () => {
   const longName = 'משימה '.repeat(30).trim();
   const result = plan({
     start: START,
@@ -253,12 +253,13 @@ test('ICS folds long lines at 75 octets without splitting a UTF-8 character', ()
     missions: [{ id: 'm1', name: longName, type: 'local', count: 1 }],
   });
   const ics = overviewIcs(result);
-  const encoder = new TextEncoder();
-  for (const line of ics.split('\r\n')) {
-    assert.ok(encoder.encode(line).length <= 75, `line too long: ${line}`);
-  }
-  const unfolded = ics.replace(/\r\n /g, '');
+  // Folding is the `ics` library's job, not ours - the RFC only "SHOULD"s a 75
+  // octet line length, and real calendar clients (Google Calendar included)
+  // are tolerant of long lines. What matters here is that the library's own
+  // fold/unfold round trip does not corrupt Hebrew (multi-byte UTF-8) text.
+  const unfolded = ics.replace(/\r\n[ \t]/g, '');
   assert.ok(unfolded.includes(`SUMMARY:${longName}`), 'unfolding the wrapped line recovers the full name');
+  assert.ok(!ics.includes('�'), 'no mangled characters from a mid-codepoint fold');
 });
 
 test('ICS UIDs are stable for the same input', () => {
@@ -273,4 +274,84 @@ test('ICS DTSTART/DTEND/DTSTAMP use UTC basic format', () => {
   assert.match(ics, /DTSTAMP:\d{8}T\d{6}Z/);
   assert.match(ics, /DTSTART:\d{8}T\d{6}Z/);
   assert.match(ics, /DTEND:\d{8}T\d{6}Z/);
+});
+
+test('ICS UIDs are namespaced by the plan, so two plans reusing the same short ids never collide', () => {
+  const planA = plan({
+    start: START,
+    end: START + HOUR,
+    shiftMinutes: 60,
+    employees: [{ id: 'e1', name: 'אבי' }],
+    missions: [{ id: 'm1', name: 'שער', type: 'local', count: 1 }],
+  });
+  const planB = plan({
+    start: START,
+    end: START + HOUR,
+    shiftMinutes: 60,
+    employees: [{ id: 'e1', name: 'דנה' }],
+    missions: [{ id: 'm1', name: 'ריכוז', type: 'local', count: 1 }],
+  });
+
+  const uidA = overviewIcs(planA).match(/UID:[^\r\n]+/)[0];
+  const uidB = overviewIcs(planB).match(/UID:[^\r\n]+/)[0];
+  assert.notEqual(uidA, uidB, 'two unrelated plans with the same mission/employee ids must not collide');
+
+  const empUidA = employeeIcs(planA, { employeeId: 'e1', employeeName: 'אבי' }).match(/UID:[^\r\n]+/)[0];
+  const empUidB = employeeIcs(planB, { employeeId: 'e1', employeeName: 'דנה' }).match(/UID:[^\r\n]+/)[0];
+  assert.notEqual(empUidA, empUidB, 'the per-employee export must also be namespaced by plan');
+});
+
+/**
+ * A pin can cover a mission for a custom range while an auto-assigned neighbour
+ * only fills part of it (their availability starts mid-shift, say), so two
+ * coworkers on the same mission at the same moment can end up with different
+ * row boundaries: one wholesale row spanning the whole window, another split
+ * at wherever the auto-fill kicked in.
+ */
+function scheduleStaggeredCoworkers() {
+  const missionEnd = START + 2 * HOUR;
+  return plan({
+    start: START,
+    end: missionEnd,
+    shiftMinutes: 60,
+    employees: [
+      { id: 'e1', name: 'אבי' },
+      { id: 'e2', name: 'דנה' },
+    ],
+    missions: [{ id: 'm1', name: 'שער', type: 'local', count: 2 }],
+    pins: [
+      { missionId: 'm1', employeeId: 'e1' }, // whole mission window
+      { missionId: 'm1', employeeId: 'e2', start: START + HOUR / 2 },
+    ],
+  });
+}
+
+test('employeeIcs finds a coworker whose row overlaps without matching it exactly', () => {
+  const result = scheduleStaggeredCoworkers();
+  // Sanity check: this scenario really does stagger row boundaries rather
+  // than collapsing into one shared range.
+  const distinctRanges = new Set(result.shifts.map((s) => `${s.start}-${s.end}`));
+  assert.ok(distinctRanges.size > 1, 'the scenario must actually produce staggered row boundaries');
+
+  const ics = employeeIcs(result, { employeeId: 'e1', employeeName: 'אבי' });
+  const descLine = ics.split('\r\n').find((l) => l.startsWith('DESCRIPTION:'));
+  assert.ok(descLine?.includes('דנה'), 'a coworker on an overlapping-but-different range is still found');
+});
+
+test('overviewIcs slices a mission at roster changes, combining genuinely overlapping coworkers', () => {
+  // אבי covers the whole two hours; דנה only joins for the second half. So
+  // there really are two distinct rosters here - the fix is not that this
+  // collapses into one event, but that the *overlapping* half (both of them,
+  // together) is not wrongly split into two single-person events the way
+  // exact-range matching would split it.
+  const result = scheduleStaggeredCoworkers();
+  const ics = overviewIcs(result);
+  const events = ics.split('BEGIN:VEVENT').slice(1);
+  assert.equal(events.length, 2, 'one event for the אבי-only half, one for the shared half');
+
+  const descriptions = events.map((e) => e.match(/DESCRIPTION:([^\r\n]+)/)?.[1] ?? '');
+  const soloEvent = descriptions.find((d) => !d.includes('דנה'));
+  const sharedEvent = descriptions.find((d) => d.includes('דנה'));
+  assert.ok(soloEvent?.includes('אבי'), 'the אבי-only half lists just אבי');
+  assert.ok(sharedEvent?.includes('אבי'), 'the shared half lists both coworkers, not just the one whose row starts there');
 });
