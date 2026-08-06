@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   Box, Button, Chip, FormControl, IconButton, InputLabel, MenuItem,
   OutlinedInput, Paper, Select, Stack, TextField, ToggleButton,
@@ -6,7 +7,9 @@ import {
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
 import AddIcon from '@mui/icons-material/Add';
 import DateTimeField from '../components/DateTimeField.jsx';
+import ConfirmDialog from '../components/ConfirmDialog.jsx';
 import { usePlan } from '../state/PlanContext.jsx';
+import { sortByHebrewName } from '../lib/sort.js';
 import { t } from '../strings.js';
 
 function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
@@ -20,7 +23,7 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
   return (
     <Paper variant="outlined" sx={{ p: 2 }}>
       <Stack spacing={2}>
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }}>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ alignItems: { xs: 'stretch', sm: 'center' } }}>
           <TextField
             label={t.missionName}
             value={mission.name}
@@ -58,7 +61,7 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
           <IconButton
             aria-label={t.remove}
             onClick={onRemove}
-            sx={{ marginInlineStart: 'auto' }}
+            sx={{ marginInlineStart: 'auto', p: 1 }}
             data-testid={`remove-mission-${mission.id}`}
           >
             <DeleteOutlineIcon />
@@ -69,7 +72,7 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
           {mission.type === 'remote' ? t.typeRemoteHelp : t.typeLocalHelp}
         </Typography>
 
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }}>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ alignItems: { xs: 'stretch', sm: 'center' } }}>
           {mission.start != null || mission.end != null ? (
             <>
               <DateTimeField
@@ -109,7 +112,7 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
             )}
             input={<OutlinedInput label={`${t.assignedPeople} (${assigned.length}/${mission.count})`} />}
             renderValue={(ids) => (
-              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+              <Stack direction="row" spacing={0.5} useFlexGap sx={{ flexWrap: 'wrap' }}>
                 {ids.map((id) => (
                   <Chip
                     key={id}
@@ -121,7 +124,7 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
             )}
             data-testid={`assign-${mission.id}`}
           >
-            {doc.employees.map((e) => (
+            {sortByHebrewName(doc.employees).map((e) => (
               <MenuItem key={e.id} value={e.id}>{e.name}</MenuItem>
             ))}
           </Select>
@@ -136,10 +139,11 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
 
 export default function MissionsPage() {
   const { doc, addMission, updateMission, removeMission, setMissionAssignees } = usePlan();
+  const [pendingRemove, setPendingRemove] = useState(null);
 
   return (
     <Box>
-      <Stack direction="row" alignItems="center" sx={{ mb: 2 }}>
+      <Stack direction="row" sx={{ mb: 2, alignItems: 'center' }}>
         <Typography variant="h6" sx={{ flex: 1 }}>{t.missions}</Typography>
         <Button variant="contained" startIcon={<AddIcon />} onClick={addMission} data-testid="add-mission">
           {t.addMission}
@@ -148,7 +152,10 @@ export default function MissionsPage() {
 
       <Stack spacing={2}>
         {doc.missions.length === 0 && (
-          <Typography color="text.secondary">{t.noMissions}</Typography>
+          <>
+            <Typography color="text.secondary">{t.noMissions}</Typography>
+            <Typography variant="caption" color="text.secondary">{t.emptyMissionsHint}</Typography>
+          </>
         )}
         {doc.missions.map((m) => (
           <MissionCard
@@ -156,11 +163,27 @@ export default function MissionsPage() {
             mission={m}
             doc={doc}
             onChange={(patch) => updateMission(m.id, patch)}
-            onRemove={() => removeMission(m.id)}
+            onRemove={() => setPendingRemove(m)}
             onAssign={(ids) => setMissionAssignees(m.id, ids)}
           />
         ))}
       </Stack>
+
+      <ConfirmDialog
+        open={pendingRemove != null}
+        title={t.confirmRemoveMissionTitle}
+        body={pendingRemove && t.confirmRemoveMissionBody(
+          pendingRemove.name || t.missionName,
+          doc.pins.filter((p) => p.missionId === pendingRemove.id).length,
+        )}
+        onCancel={() => setPendingRemove(null)}
+        onConfirm={() => {
+          removeMission(pendingRemove.id);
+          setPendingRemove(null);
+        }}
+        confirmTestId="confirm-remove-mission"
+        cancelTestId="cancel-remove-mission"
+      />
     </Box>
   );
 }

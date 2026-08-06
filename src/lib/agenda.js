@@ -37,6 +37,34 @@ export function groupAgenda(result) {
   return [...days.values()].sort((a, b) => a.day - b.day);
 }
 
+/** Whether `now` falls inside `slot`'s [start, end) range. */
+export function slotContainsInstant(slot, now) {
+  return now != null && slot.start <= now && now < slot.end;
+}
+
+/**
+ * The single most specific slot containing `now`, across every day - e.g. an
+ * all-day remote mission and the current hour of a rotating local mission can
+ * both contain `now` at once, since each distinct (start, end) is its own slot.
+ * The shortest one is the actually-current shift, not the long-running block
+ * that merely happens to still be open; ties break on the earlier start so the
+ * result is deterministic. `null` if no slot contains `now`.
+ */
+export function findNowSlot(days, now) {
+  let best = null;
+  for (const day of days) {
+    for (const slot of day.slots) {
+      if (!slotContainsInstant(slot, now)) continue;
+      const duration = slot.end - slot.start;
+      const bestDuration = best ? best.end - best.start : Infinity;
+      if (!best || duration < bestDuration || (duration === bestDuration && slot.start < best.start)) {
+        best = slot;
+      }
+    }
+  }
+  return best;
+}
+
 /**
  * Who is free during a given slot. Derived from the engine's timeline: a person
  * counts as off duty only if they are off duty for the *whole* slot, so the

@@ -312,22 +312,27 @@ export function plan({ start, end, shiftMinutes, employees = [], missions = [], 
   }
 
   /* --- 3. local missions on a segment grid --- */
-  // Boundaries: the global shift grid, plus every mission edge and every
-  // availability edge. A mission that starts mid-slot therefore gets a properly
-  // clamped partial segment rather than a half-covered slot.
+  // Boundaries: the global shift grid plus every availability edge, shared
+  // across all local missions since an employee's window genuinely affects
+  // whether *any* mission can be staffed across it. Each mission's own start/end
+  // is added only to its own segmentation below - so it gets a properly clamped
+  // partial segment at its own edges, without leaking into an unrelated
+  // mission's grid (a remote or local mission ending off-grid must not fragment
+  // some other local mission's otherwise-clean hourly slots).
   const locals = miss.filter((m) => m.type === 'local');
-  const boundaries = new Set([start, end]);
-  for (let t = start; t < end; t += shiftMinutes * MINUTE) boundaries.add(t);
-  for (const m of miss) { boundaries.add(m.start); boundaries.add(m.end); }
-  for (const e of emps) { boundaries.add(e.start); boundaries.add(e.end); }
-  const edges = [...boundaries].filter((t) => t >= start && t <= end).sort((a, b) => a - b);
+  const baseBoundaries = new Set([start, end]);
+  for (let t = start; t < end; t += shiftMinutes * MINUTE) baseBoundaries.add(t);
+  for (const e of emps) { baseBoundaries.add(e.start); baseBoundaries.add(e.end); }
 
   const demands = [];
   for (const m of locals) {
+    const edges = [...baseBoundaries, m.start, m.end]
+      .filter((t) => t >= m.start && t <= m.end)
+      .sort((a, b) => a - b);
     for (let i = 1; i < edges.length; i++) {
       const segStart = edges[i - 1];
       const segEnd = edges[i];
-      if (segEnd <= m.start || segStart >= m.end) continue;
+      if (segEnd <= segStart) continue;
       const covered = rows.filter(
         (r) => r.missionId === m.id && r.start <= segStart && r.end >= segEnd,
       ).length;
