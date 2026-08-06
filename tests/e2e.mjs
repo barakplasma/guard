@@ -131,8 +131,9 @@ await download.saveAs(`${SHOT}/shifts.csv`);
 const csv = readFileSync(`${SHOT}/shifts.csv`, 'utf8');
 check('CSV carries the BOM', csv.charCodeAt(0) === 0xfeff);
 check('CSV mentions both missions', csv.includes('סיור מרוחק') && csv.includes('שער'));
-check('CSV row count matches the agenda',
-  csv.trimEnd().split('\r\n').length - 1 === await page.locator('[data-testid^="shift-select-"]').count());
+const individualShiftAssignments = await page.locator('[data-testid^="shift-select-"]').count();
+check('CSV has one data row per individual shift assignment',
+  csv.trimEnd().split('\r\n').length - 1 === individualShiftAssignments);
 
 /* ---------- WhatsApp ---------- */
 await page.getByTestId('copy-whatsapp').click();
