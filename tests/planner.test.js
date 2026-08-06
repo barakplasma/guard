@@ -101,6 +101,37 @@ test('gap maximization: nobody repeats until everyone has had a turn', () => {
   }
 });
 
+test('local rotation spreads people across missions, not just across time', () => {
+  // Two people, two concurrent single-seat local missions: without a mission-aware
+  // tiebreak, "fewest minutes so far" alone can settle into always the same person
+  // on mission A and the other on mission B forever, since their total minutes stay
+  // perfectly balanced even though neither ever switches missions.
+  const start = START;
+  const end = start + 4 * HOUR;
+  const result = plan({
+    start,
+    end,
+    shiftMinutes: 60,
+    employees: people(2),
+    missions: [
+      { id: 'ma', name: 'Mission A', type: 'local', start, end, count: 1 },
+      { id: 'mb', name: 'Mission B', type: 'local', start, end, count: 1 },
+    ],
+  });
+
+  const missionsByEmployee = new Map();
+  for (const s of result.shifts) {
+    if (!missionsByEmployee.has(s.employeeId)) missionsByEmployee.set(s.employeeId, new Set());
+    missionsByEmployee.get(s.employeeId).add(s.missionId);
+  }
+  for (const [id, missions] of missionsByEmployee) {
+    const stints = result.shifts.filter((s) => s.employeeId === id).length;
+    if (stints >= 2) {
+      assert.ok(missions.size >= 2, `${id} worked ${stints} shifts but never left mission(s) ${[...missions]}`);
+    }
+  }
+});
+
 test('nobody is ever double-booked across concurrent missions', () => {
   const start = START;
   const end = start + 4 * HOUR;

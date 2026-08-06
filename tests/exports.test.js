@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { shiftsToCsv } from '../src/lib/exportCsv.js';
 import { whatsappText, whatsappShareLink } from '../src/lib/exportText.js';
 import { groupAgenda, offDutyDuring } from '../src/lib/agenda.js';
+import { employeeIcs, overviewIcs } from '../src/lib/exportIcal.js';
 import { plan } from '../src/lib/planner.js';
 
 const HOUR = 3600 * 1000;
@@ -174,4 +175,102 @@ test('a range that crosses midnight shows the end date', async () => {
   const overnight = formatRange(START, START + 24 * HOUR);
   assert.ok(overnight.includes('('), `expected a date suffix, got ${overnight}`);
   assert.ok(overnight.startsWith('08:00–08:00 ('), overnight);
+});
+
+/* --- iCal -------------------------------------------------------------- */
+
+/** Two people sharing every shift of a single mission, so co-workers are non-empty. */
+function schedulePair() {
+  return plan({
+    start: START,
+    end: START + HOUR,
+    shiftMinutes: 60,
+    employees: [
+      { id: 'e1', name: 'אבי' },
+      { id: 'e2', name: 'דנה' },
+    ],
+    missions: [{ id: 'm1', name: 'שער', type: 'local', count: 2 }],
+  });
+}
+
+test('an ICS calendar is wrapped in VCALENDAR/VERSION 2.0', () => {
+  const ics = overviewIcs(schedulePair(), { title: 'בדיקה' });
+  assert.ok(ics.startsWith('BEGIN:VCALENDAR\r\n'));
+  assert.ok(ics.includes('VERSION:2.0\r\n'));
+  assert.ok(ics.trimEnd().endsWith('END:VCALENDAR'));
+});
+
+test('overviewIcs makes one VEVENT per mission per shift, listing everyone on it', () => {
+  const result = schedulePair();
+  const ics = overviewIcs(result, { title: 'בדיקה' });
+  assert.equal((ics.match(/BEGIN:VEVENT/g) || []).length, 1, 'one shared slot -> one event');
+  assert.ok(ics.includes('SUMMARY:שער'));
+  assert.ok(ics.includes('DESCRIPTION:אבי\\, דנה') || ics.includes('DESCRIPTION:דנה\\, אבי'));
+});
+
+test('employeeIcs makes one VEVENT per shift of that employee only', () => {
+  const result = schedule();
+  const mine = result.shifts.filter((s) => s.employeeId === 'e1');
+  const ics = employeeIcs(result, { employeeId: 'e1', employeeName: 'אבי' });
+  assert.equal((ics.match(/BEGIN:VEVENT/g) || []).length, mine.length);
+});
+
+test('employeeIcs describes co-workers on the same mission and shift', () => {
+  const result = schedulePair();
+  const ics = employeeIcs(result, { employeeId: 'e1', employeeName: 'אבי' });
+  const descLine = ics.split('\r\n').find((l) => l.startsWith('DESCRIPTION:'));
+  assert.ok(ics.includes('SUMMARY:שער'));
+  assert.ok(descLine?.includes('דנה'), 'the other person on the same shift is named');
+  assert.ok(!descLine?.includes('אבי'), 'the employee is not listed as their own co-worker');
+});
+
+test('employeeIcs omits DESCRIPTION when the employee works alone', () => {
+  const result = schedule();
+  const ics = employeeIcs(result, { employeeId: 'e1', employeeName: 'אבי' });
+  assert.ok(!ics.includes('DESCRIPTION:'));
+});
+
+test('ICS escapes commas, semicolons and backslashes in text', () => {
+  const result = plan({
+    start: START,
+    end: START + HOUR,
+    shiftMinutes: 60,
+    employees: [{ id: 'e1', name: 'A; B\\C' }],
+    missions: [{ id: 'm1', name: 'Gate, North', type: 'local', count: 1 }],
+  });
+  const ics = overviewIcs(result);
+  assert.ok(ics.includes('SUMMARY:Gate\\, North'));
+  assert.ok(ics.includes('DESCRIPTION:A\\; B\\\\C'));
+});
+
+test('ICS folds long lines at 75 octets without splitting a UTF-8 character', () => {
+  const longName = 'משימה '.repeat(30).trim();
+  const result = plan({
+    start: START,
+    end: START + HOUR,
+    shiftMinutes: 60,
+    employees: [{ id: 'e1', name: 'אבי' }],
+    missions: [{ id: 'm1', name: longName, type: 'local', count: 1 }],
+  });
+  const ics = overviewIcs(result);
+  const encoder = new TextEncoder();
+  for (const line of ics.split('\r\n')) {
+    assert.ok(encoder.encode(line).length <= 75, `line too long: ${line}`);
+  }
+  const unfolded = ics.replace(/\r\n /g, '');
+  assert.ok(unfolded.includes(`SUMMARY:${longName}`), 'unfolding the wrapped line recovers the full name');
+});
+
+test('ICS UIDs are stable for the same input', () => {
+  const result = schedulePair();
+  const a = overviewIcs(result, { title: 'בדיקה', now: START });
+  const b = overviewIcs(result, { title: 'בדיקה', now: START + HOUR });
+  assert.equal(a.match(/UID:[^\r\n]+/)[0], b.match(/UID:[^\r\n]+/)[0], 'UID must not depend on generation time');
+});
+
+test('ICS DTSTART/DTEND/DTSTAMP use UTC basic format', () => {
+  const ics = overviewIcs(schedulePair());
+  assert.match(ics, /DTSTAMP:\d{8}T\d{6}Z/);
+  assert.match(ics, /DTSTART:\d{8}T\d{6}Z/);
+  assert.match(ics, /DTEND:\d{8}T\d{6}Z/);
 });

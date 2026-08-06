@@ -1,18 +1,25 @@
 import { useState } from 'react';
 import {
-  Alert, Button, Checkbox, FormControlLabel, Snackbar, Stack,
+  Alert, Button, Checkbox, FormControlLabel, MenuItem, Select, Snackbar, Stack,
 } from '@mui/material';
 import LinkIcon from '@mui/icons-material/Link';
 import DownloadIcon from '@mui/icons-material/Download';
 import ChatIcon from '@mui/icons-material/Chat';
+import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import { shareUrl, URL_WARN_LENGTH } from '../lib/urlState.js';
 import { downloadCsv, shiftsToCsv } from '../lib/exportCsv.js';
 import { copyText, whatsappText } from '../lib/exportText.js';
+import { downloadIcs, employeeIcs, overviewIcs } from '../lib/exportIcal.js';
 import { t } from '../strings.js';
 
-/** Copy-link / CSV / WhatsApp actions for a generated schedule. */
+function sanitizeFilename(name) {
+  return (name || 'shifts').replace(/[^\p{L}\p{N}_-]+/gu, '_');
+}
+
+/** Copy-link / CSV / WhatsApp / iCal actions for a generated schedule. */
 export default function ShareBar({ doc, result, includeOffDuty, setIncludeOffDuty }) {
   const [toast, setToast] = useState(null);
+  const [icsEmployeeId, setIcsEmployeeId] = useState(doc.employees[0]?.id ?? '');
 
   const notify = (ok) => setToast(ok ? t.copied : t.copyFailed);
 
@@ -24,8 +31,7 @@ export default function ShareBar({ doc, result, includeOffDuty, setIncludeOffDut
   };
 
   const onCsv = () => {
-    const name = (doc.title || 'shifts').replace(/[^\p{L}\p{N}_-]+/gu, '_');
-    downloadCsv(shiftsToCsv(result), `${name}.csv`);
+    downloadCsv(shiftsToCsv(result), `${sanitizeFilename(doc.title)}.csv`);
   };
 
   const onWhatsapp = async () => {
@@ -35,6 +41,23 @@ export default function ShareBar({ doc, result, includeOffDuty, setIncludeOffDut
       includeOffDuty,
     });
     notify(await copyText(text));
+  };
+
+  const onIcsOverview = () => {
+    const name = sanitizeFilename(doc.title);
+    downloadIcs(overviewIcs(result, { title: doc.title }), `${name}.ics`);
+  };
+
+  const selectedEmployee = doc.employees.find((e) => e.id === icsEmployeeId) ?? doc.employees[0];
+
+  const onIcsEmployee = () => {
+    if (!selectedEmployee) return;
+    const ics = employeeIcs(result, {
+      employeeId: selectedEmployee.id,
+      employeeName: selectedEmployee.name,
+      title: doc.title,
+    });
+    downloadIcs(ics, `${sanitizeFilename(selectedEmployee.name)}.ics`);
   };
 
   return (
@@ -60,6 +83,28 @@ export default function ShareBar({ doc, result, includeOffDuty, setIncludeOffDut
           )}
           label={t.includeOffDuty}
         />
+        <Button startIcon={<CalendarMonthIcon />} onClick={onIcsOverview} data-testid="download-ics-overview">
+          {t.downloadIcsOverview}
+        </Button>
+        {selectedEmployee && (
+          <>
+            <Select
+              value={selectedEmployee.id}
+              onChange={(e) => setIcsEmployeeId(e.target.value)}
+              size="small"
+              sx={{ minWidth: 150 }}
+              aria-label={t.icsEmployeeSelect}
+              data-testid="ics-employee-select"
+            >
+              {doc.employees.map((e) => (
+                <MenuItem key={e.id} value={e.id}>{e.name}</MenuItem>
+              ))}
+            </Select>
+            <Button startIcon={<CalendarMonthIcon />} onClick={onIcsEmployee} data-testid="download-ics-employee">
+              {t.downloadIcsEmployee}
+            </Button>
+          </>
+        )}
       </Stack>
 
       <Snackbar
