@@ -105,7 +105,6 @@ for (const viewport of VIEWPORTS) {
 
   if (appBarInfo) {
     console.log(`  [${viewport.name}] AppBar height: ${appBarInfo.height}px, position: ${appBarInfo.position}`);
-    const visibleShiftArea = viewport.height - appBarInfo.height;
 
     if (appBarInfo.height > 100) {
       findings.push(`[${viewport.name}] ⚠ AppBar is tall (${appBarInfo.height}px), may crowd content on short screens`);
