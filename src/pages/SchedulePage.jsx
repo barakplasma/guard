@@ -92,6 +92,7 @@ export default function SchedulePage() {
   const nowSlot = useMemo(() => findNowSlot(days, now), [days, now]);
   const nowSlotKey = nowSlot ? `${nowSlot.start}|${nowSlot.end}` : null;
   const [confirmClearPins, setConfirmClearPins] = useState(false);
+  const [includeOffDuty, setIncludeOffDuty] = useState(false);
 
   return (
     <Box>
@@ -130,7 +131,12 @@ export default function SchedulePage() {
       {result && (
         <>
           <Box sx={{ mb: 2 }}>
-            <ShareBar doc={doc} result={result} />
+            <ShareBar
+              doc={doc}
+              result={result}
+              includeOffDuty={includeOffDuty}
+              setIncludeOffDuty={setIncludeOffDuty}
+            />
           </Box>
 
           {result.warnings.map((w, i) => (
@@ -153,6 +159,7 @@ export default function SchedulePage() {
               employees={sortedEmployees}
               now={now}
               nowSlotKey={nowSlotKey}
+              includeOffDuty={includeOffDuty}
               onSwap={(shift, employeeId) => pinShift(
                 shift.missionId, employeeId, shift.start, shift.end, shift.employeeId,
               )}

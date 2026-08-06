@@ -1,5 +1,6 @@
 import {
-  Box, Chip, Divider, Paper, Stack, Typography,
+  Chip, Paper, Stack, Table, TableBody, TableCell, TableContainer, TableHead,
+  TableRow, Typography,
 } from '@mui/material';
 import ShiftRow from './ShiftRow.jsx';
 import { dayKey, formatDay, formatRange } from '../lib/format.js';
@@ -8,7 +9,7 @@ import { t } from '../strings.js';
 
 /** One calendar day of the agenda: its time slots, and who is on/off duty in each. */
 export default function AgendaDay({
-  day, result, employees, now, nowSlotKey, onSwap, onClearPin,
+  day, result, employees, now, nowSlotKey, includeOffDuty, onSwap, onClearPin,
 }) {
   const nameOf = (id) => employees.find((e) => e.id === id)?.name ?? id;
   const isToday = now != null && dayKey(now) === day.day;
@@ -22,7 +23,16 @@ export default function AgendaDay({
         {isToday && <Chip size="small" label={t.today} color="primary" variant="outlined" />}
       </Stack>
 
-      <Stack divider={<Divider flexItem />} spacing={1.5}>
+      <TableContainer sx={{ overflowX: 'auto' }}>
+        <Table size="small" sx={{ minWidth: includeOffDuty ? 680 : 540 }}>
+          <TableHead>
+            <TableRow>
+              <TableCell>{t.shiftTime}</TableCell>
+              <TableCell>{t.missionName}</TableCell>
+              <TableCell>{t.onDuty}</TableCell>
+              {includeOffDuty && <TableCell>{t.offDuty}</TableCell>}
+            </TableRow>
+          </TableHead>
         {day.slots.map((slot) => {
           // Everyone on duty anywhere in this slot - so the dropdown can mark
           // people who are already taken.
@@ -31,7 +41,9 @@ export default function AgendaDay({
               .filter((s) => s.start < slot.end && s.end > slot.start)
               .map((s) => s.employeeId),
           );
-          const free = offDutyDuring(result, slot.start, slot.end).map(nameOf);
+          const free = includeOffDuty
+            ? offDutyDuring(result, slot.start, slot.end).map(nameOf)
+            : [];
           const isNow = slotContainsInstant(slot, now);
           // Only the single canonical "now" slot (picked in SchedulePage via
           // findNowSlot) gets this id - a long-running mission and the current
@@ -41,39 +53,44 @@ export default function AgendaDay({
           const isNowAnchor = nowSlotKey != null && `${slot.start}|${slot.end}` === nowSlotKey;
 
           return (
-            <Box
+            <TableBody
               key={`${slot.start}-${slot.end}`}
               id={isNowAnchor ? 'now-slot' : undefined}
               data-testid={`slot-${slot.start}`}
               sx={isNow ? {
-                borderInlineStart: '4px solid',
-                borderColor: 'primary.main',
-                bgcolor: 'action.hover',
-                pl: 1,
+                '& > tr': { bgcolor: 'action.hover' },
+                '& > tr > td:first-of-type': {
+                  borderInlineStart: '4px solid', borderColor: 'primary.main',
+                },
               } : undefined}
             >
-              <Stack direction="row" spacing={1} sx={{ mb: 0.5, alignItems: 'center' }}>
-                <Typography variant="body2" fontWeight={700}>
-                  {formatRange(slot.start, slot.end)}
-                </Typography>
-                {isNow && <Chip size="small" label={t.now} color="primary" />}
-              </Stack>
-
-              <Stack spacing={1}>
-                {slot.missions.map((mission) => (
-                  <Stack
-                    key={mission.missionId}
-                    direction={{ xs: 'column', sm: 'row' }}
-                    spacing={1}
-                    sx={{ alignItems: { xs: 'flex-start', sm: 'center' } }}
-                  >
+              {slot.missions.map((mission, index) => (
+                <TableRow key={mission.missionId}>
+                  {index === 0 && (
+                    <TableCell rowSpan={slot.missions.length} sx={{ whiteSpace: 'nowrap', verticalAlign: 'top' }}>
+                      <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                        <Typography variant="body2" fontWeight={700}>
+                          {formatRange(slot.start, slot.end)}
+                        </Typography>
+                        {isNow && <Chip size="small" label={t.now} color="primary" />}
+                      </Stack>
+                    </TableCell>
+                  )}
+                  <TableCell sx={{ verticalAlign: 'top' }}>
                     <Chip
                       size="small"
                       label={mission.missionName || '—'}
                       color={mission.type === 'remote' ? 'secondary' : 'default'}
                       sx={{ minWidth: 110 }}
                     />
-                    <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
+                  </TableCell>
+                  <TableCell>
+                    <Stack
+                      direction="row"
+                      spacing={1}
+                      useFlexGap
+                      sx={{ alignItems: 'center', flexWrap: 'wrap' }}
+                    >
                       {mission.entries.map((shift) => (
                         <ShiftRow
                           key={`${shift.missionId}-${shift.employeeId}-${shift.start}`}
@@ -85,17 +102,23 @@ export default function AgendaDay({
                         />
                       ))}
                     </Stack>
-                  </Stack>
-                ))}
-              </Stack>
-
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-                {`${t.offDuty}: ${free.length ? free.join(', ') : t.nobody}`}
-              </Typography>
-            </Box>
+                  </TableCell>
+                  {includeOffDuty && index === 0 && (
+                    <TableCell
+                      rowSpan={slot.missions.length}
+                      data-testid={`off-duty-${slot.start}`}
+                      sx={{ color: 'text.secondary', verticalAlign: 'top' }}
+                    >
+                      {free.length ? free.join(', ') : t.nobody}
+                    </TableCell>
+                  )}
+                </TableRow>
+              ))}
+            </TableBody>
           );
         })}
-      </Stack>
+        </Table>
+      </TableContainer>
     </Paper>
   );
 }

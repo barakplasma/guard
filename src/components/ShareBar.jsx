@@ -11,9 +11,8 @@ import { copyText, whatsappText } from '../lib/exportText.js';
 import { t } from '../strings.js';
 
 /** Copy-link / CSV / WhatsApp actions for a generated schedule. */
-export default function ShareBar({ doc, result }) {
+export default function ShareBar({ doc, result, includeOffDuty, setIncludeOffDuty }) {
   const [toast, setToast] = useState(null);
-  const [withOffDuty, setWithOffDuty] = useState(false);
 
   const notify = (ok) => setToast(ok ? t.copied : t.copyFailed);
 
@@ -33,7 +32,7 @@ export default function ShareBar({ doc, result }) {
     const text = whatsappText(result, {
       title: doc.title,
       employeeNames: new Map(doc.employees.map((e) => [e.id, e.name])),
-      includeOffDuty: withOffDuty,
+      includeOffDuty,
     });
     notify(await copyText(text));
   };
@@ -54,8 +53,8 @@ export default function ShareBar({ doc, result }) {
           control={(
             <Checkbox
               size="small"
-              checked={withOffDuty}
-              onChange={(e) => setWithOffDuty(e.target.checked)}
+              checked={includeOffDuty}
+              onChange={(e) => setIncludeOffDuty(e.target.checked)}
               data-testid="include-off-duty"
             />
           )}
