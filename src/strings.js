@@ -93,6 +93,9 @@ export const t = {
   copyWhatsapp: 'העתק לוואטסאפ',
   includeOffDuty: 'כלול רשימת פנויים',
   longUrlWarning: 'הקישור ארוך מאוד. חלק מהאפליקציות עלולות לקצר אותו.',
+  downloadIcsOverview: 'הורד יומן (ical) — כלל הצוות',
+  downloadIcsEmployee: 'הורד יומן אישי (ical)',
+  icsEmployeeSelect: 'עובד ליומן אישי',
 
   // errors and warnings
   planError: 'לא ניתן לתכנן',

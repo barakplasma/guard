@@ -174,7 +174,10 @@ function makeState(employees) {
   return new Map(
     employees.map((e) => [
       e.id,
-      { id: e.id, name: e.name, start: e.start, end: e.end, busy: [], busyUntil: -Infinity, minutes: 0, lastEnd: -Infinity, seq: seq++, stints: 0 },
+      {
+        id: e.id, name: e.name, start: e.start, end: e.end, busy: [], busyUntil: -Infinity,
+        minutes: 0, missionMinutes: new Map(), lastEnd: -Infinity, seq: seq++, stints: 0,
+      },
     ]),
   );
 }
@@ -188,10 +191,12 @@ function isAvailable(st, start, end) {
   return st.start <= start && st.end >= end;
 }
 
-function occupy(st, start, end, counter) {
+function occupy(st, missionId, start, end, counter) {
   st.busy.push({ start, end });
   st.busyUntil = Math.max(st.busyUntil, end);
-  st.minutes += (end - start) / MINUTE;
+  const minutes = (end - start) / MINUTE;
+  st.minutes += minutes;
+  st.missionMinutes.set(missionId, (st.missionMinutes.get(missionId) ?? 0) + minutes);
   st.lastEnd = Math.max(st.lastEnd, end);
   st.stints += 1;
   st.seq = counter();
@@ -249,7 +254,7 @@ export function plan({ start, end, shiftMinutes, employees = [], missions = [], 
   /** Raw assignments before adjacent-row merging. */
   const rows = [];
   const addRow = (mission, st, blockStart, blockEnd, pinned) => {
-    occupy(st, blockStart, blockEnd, nextSeq);
+    occupy(st, mission.id, blockStart, blockEnd, nextSeq);
     rows.push({
       missionId: mission.id,
       missionName: mission.name,
@@ -359,12 +364,17 @@ export function plan({ start, end, shiftMinutes, employees = [], missions = [], 
       (st) => isAvailable(st, d.start, d.end) && isFree(st, d.start, d.end),
     );
     // The fairness core:
-    //   1. fewest minutes so far  -> even rotation
-    //   2. earliest `lastEnd`     -> maximizes the gap since last on duty
-    //   3. `seq`                  -> round-robin among exact ties
+    //   1. fewest minutes so far      -> even rotation
+    //   2. earliest `lastEnd`         -> maximizes the gap since last on duty
+    //   3. fewest minutes on *this* mission -> rotates people across mission types,
+    //      not just across time - otherwise two concurrent local missions can settle
+    //      into "always the same person on A, always the other on B" even though their
+    //      total minutes stay perfectly balanced.
+    //   4. `seq`                      -> round-robin among exact ties
     candidates.sort((a, b) => (
       a.minutes - b.minutes
       || a.lastEnd - b.lastEnd
+      || (a.missionMinutes.get(d.mission.id) ?? 0) - (b.missionMinutes.get(d.mission.id) ?? 0)
       || a.seq - b.seq
     ));
 
