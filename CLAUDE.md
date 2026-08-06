@@ -50,6 +50,9 @@ validation error there takes down the whole document, which is the user's only c
   quietly drops `data-testid` attributes and breaks `tests/e2e.mjs`.
 - The icon is `DeleteOutlined`, not `DeleteOutline` — v9 renamed several.
 - Navigation must carry `location.search` along; dropping it discards the user's entire plan.
+- MUI `Stack` component only gives special responsive handling to `direction` and `spacing` props.
+  Style props like `alignItems`, `flexWrap`, `justifyContent` MUST go in `sx`, not as bare props.
+  Bare props are spread as invalid DOM attributes and silently dropped by the browser.
 
 ## Before delivering
 
