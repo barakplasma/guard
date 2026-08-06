@@ -59,6 +59,7 @@ export const t = {
 
   // schedule
   schedule: 'סידור',
+  shiftTime: 'שעות',
   planNow: 'תכנן',
   replan: 'תכנן מחדש',
   onDuty: 'במשמרת',
