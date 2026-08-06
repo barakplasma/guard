@@ -24,13 +24,20 @@ export default function AgendaDay({
       </Stack>
 
       <TableContainer sx={{ overflowX: 'auto' }}>
-        <Table size="small" sx={{ minWidth: includeOffDuty ? 680 : 540 }}>
+        <Table
+          size="small"
+          sx={{
+            tableLayout: { xs: 'fixed', sm: 'auto' },
+            width: { xs: '100%', sm: 'auto' },
+            minWidth: { xs: 0, sm: includeOffDuty ? 680 : 540 },
+          }}
+        >
           <TableHead>
             <TableRow>
-              <TableCell>{t.shiftTime}</TableCell>
-              <TableCell>{t.missionName}</TableCell>
-              <TableCell>{t.onDuty}</TableCell>
-              {includeOffDuty && <TableCell>{t.offDuty}</TableCell>}
+              <TableCell sx={{ width: { xs: includeOffDuty ? '22%' : '25%', sm: 'auto' } }}>{t.shiftTime}</TableCell>
+              <TableCell sx={{ width: { xs: includeOffDuty ? '22%' : '26%', sm: 'auto' } }}>{t.missionName}</TableCell>
+              <TableCell sx={{ width: { xs: includeOffDuty ? '28%' : '49%', sm: 'auto' } }}>{t.onDuty}</TableCell>
+              {includeOffDuty && <TableCell sx={{ width: { xs: '28%', sm: 'auto' } }}>{t.offDuty}</TableCell>}
             </TableRow>
           </TableHead>
         {day.slots.map((slot) => {
@@ -68,7 +75,11 @@ export default function AgendaDay({
                 <TableRow key={mission.missionId}>
                   {index === 0 && (
                     <TableCell rowSpan={slot.missions.length} sx={{ whiteSpace: 'nowrap', verticalAlign: 'top' }}>
-                      <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                      <Stack
+                        direction={{ xs: 'column', sm: 'row' }}
+                        spacing={0.5}
+                        sx={{ alignItems: { xs: 'flex-start', sm: 'center' } }}
+                      >
                         <Typography variant="body2" fontWeight={700}>
                           {formatRange(slot.start, slot.end)}
                         </Typography>
@@ -76,12 +87,18 @@ export default function AgendaDay({
                       </Stack>
                     </TableCell>
                   )}
-                  <TableCell sx={{ verticalAlign: 'top' }}>
+                  <TableCell sx={{ verticalAlign: 'top', overflowWrap: 'break-word' }}>
                     <Chip
                       size="small"
                       label={mission.missionName || '—'}
                       color={mission.type === 'remote' ? 'secondary' : 'default'}
-                      sx={{ minWidth: 110 }}
+                      sx={{
+                        minWidth: { xs: 0, sm: 110 },
+                        maxWidth: '100%',
+                        '& .MuiChip-label': {
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        },
+                      }}
                     />
                   </TableCell>
                   <TableCell>
