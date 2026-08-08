@@ -25,11 +25,15 @@ export default function ShiftRow({ shift, employees, busyElsewhere, onSwap, onCl
         alignItems: 'center',
         gap: 0.5,
         rowGap: 0.5,
+        // On a phone it grows into whatever the row has left and stacks when it
+        // runs out, so two people on one mission sit side by side when there is
+        // room and one per line when there is not. On a wide screen the column
+        // is roomy already, and a name-wide control beats a stretched one.
+        flex: { xs: '1 1 6rem', sm: '0 0 auto' },
         maxWidth: '100%',
         minWidth: 0,
-        py: 0.25,
         ...(shift.pinned && {
-          borderInlineStart: '3px solid', borderColor: 'primary.main', pl: 1,
+          borderInlineStart: '3px solid', borderColor: 'primary.main', pl: 0.75,
         }),
       }}
     >
@@ -37,7 +41,13 @@ export default function ShiftRow({ shift, employees, busyElsewhere, onSwap, onCl
         value={shift.employeeId}
         onChange={(e) => onSwap(e.target.value)}
         size="small"
-        sx={{ minWidth: { xs: 128, sm: 150 }, maxWidth: '100%' }}
+        sx={{
+          flex: '1 1 auto',
+          minWidth: { xs: 0, sm: 150 },
+          maxWidth: '100%',
+          // A denser control on phones: 24 of these stacked is most of the page.
+          '& .MuiSelect-select': { py: { xs: 0.75, sm: 1 } },
+        }}
         data-testid={`shift-select-${shift.missionId}-${shift.start}-${shift.employeeId}`}
       >
         {employees.map((e) => {

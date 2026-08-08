@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import {
-  Alert, Box, Button, Checkbox, Divider, FormControlLabel, MenuItem, Paper,
-  Select, Snackbar, Stack, Typography,
+  Alert, Box, Button, Divider, MenuItem, Paper, Select, Snackbar, Stack, Typography,
 } from '@mui/material';
 import LinkIcon from '@mui/icons-material/Link';
 import DownloadIcon from '@mui/icons-material/Download';
@@ -18,7 +17,7 @@ function sanitizeFilename(name) {
 }
 
 /** Copy-link / CSV / WhatsApp / iCal actions for a generated schedule. */
-export default function ShareBar({ doc, result, includeOffDuty, setIncludeOffDuty }) {
+export default function ShareBar({ doc, result }) {
   const [toast, setToast] = useState(null);
   const [icsEmployeeId, setIcsEmployeeId] = useState(doc.employees[0]?.id ?? '');
 
@@ -36,11 +35,7 @@ export default function ShareBar({ doc, result, includeOffDuty, setIncludeOffDut
   };
 
   const onWhatsapp = async () => {
-    const text = whatsappText(result, {
-      title: doc.title,
-      employeeNames: new Map(doc.employees.map((e) => [e.id, e.name])),
-      includeOffDuty,
-    });
+    const text = whatsappText(result, { title: doc.title });
     notify(await copyText(text));
   };
 
@@ -69,44 +64,30 @@ export default function ShareBar({ doc, result, includeOffDuty, setIncludeOffDut
         In one undivided row of buttons the iCal actions read as more of the
         same, and the employee picker looks like it belongs to all of them.
       */}
-      <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2 } }}>
-        <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1 }}>
+      <Paper variant="outlined" sx={{ p: { xs: 1, sm: 2 } }}>
+        <Typography variant="caption" color="text.secondary" fontWeight={700} sx={{ display: 'block', mb: 0.5 }}>
           {t.shareSection}
         </Typography>
-        <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
-          <Button variant="outlined" startIcon={<LinkIcon />} onClick={onCopyLink} data-testid="copy-link">
+        <Stack direction="row" spacing={0.75} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
+          <Button size="small" variant="outlined" startIcon={<LinkIcon />} onClick={onCopyLink} data-testid="copy-link">
             {t.copyLink}
           </Button>
-          <Button variant="outlined" startIcon={<DownloadIcon />} onClick={onCsv} data-testid="download-csv">
+          <Button size="small" variant="outlined" startIcon={<DownloadIcon />} onClick={onCsv} data-testid="download-csv">
             {t.downloadCsv}
           </Button>
-          <Button variant="outlined" startIcon={<ChatIcon />} onClick={onWhatsapp} data-testid="copy-whatsapp">
+          <Button size="small" variant="outlined" startIcon={<ChatIcon />} onClick={onWhatsapp} data-testid="copy-whatsapp">
             {t.copyWhatsapp}
           </Button>
         </Stack>
-        <FormControlLabel
-          sx={{ mt: 0.5, mr: 0 }}
-          control={(
-            <Checkbox
-              size="small"
-              checked={includeOffDuty}
-              onChange={(e) => setIncludeOffDuty(e.target.checked)}
-              data-testid="include-off-duty"
-            />
-          )}
-          label={t.includeOffDuty}
-        />
 
-        <Divider sx={{ my: 2 }} />
+        <Divider sx={{ my: 1.25 }} />
 
-        <Typography variant="subtitle2" fontWeight={700}>
+        <Typography variant="caption" color="text.secondary" fontWeight={700} sx={{ display: 'block', mb: 0.5 }}>
           {t.calendarSection}
         </Typography>
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-          {t.calendarSectionHelp}
-        </Typography>
-        <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
+        <Stack direction="row" spacing={0.75} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
           <Button
+            size="small"
             variant="outlined"
             startIcon={<CalendarMonthIcon />}
             onClick={onIcsOverview}
@@ -115,12 +96,12 @@ export default function ShareBar({ doc, result, includeOffDuty, setIncludeOffDut
             {t.downloadIcsOverview}
           </Button>
           {selectedEmployee && (
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1 }}>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 0.75 }}>
               <Select
                 value={selectedEmployee.id}
                 onChange={(e) => setIcsEmployeeId(e.target.value)}
                 size="small"
-                sx={{ minWidth: 130 }}
+                sx={{ minWidth: 110, '& .MuiSelect-select': { py: 0.5 } }}
                 aria-label={t.icsEmployeeSelect}
                 data-testid="ics-employee-select"
               >
@@ -129,6 +110,7 @@ export default function ShareBar({ doc, result, includeOffDuty, setIncludeOffDut
                 ))}
               </Select>
               <Button
+                size="small"
                 variant="outlined"
                 startIcon={<CalendarMonthIcon />}
                 onClick={onIcsEmployee}

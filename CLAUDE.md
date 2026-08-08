@@ -56,10 +56,12 @@ validation error there takes down the whole document, which is the user's only c
 - A wrapping row must space itself with `gap` (`useFlexGap` on a `Stack`, or a plain flex `Box`).
   `Stack`'s default margin-based `spacing` offsets whatever falls to the second line, so wrapped
   chips and buttons land on top of the row below.
-- The agenda is a table from `sm` up and one card per slot below it (`AgendaDay.jsx`, switched with
-  `useMediaQuery`). Only one of the two is mounted, which is what keeps the `data-testid`s unique —
-  do not render both and hide one with CSS. Four columns do not fit a 360px phone: squeezing them
-  in truncated the mission name to a single letter and spilled the times over it.
+- The agenda is a table from `sm` up and, below it, a time gutter with the missions beside it
+  (`AgendaDay.jsx`, switched with `useMediaQuery`). Only one of the two is mounted, which is what
+  keeps the `data-testid`s unique — do not render both and hide one with CSS. Both failure modes
+  are real: four table columns on a 360px phone truncated the mission name to a single letter and
+  spilled the times over it, while a card per slot cost a screenful per hour. Portrait density is
+  the constraint to design against — a day is 24 of these rows.
 - `sx` maps palette tokens for `borderColor` only. `borderInlineStartColor: 'primary.main'` is
   emitted as an invalid colour and dropped — resolve it via a callback (`(theme) => …`).
 

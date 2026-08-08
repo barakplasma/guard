@@ -68,7 +68,7 @@ function SummaryTable({ result }) {
           <TableBody>
             {result.stats.perEmployee.map((row) => (
               <TableRow key={row.employeeId} data-testid={`summary-${row.employeeId}`}>
-                <TableCell sx={{ overflowWrap: 'anywhere' }}>{row.name}</TableCell>
+                <TableCell sx={{ overflowWrap: 'break-word' }}>{row.name}</TableCell>
                 <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>{formatDuration(row.minutes)}</TableCell>
                 <TableCell align="right">{row.stints}</TableCell>
                 <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
@@ -96,14 +96,15 @@ export default function SchedulePage() {
   const nowSlot = useMemo(() => findNowSlot(days, now), [days, now]);
   const nowSlotKey = nowSlot ? `${nowSlot.start}|${nowSlot.end}` : null;
   const [confirmClearPins, setConfirmClearPins] = useState(false);
-  const [includeOffDuty, setIncludeOffDuty] = useState(false);
 
   return (
     <Box>
       {decodeFailed && <Alert severity="warning" sx={{ mb: 2 }}>{t.badLink}</Alert>}
 
-      <Stack direction="row" spacing={1} useFlexGap sx={{ mb: 2, alignItems: 'center', flexWrap: 'wrap' }}>
-        <Typography variant="h6" sx={{ flex: 1 }}>{t.schedule}</Typography>
+      <Stack direction="row" spacing={1} useFlexGap sx={{ mb: 1, alignItems: 'center', flexWrap: 'wrap' }}>
+        <Typography variant="h6" sx={{ flex: 1, fontSize: { xs: '1.05rem', sm: '1.25rem' } }}>
+          {t.schedule}
+        </Typography>
         {nowSlotKey != null && (
           <Button size="small" onClick={jumpToNow} data-testid="jump-to-now">
             {t.jumpToNow}
@@ -134,13 +135,8 @@ export default function SchedulePage() {
 
       {result && (
         <>
-          <Box sx={{ mb: 2 }}>
-            <ShareBar
-              doc={doc}
-              result={result}
-              includeOffDuty={includeOffDuty}
-              setIncludeOffDuty={setIncludeOffDuty}
-            />
+          <Box sx={{ mb: { xs: 1, sm: 2 } }}>
+            <ShareBar doc={doc} result={result} />
           </Box>
 
           {result.warnings.map((w, i) => (
@@ -163,7 +159,6 @@ export default function SchedulePage() {
               employees={sortedEmployees}
               now={now}
               nowSlotKey={nowSlotKey}
-              includeOffDuty={includeOffDuty}
               onSwap={(shift, employeeId) => pinShift(
                 shift.missionId, employeeId, shift.start, shift.end, shift.employeeId,
               )}

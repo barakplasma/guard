@@ -94,33 +94,31 @@ for (const viewport of VIEWPORTS) {
 
   await page.screenshot({ path: `${SHOT}/${viewport.name}-03-schedule.png`, fullPage: true });
 
-  // A cell narrower than its own content does not clip - it spills over the
-  // neighbouring column, which is how the agenda's times ended up printed on
-  // top of the mission names on a phone.
-  const spilling = await page.evaluate(() => [...document.querySelectorAll('td, th')]
+  // A box narrower than its own content does not clip - it spills over its
+  // neighbour, which is how the agenda's times ended up printed on top of the
+  // mission names on a phone. Covers the table cells and, in the portrait
+  // layout that replaces them below `sm`, the slot rows.
+  const spilling = await page.evaluate(() => [
+    ...document.querySelectorAll('td, th, [data-testid^="slot-"], [data-testid^="slot-"] *'),
+  ]
     .filter((c) => c.scrollWidth > c.clientWidth + 1)
-    .map((c) => `"${c.innerText.trim().replace(/\s+/g, ' ').slice(0, 24)}" needs ${c.scrollWidth}px, has ${c.clientWidth}px`));
+    .map((c) => `"${c.innerText?.trim().replace(/\s+/g, ' ').slice(0, 24) ?? ''}" needs ${c.scrollWidth}px, has ${c.clientWidth}px`));
 
   if (spilling.length > 0) {
-    findings.push(`[${viewport.name}] ⚠ ${spilling.length} table cell(s) overflow their column: ${spilling.slice(0, 3).join('; ')}`);
+    findings.push(`[${viewport.name}] ⚠ ${spilling.length} element(s) overflow their box in the agenda: ${spilling.slice(0, 3).join('; ')}`);
   } else {
-    console.log(`  [${viewport.name}] ✓ No table cell overflows its column`);
+    console.log(`  [${viewport.name}] ✓ Nothing in the agenda overflows its box`);
   }
 
-  // The off-duty list adds a column on the schedule; check that state too.
-  const offDutyToggle = page.getByTestId('include-off-duty');
-  if (await offDutyToggle.count() > 0) {
-    await offDutyToggle.click();
-    await page.waitForTimeout(400);
-    const overflowWithOffDuty = await page.evaluate(() => document.body.scrollWidth > window.innerWidth);
-    if (overflowWithOffDuty) {
-      findings.push(`[${viewport.name}] ⚠ HORIZONTAL OVERFLOW with the off-duty list shown`);
-    } else {
-      console.log(`  [${viewport.name}] ✓ No horizontal overflow with the off-duty list shown`);
-    }
-    await page.screenshot({ path: `${SHOT}/${viewport.name}-03b-off-duty.png`, fullPage: true });
-    await offDutyToggle.click();
-    await page.waitForTimeout(300);
+  // Density: how much of the screen one hour of schedule costs.
+  const slotHeight = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('[data-testid^="slot-"]')];
+    if (rows.length === 0) return null;
+    const total = rows.reduce((sum, r) => sum + r.getBoundingClientRect().height, 0);
+    return Math.round(total / rows.length);
+  });
+  if (slotHeight != null) {
+    console.log(`  [${viewport.name}] Average slot height: ${slotHeight}px (${(viewport.height / slotHeight).toFixed(1)} slots per screen)`);
   }
 
   // Check for vertical crowding with sticky AppBar

@@ -30,8 +30,22 @@ export const formatDate = (ms) => dateFmt.format(new Date(ms));
  * like a zero-length shift rather than a full day on duty.
  */
 export function formatRange(start, end) {
-  const base = `${formatTime(start)}–${formatTime(end)}`;
-  return dayKey(start) === dayKey(end) ? base : `${base} (${shortDayFmt.format(new Date(end))})`;
+  const [from, to] = formatRangeLines(start, end);
+  return `${from}–${to}`;
+}
+
+/**
+ * The same range split in two, for the narrow time gutter of the portrait
+ * agenda. The end keeps its date suffix: stacked without it, a 24-hour mission
+ * reads as `22:00` over `22:00`, which is the zero-length-shift confusion the
+ * suffix exists to prevent.
+ */
+export function formatRangeLines(start, end) {
+  const to = formatTime(end);
+  return [
+    formatTime(start),
+    dayKey(start) === dayKey(end) ? to : `${to} (${shortDayFmt.format(new Date(end))})`,
+  ];
 }
 
 /** Local midnight of the day containing `ms` - the grouping key for the agenda. */

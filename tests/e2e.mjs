@@ -136,34 +136,13 @@ check('CSV has one data row per individual shift assignment',
   csv.trimEnd().split('\r\n').length - 1 === individualShiftAssignments);
 
 /* ---------- WhatsApp ---------- */
-check('free names are absent initially',
-  (await page.locator('[data-testid^="off-duty-"]').count()) === 0);
 await page.getByTestId('copy-whatsapp').click();
 await page.waitForTimeout(400);
-let clip = await page.evaluate(() => navigator.clipboard.readText());
+const clip = await page.evaluate(() => navigator.clipboard.readText());
 check('WhatsApp text has a bold heading', clip.startsWith('*בדיקה*'), clip.slice(0, 40));
 check('WhatsApp text bullets the missions',
   clip.includes('• *שער*:') && clip.includes('• *סיור מרוחק*:'));
-check('WhatsApp text omits free names initially', !clip.includes('פנויים:'));
-
-await page.getByTestId('include-off-duty').click();
-await page.waitForTimeout(200);
-const freeCells = page.locator('[data-testid^="off-duty-"]');
-check('free names appear after selecting include-off-duty',
-  (await freeCells.count()) > 0 && (await freeCells.first().innerText()).trim() !== '—');
-await page.getByTestId('copy-whatsapp').click();
-await page.waitForTimeout(400);
-clip = await page.evaluate(() => navigator.clipboard.readText());
-check('WhatsApp text includes free names when selected', clip.includes('פנויים:'));
-
-await page.getByTestId('include-off-duty').click();
-await page.waitForTimeout(200);
-check('free names disappear when include-off-duty is cleared',
-  (await page.locator('[data-testid^="off-duty-"]').count()) === 0);
-await page.getByTestId('copy-whatsapp').click();
-await page.waitForTimeout(400);
-clip = await page.evaluate(() => navigator.clipboard.readText());
-check('WhatsApp text omits free names again when cleared', !clip.includes('פנויים:'));
+check('WhatsApp text lists only who is on duty', !clip.includes('פנויים'));
 
 /* ---------- the shared link ---------- */
 const ctx2 = await browser.newContext();
