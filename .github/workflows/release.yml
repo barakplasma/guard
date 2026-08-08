@@ -19,13 +19,24 @@ permissions:
   pages: write      # deploy to Pages
   id-token: write   # Pages deploy attestation
 
+# A newer push to main supersedes an in-flight release. Every channel here is
+# "latest wins" — the rolling release tag, the :latest image, the Pages site —
+# so a half-finished older run has nothing worth protecting, and letting it hold
+# the group is actively harmful: run 31124152979 wedged in `queued` with all its
+# jobs already dead, and with cancel-in-progress: false it owned this group
+# indefinitely, so no later push to main could ever release.
 concurrency:
   group: release-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
+# Every job carries an explicit timeout. The default is 360 minutes, so one hung
+# step holds the concurrency group — and therefore all releases — for six hours.
+# This is not hypothetical: deploy-pages@v4 hung for 10 minutes in run
+# 31098270057 before failing.
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -58,6 +69,7 @@ jobs:
   e2e-browser:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -90,6 +102,7 @@ jobs:
   pages:
     needs: e2e-browser
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     outputs:
       page_url: ${{ steps.deployment.outputs.page_url }}
     environment:
@@ -122,6 +135,7 @@ jobs:
   release-zip:
     needs: e2e-browser
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -149,6 +163,7 @@ jobs:
   oci:
     needs: e2e-browser
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -175,6 +190,7 @@ jobs:
   e2e-oci:
     needs: oci
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: docker/login-action@v3
         with:
@@ -219,6 +235,7 @@ jobs:
   e2e-pages:
     needs: pages
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Verify the Pages site is live
         run: |
