@@ -19,13 +19,31 @@ permissions:
   pages: write      # deploy to Pages
   id-token: write   # Pages deploy attestation
 
+# The group is deliberately named `release-v2-`, not `release-`. Run 31124152979
+# is wedged in `queued` with all seven of its jobs already terminal, and GitHub
+# will not clear it: both /cancel and /force-cancel reject it with 409 "Cannot
+# cancel a workflow re-run that has not yet queued". It therefore owns the old
+# `release-refs/heads/main` group indefinitely. cancel-in-progress cannot help,
+# because that works by cancelling the incumbent and this incumbent is precisely
+# the thing that cannot be cancelled. Moving to a new group name is what actually
+# lets main release again. Do not rename this back to `release-`.
+#
+# cancel-in-progress is on because a newer push to main should supersede an
+# in-flight release: every channel here is "latest wins" — the rolling release
+# tag, the :latest image, the Pages site — so a half-finished older run has
+# nothing worth protecting.
 concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: false
+  group: release-v2-${{ github.ref }}
+  cancel-in-progress: true
 
+# Every job carries an explicit timeout. The default is 360 minutes, so one hung
+# step holds the concurrency group — and therefore all releases — for six hours.
+# This is not hypothetical: deploy-pages@v4 hung for 10 minutes in run
+# 31098270057 before failing.
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -58,6 +76,7 @@ jobs:
   e2e-browser:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -90,6 +109,7 @@ jobs:
   pages:
     needs: e2e-browser
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     outputs:
       page_url: ${{ steps.deployment.outputs.page_url }}
     environment:
@@ -122,6 +142,7 @@ jobs:
   release-zip:
     needs: e2e-browser
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -149,6 +170,7 @@ jobs:
   oci:
     needs: e2e-browser
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -175,6 +197,7 @@ jobs:
   e2e-oci:
     needs: oci
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: docker/login-action@v3
         with:
@@ -219,6 +242,7 @@ jobs:
   e2e-pages:
     needs: pages
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Verify the Pages site is live
         run: |
