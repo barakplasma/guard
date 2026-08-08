@@ -86,6 +86,7 @@ export const t = {
   spread: 'פער בין העמוס לפנוי ביותר',
 
   // sharing
+  shareSection: 'שיתוף וייצוא',
   copyLink: 'העתק קישור',
   copied: 'הועתק!',
   copyFailed: 'ההעתקה נכשלה',
@@ -93,8 +94,10 @@ export const t = {
   copyWhatsapp: 'העתק לוואטסאפ',
   includeOffDuty: 'כלול רשימת פנויים',
   longUrlWarning: 'הקישור ארוך מאוד. חלק מהאפליקציות עלולות לקצר אותו.',
-  downloadIcsOverview: 'הורד יומן (ical) — כלל הצוות',
-  downloadIcsEmployee: 'הורד יומן אישי (ical)',
+  calendarSection: 'ייצוא ליומן (iCal)',
+  calendarSectionHelp: 'קובץ להוספה ליומן — גוגל, אאוטלוק או היומן של הטלפון.',
+  downloadIcsOverview: 'יומן כלל הצוות',
+  downloadIcsEmployee: 'יומן אישי',
   icsEmployeeSelect: 'עובד ליומן אישי',
 
   // errors and warnings

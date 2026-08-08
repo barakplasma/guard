@@ -22,8 +22,11 @@ const VIEWPORTS = [
   { name: 'landscape-phone', width: 812, height: 375 }, // iPhone X landscape
 ];
 
+// CHROME points at an existing Chromium when the sandbox already ships one,
+// matching how tests/e2e.mjs is run.
 const browser = await chromium.launch({
   headless: true,
+  ...(process.env.CHROME ? { executablePath: process.env.CHROME } : {}),
 });
 
 const findings = [];
@@ -90,6 +93,35 @@ for (const viewport of VIEWPORTS) {
   await page.waitForTimeout(600);
 
   await page.screenshot({ path: `${SHOT}/${viewport.name}-03-schedule.png`, fullPage: true });
+
+  // A cell narrower than its own content does not clip - it spills over the
+  // neighbouring column, which is how the agenda's times ended up printed on
+  // top of the mission names on a phone.
+  const spilling = await page.evaluate(() => [...document.querySelectorAll('td, th')]
+    .filter((c) => c.scrollWidth > c.clientWidth + 1)
+    .map((c) => `"${c.innerText.trim().replace(/\s+/g, ' ').slice(0, 24)}" needs ${c.scrollWidth}px, has ${c.clientWidth}px`));
+
+  if (spilling.length > 0) {
+    findings.push(`[${viewport.name}] ⚠ ${spilling.length} table cell(s) overflow their column: ${spilling.slice(0, 3).join('; ')}`);
+  } else {
+    console.log(`  [${viewport.name}] ✓ No table cell overflows its column`);
+  }
+
+  // The off-duty list adds a column on the schedule; check that state too.
+  const offDutyToggle = page.getByTestId('include-off-duty');
+  if (await offDutyToggle.count() > 0) {
+    await offDutyToggle.click();
+    await page.waitForTimeout(400);
+    const overflowWithOffDuty = await page.evaluate(() => document.body.scrollWidth > window.innerWidth);
+    if (overflowWithOffDuty) {
+      findings.push(`[${viewport.name}] ⚠ HORIZONTAL OVERFLOW with the off-duty list shown`);
+    } else {
+      console.log(`  [${viewport.name}] ✓ No horizontal overflow with the off-duty list shown`);
+    }
+    await page.screenshot({ path: `${SHOT}/${viewport.name}-03b-off-duty.png`, fullPage: true });
+    await offDutyToggle.click();
+    await page.waitForTimeout(300);
+  }
 
   // Check for vertical crowding with sticky AppBar
   const appBarInfo = await page.evaluate(() => {

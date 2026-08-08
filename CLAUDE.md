@@ -53,6 +53,15 @@ validation error there takes down the whole document, which is the user's only c
 - MUI `Stack` component only gives special responsive handling to `direction` and `spacing` props.
   Style props like `alignItems`, `flexWrap`, `justifyContent` MUST go in `sx`, not as bare props.
   Bare props are spread as invalid DOM attributes and silently dropped by the browser.
+- A wrapping row must space itself with `gap` (`useFlexGap` on a `Stack`, or a plain flex `Box`).
+  `Stack`'s default margin-based `spacing` offsets whatever falls to the second line, so wrapped
+  chips and buttons land on top of the row below.
+- The agenda is a table from `sm` up and one card per slot below it (`AgendaDay.jsx`, switched with
+  `useMediaQuery`). Only one of the two is mounted, which is what keeps the `data-testid`s unique —
+  do not render both and hide one with CSS. Four columns do not fit a 360px phone: squeezing them
+  in truncated the mission name to a single letter and spilled the times over it.
+- `sx` maps palette tokens for `borderColor` only. `borderInlineStartColor: 'primary.main'` is
+  emitted as an invalid colour and dropped — resolve it via a callback (`(theme) => …`).
 
 ## Before delivering
 
@@ -64,6 +73,10 @@ For anything touching the UI, exports, sharing, or offline behaviour, also run t
 (`tests/e2e.mjs`, instructions in `README.md`) — several bugs found during development were
 invisible to the unit tests: MUI dropping test ids, a zod schema rejecting a freshly added mission,
 and a 24-hour remote mission rendering as `22:00–22:00`.
+
+For layout changes run `tests/mobile-viewports.mjs` too (same server, three phone/tablet
+viewports). It fails on horizontal overflow and on any table cell whose content is wider than its
+column — the shape of every mobile layout bug reported so far.
 
 `lz-string` is CommonJS: import it as a default and destructure, or the Node test run breaks while
 the Vite build keeps working.

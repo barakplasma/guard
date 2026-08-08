@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import {
   Alert, Box, Button, Paper, Stack, Table, TableBody, TableCell,
-  TableHead, TableRow, Typography,
+  TableContainer, TableHead, TableRow, Typography,
 } from '@mui/material';
 import AgendaDay from '../components/AgendaDay.jsx';
 import ShareBar from '../components/ShareBar.jsx';
@@ -51,30 +51,34 @@ function warningText(warning, doc) {
 
 function SummaryTable({ result }) {
   return (
-    <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
+    <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2 }, mb: 2 }}>
       <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1 }}>{t.summary}</Typography>
-      <Table size="small">
-        <TableHead>
-          <TableRow>
-            <TableCell>{t.employeeName}</TableCell>
-            <TableCell align="right">{t.totalTime}</TableCell>
-            <TableCell align="right">{t.stints}</TableCell>
-            <TableCell align="right">{t.minGap}</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {result.stats.perEmployee.map((row) => (
-            <TableRow key={row.employeeId} data-testid={`summary-${row.employeeId}`}>
-              <TableCell>{row.name}</TableCell>
-              <TableCell align="right">{formatDuration(row.minutes)}</TableCell>
-              <TableCell align="right">{row.stints}</TableCell>
-              <TableCell align="right">
-                {row.minGapMinutes == null ? '—' : formatDuration(row.minGapMinutes)}
-              </TableCell>
+      {/* Scrolls sideways on a narrow screen rather than wrapping the headers
+          into unreadable stacks of single words. */}
+      <TableContainer sx={{ overflowX: 'auto' }}>
+        <Table size="small" sx={{ minWidth: 360 }}>
+          <TableHead>
+            <TableRow>
+              <TableCell sx={{ whiteSpace: 'nowrap' }}>{t.employeeName}</TableCell>
+              <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>{t.totalTime}</TableCell>
+              <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>{t.stints}</TableCell>
+              <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>{t.minGap}</TableCell>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+          </TableHead>
+          <TableBody>
+            {result.stats.perEmployee.map((row) => (
+              <TableRow key={row.employeeId} data-testid={`summary-${row.employeeId}`}>
+                <TableCell sx={{ overflowWrap: 'anywhere' }}>{row.name}</TableCell>
+                <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>{formatDuration(row.minutes)}</TableCell>
+                <TableCell align="right">{row.stints}</TableCell>
+                <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+                  {row.minGapMinutes == null ? '—' : formatDuration(row.minGapMinutes)}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
       <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
         {`${t.spread}: ${formatDuration(result.stats.spreadMinutes)}`}
       </Typography>

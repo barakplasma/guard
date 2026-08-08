@@ -17,7 +17,8 @@ once the page has loaded, it keeps working with no network at all.
 - **Manual control** — assign specific people to a mission from the Missions page, or swap anyone
   in any generated shift with one dropdown on the schedule. Manual choices are remembered and
   travel with the shared link.
-- **Export** — download a CSV (Excel-safe Hebrew), or copy a message formatted for WhatsApp.
+- **Export** — download a CSV (Excel-safe Hebrew), or copy a message formatted for WhatsApp. A
+  separate calendar section downloads an iCal file, for the whole team or for one person.
 - **Offline** — a service worker precaches the app; all scheduling runs in the browser.
 
 ### Example

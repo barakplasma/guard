@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import {
-  Alert, Button, Checkbox, FormControlLabel, MenuItem, Select, Snackbar, Stack,
+  Alert, Box, Button, Checkbox, Divider, FormControlLabel, MenuItem, Paper,
+  Select, Snackbar, Stack, Typography,
 } from '@mui/material';
 import LinkIcon from '@mui/icons-material/Link';
 import DownloadIcon from '@mui/icons-material/Download';
@@ -62,17 +63,29 @@ export default function ShareBar({ doc, result, includeOffDuty, setIncludeOffDut
 
   return (
     <>
-      <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
-        <Button startIcon={<LinkIcon />} onClick={onCopyLink} data-testid="copy-link">
-          {t.copyLink}
-        </Button>
-        <Button startIcon={<DownloadIcon />} onClick={onCsv} data-testid="download-csv">
-          {t.downloadCsv}
-        </Button>
-        <Button startIcon={<ChatIcon />} onClick={onWhatsapp} data-testid="copy-whatsapp">
-          {t.copyWhatsapp}
-        </Button>
+      {/*
+        Two distinct jobs, so two labelled sections: sharing the plan itself
+        (link, spreadsheet, WhatsApp message) and downloading a calendar file.
+        In one undivided row of buttons the iCal actions read as more of the
+        same, and the employee picker looks like it belongs to all of them.
+      */}
+      <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2 } }}>
+        <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1 }}>
+          {t.shareSection}
+        </Typography>
+        <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
+          <Button variant="outlined" startIcon={<LinkIcon />} onClick={onCopyLink} data-testid="copy-link">
+            {t.copyLink}
+          </Button>
+          <Button variant="outlined" startIcon={<DownloadIcon />} onClick={onCsv} data-testid="download-csv">
+            {t.downloadCsv}
+          </Button>
+          <Button variant="outlined" startIcon={<ChatIcon />} onClick={onWhatsapp} data-testid="copy-whatsapp">
+            {t.copyWhatsapp}
+          </Button>
+        </Stack>
         <FormControlLabel
+          sx={{ mt: 0.5, mr: 0 }}
           control={(
             <Checkbox
               size="small"
@@ -83,29 +96,50 @@ export default function ShareBar({ doc, result, includeOffDuty, setIncludeOffDut
           )}
           label={t.includeOffDuty}
         />
-        <Button startIcon={<CalendarMonthIcon />} onClick={onIcsOverview} data-testid="download-ics-overview">
-          {t.downloadIcsOverview}
-        </Button>
-        {selectedEmployee && (
-          <>
-            <Select
-              value={selectedEmployee.id}
-              onChange={(e) => setIcsEmployeeId(e.target.value)}
-              size="small"
-              sx={{ minWidth: 150 }}
-              aria-label={t.icsEmployeeSelect}
-              data-testid="ics-employee-select"
-            >
-              {doc.employees.map((e) => (
-                <MenuItem key={e.id} value={e.id}>{e.name}</MenuItem>
-              ))}
-            </Select>
-            <Button startIcon={<CalendarMonthIcon />} onClick={onIcsEmployee} data-testid="download-ics-employee">
-              {t.downloadIcsEmployee}
-            </Button>
-          </>
-        )}
-      </Stack>
+
+        <Divider sx={{ my: 2 }} />
+
+        <Typography variant="subtitle2" fontWeight={700}>
+          {t.calendarSection}
+        </Typography>
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+          {t.calendarSectionHelp}
+        </Typography>
+        <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
+          <Button
+            variant="outlined"
+            startIcon={<CalendarMonthIcon />}
+            onClick={onIcsOverview}
+            data-testid="download-ics-overview"
+          >
+            {t.downloadIcsOverview}
+          </Button>
+          {selectedEmployee && (
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1 }}>
+              <Select
+                value={selectedEmployee.id}
+                onChange={(e) => setIcsEmployeeId(e.target.value)}
+                size="small"
+                sx={{ minWidth: 130 }}
+                aria-label={t.icsEmployeeSelect}
+                data-testid="ics-employee-select"
+              >
+                {doc.employees.map((e) => (
+                  <MenuItem key={e.id} value={e.id}>{e.name}</MenuItem>
+                ))}
+              </Select>
+              <Button
+                variant="outlined"
+                startIcon={<CalendarMonthIcon />}
+                onClick={onIcsEmployee}
+                data-testid="download-ics-employee"
+              >
+                {t.downloadIcsEmployee}
+              </Button>
+            </Box>
+          )}
+        </Stack>
+      </Paper>
 
       <Snackbar
         open={Boolean(toast)}
