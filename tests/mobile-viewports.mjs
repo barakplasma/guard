@@ -22,8 +22,11 @@ const VIEWPORTS = [
   { name: 'landscape-phone', width: 812, height: 375 }, // iPhone X landscape
 ];
 
+// CHROME points at an existing Chromium when the sandbox already ships one,
+// matching how tests/e2e.mjs is run.
 const browser = await chromium.launch({
   headless: true,
+  ...(process.env.CHROME ? { executablePath: process.env.CHROME } : {}),
 });
 
 const findings = [];
@@ -90,6 +93,33 @@ for (const viewport of VIEWPORTS) {
   await page.waitForTimeout(600);
 
   await page.screenshot({ path: `${SHOT}/${viewport.name}-03-schedule.png`, fullPage: true });
+
+  // A box narrower than its own content does not clip - it spills over its
+  // neighbour, which is how the agenda's times ended up printed on top of the
+  // mission names on a phone. Covers the table cells and, in the portrait
+  // layout that replaces them below `sm`, the slot rows.
+  const spilling = await page.evaluate(() => [
+    ...document.querySelectorAll('td, th, [data-testid^="slot-"], [data-testid^="slot-"] *'),
+  ]
+    .filter((c) => c.scrollWidth > c.clientWidth + 1)
+    .map((c) => `"${c.innerText?.trim().replace(/\s+/g, ' ').slice(0, 24) ?? ''}" needs ${c.scrollWidth}px, has ${c.clientWidth}px`));
+
+  if (spilling.length > 0) {
+    findings.push(`[${viewport.name}] ⚠ ${spilling.length} element(s) overflow their box in the agenda: ${spilling.slice(0, 3).join('; ')}`);
+  } else {
+    console.log(`  [${viewport.name}] ✓ Nothing in the agenda overflows its box`);
+  }
+
+  // Density: how much of the screen one hour of schedule costs.
+  const slotHeight = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('[data-testid^="slot-"]')];
+    if (rows.length === 0) return null;
+    const total = rows.reduce((sum, r) => sum + r.getBoundingClientRect().height, 0);
+    return Math.round(total / rows.length);
+  });
+  if (slotHeight != null) {
+    console.log(`  [${viewport.name}] Average slot height: ${slotHeight}px (${(viewport.height / slotHeight).toFixed(1)} slots per screen)`);
+  }
 
   // Check for vertical crowding with sticky AppBar
   const appBarInfo = await page.evaluate(() => {

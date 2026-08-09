@@ -64,21 +64,3 @@ export function findNowSlot(days, now) {
   }
   return best;
 }
-
-/**
- * Who is free during a given slot. Derived from the engine's timeline: a person
- * counts as off duty only if they are off duty for the *whole* slot, so the
- * "available now" list can never suggest someone who is mid-shift.
- */
-export function offDutyDuring(result, slotStart, slotEnd) {
-  const covering = result.timeline.filter((seg) => seg.start < slotEnd && seg.end > slotStart);
-  if (covering.length === 0) return [];
-  // Intersect the off-duty sets of every segment the slot touches: being free
-  // for part of a slot is not being free for the slot.
-  let free = null;
-  for (const seg of covering) {
-    const ids = new Set(seg.offDuty);
-    free = free == null ? ids : new Set([...free].filter((id) => ids.has(id)));
-  }
-  return [...free];
-}

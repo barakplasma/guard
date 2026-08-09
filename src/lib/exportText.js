@@ -1,5 +1,5 @@
 import { formatDay, formatRange } from './format.js';
-import { groupAgenda, offDutyDuring } from './agenda.js';
+import { groupAgenda } from './agenda.js';
 
 /**
  * Render the schedule as text suitable for pasting into WhatsApp.
@@ -14,10 +14,8 @@ import { groupAgenda, offDutyDuring } from './agenda.js';
  * @param {object} result - the planner engine's output
  * @param {object} [options]
  * @param {string} [options.title] - plan title, used as the message heading
- * @param {Map<string,string>} [options.employeeNames] - id -> name, for the off-duty line
- * @param {boolean} [options.includeOffDuty=false] - append who is free each slot
  */
-export function whatsappText(result, { title = '', employeeNames, includeOffDuty = false } = {}) {
+export function whatsappText(result, { title = '' } = {}) {
   const lines = [`*${title.trim() || 'סידור משמרות'}*`];
 
   for (const day of groupAgenda(result)) {
@@ -27,12 +25,6 @@ export function whatsappText(result, { title = '', employeeNames, includeOffDuty
       for (const mission of slot.missions) {
         const people = mission.entries.map((e) => e.employeeName).join(', ');
         lines.push(`• *${mission.missionName}*: ${people}`);
-      }
-      if (includeOffDuty && employeeNames) {
-        const free = offDutyDuring(result, slot.start, slot.end)
-          .map((id) => employeeNames.get(id))
-          .filter(Boolean);
-        if (free.length) lines.push(`  פנויים: ${free.join(', ')}`);
       }
     }
   }

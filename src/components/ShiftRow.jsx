@@ -1,4 +1,4 @@
-import { Chip, IconButton, MenuItem, Select, Stack, Tooltip } from '@mui/material';
+import { Box, Chip, IconButton, MenuItem, Select, Tooltip } from '@mui/material';
 import PushPinIcon from '@mui/icons-material/PushPin';
 import CloseIcon from '@mui/icons-material/Close';
 import { t } from '../strings.js';
@@ -10,18 +10,30 @@ import { t } from '../strings.js';
  * Choosing someone else writes a pin over this exact range rather than editing
  * the generated output - so the displaced person is freed and automatically
  * rescheduled elsewhere by the fairness pass, and the edit survives sharing.
+ *
+ * Layout note: the wrapping here uses `gap`, never MUI's margin-based
+ * `spacing`. Margin spacing on a wrapping row offsets the items that fall to
+ * the second line, which is what made the pin badge and its clear button
+ * overlap the row underneath on a phone.
  */
 export default function ShiftRow({ shift, employees, busyElsewhere, onSwap, onClearPin }) {
   return (
-    <Stack
-      direction="row"
-      spacing={1}
+    <Box
       sx={{
-        alignItems: 'center',
+        display: 'inline-flex',
         flexWrap: 'wrap',
+        alignItems: 'center',
+        gap: 0.5,
+        rowGap: 0.5,
+        // On a phone it grows into whatever the row has left and stacks when it
+        // runs out, so two people on one mission sit side by side when there is
+        // room and one per line when there is not. On a wide screen the column
+        // is roomy already, and a name-wide control beats a stretched one.
+        flex: { xs: '1 1 6rem', sm: '0 0 auto' },
         maxWidth: '100%',
+        minWidth: 0,
         ...(shift.pinned && {
-          borderInlineStart: '3px solid', borderColor: 'primary.main', pl: 1,
+          borderInlineStart: '3px solid', borderColor: 'primary.main', pl: 0.75,
         }),
       }}
     >
@@ -29,7 +41,13 @@ export default function ShiftRow({ shift, employees, busyElsewhere, onSwap, onCl
         value={shift.employeeId}
         onChange={(e) => onSwap(e.target.value)}
         size="small"
-        sx={{ minWidth: { xs: 120, sm: 150 } }}
+        sx={{
+          flex: '1 1 auto',
+          minWidth: { xs: 0, sm: 150 },
+          maxWidth: '100%',
+          // A denser control on phones: 24 of these stacked is most of the page.
+          '& .MuiSelect-select': { py: { xs: 0.75, sm: 1 } },
+        }}
         data-testid={`shift-select-${shift.missionId}-${shift.start}-${shift.employeeId}`}
       >
         {employees.map((e) => {
@@ -45,7 +63,8 @@ export default function ShiftRow({ shift, employees, busyElsewhere, onSwap, onCl
       </Select>
 
       {shift.pinned && (
-        <>
+        // Badge and its clear button stay one unit so they never wrap apart.
+        <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.25 }}>
           <Tooltip title={t.pinned}>
             <Chip
               size="small"
@@ -53,6 +72,7 @@ export default function ShiftRow({ shift, employees, busyElsewhere, onSwap, onCl
               label={t.pinned}
               color="primary"
               variant="outlined"
+              sx={{ maxWidth: '100%' }}
               data-testid={`pinned-${shift.missionId}-${shift.start}`}
             />
           </Tooltip>
@@ -60,13 +80,13 @@ export default function ShiftRow({ shift, employees, busyElsewhere, onSwap, onCl
             size="small"
             aria-label={t.clearPin}
             onClick={onClearPin}
-            sx={{ p: 1 }}
+            sx={{ p: 0.5 }}
             data-testid={`clear-pin-${shift.missionId}-${shift.start}`}
           >
             <CloseIcon fontSize="small" />
           </IconButton>
-        </>
+        </Box>
       )}
-    </Stack>
+    </Box>
   );
 }

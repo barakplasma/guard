@@ -28,7 +28,19 @@ function Nav() {
       textColor="inherit"
       indicatorColor="secondary"
       variant="fullWidth"
-      sx={{ flex: { xs: '1 1 100%', sm: '0 1 auto' } }}
+      // Shares the toolbar row rather than wrapping below it: a second sticky
+      // line costs ~40px of every screen, on the page that needs them most.
+      sx={{
+        flex: '1 1 auto',
+        minWidth: 0,
+        minHeight: 48,
+        '& .MuiTab-root': {
+          minWidth: 0,
+          minHeight: 48,
+          px: { xs: 1, sm: 2 },
+          fontSize: { xs: '0.8125rem', sm: '0.875rem' },
+        },
+      }}
     >
       <Tab label={t.navEmployees} data-testid="tab-employees" />
       <Tab label={t.navMissions} data-testid="tab-missions" />
@@ -50,19 +62,27 @@ function Shell() {
   return (
     <PlanProvider>
       <AppBar position="sticky" sx={{ top: 0 }}>
-        <Toolbar sx={{ gap: 2, flexWrap: 'wrap' }}>
+        <Toolbar
+          variant="dense"
+          sx={{ gap: { xs: 1, sm: 2 }, minHeight: 48, px: { xs: 1, sm: 3 } }}
+        >
           <Typography
             variant="h6"
             component="h1"
             noWrap
-            sx={{ overflow: 'hidden', textOverflow: 'ellipsis', fontSize: { xs: '1rem', sm: '1.25rem' } }}
+            sx={{
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              fontSize: { xs: '0.9375rem', sm: '1.25rem' },
+              flexShrink: 0,
+            }}
           >
             {t.appTitle}
           </Typography>
           <Nav />
         </Toolbar>
       </AppBar>
-      <Container maxWidth="lg" sx={{ py: 3 }}>
+      <Container maxWidth="lg" sx={{ py: { xs: 1.5, sm: 3 }, px: { xs: 1.5, sm: 3 } }}>
         <Box component="main">
           <Routes>
             <Route path="/employees" element={<EmployeesPage />} />

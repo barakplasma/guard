@@ -63,9 +63,7 @@ export const t = {
   planNow: 'תכנן',
   replan: 'תכנן מחדש',
   onDuty: 'במשמרת',
-  offDuty: 'פנויים',
   unavailable: 'לא זמינים',
-  nobody: '—',
   pinned: 'שיבוץ ידני',
   clearPin: 'בטל שיבוץ ידני',
   clearAllPins: 'נקה שיבוצים ידניים',
@@ -86,15 +84,16 @@ export const t = {
   spread: 'פער בין העמוס לפנוי ביותר',
 
   // sharing
+  shareSection: 'שיתוף וייצוא',
   copyLink: 'העתק קישור',
   copied: 'הועתק!',
   copyFailed: 'ההעתקה נכשלה',
   downloadCsv: 'הורד CSV',
   copyWhatsapp: 'העתק לוואטסאפ',
-  includeOffDuty: 'כלול רשימת פנויים',
   longUrlWarning: 'הקישור ארוך מאוד. חלק מהאפליקציות עלולות לקצר אותו.',
-  downloadIcsOverview: 'הורד יומן (ical) — כלל הצוות',
-  downloadIcsEmployee: 'הורד יומן אישי (ical)',
+  calendarSection: 'ייצוא ליומן (iCal)',
+  downloadIcsOverview: 'יומן כלל הצוות',
+  downloadIcsEmployee: 'יומן אישי',
   icsEmployeeSelect: 'עובד ליומן אישי',
 
   // errors and warnings

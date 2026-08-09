@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import {
   Alert, Box, Button, Paper, Stack, Table, TableBody, TableCell,
-  TableHead, TableRow, Typography,
+  TableContainer, TableHead, TableRow, Typography,
 } from '@mui/material';
 import AgendaDay from '../components/AgendaDay.jsx';
 import ShareBar from '../components/ShareBar.jsx';
@@ -51,30 +51,34 @@ function warningText(warning, doc) {
 
 function SummaryTable({ result }) {
   return (
-    <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
+    <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2 }, mb: 2 }}>
       <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1 }}>{t.summary}</Typography>
-      <Table size="small">
-        <TableHead>
-          <TableRow>
-            <TableCell>{t.employeeName}</TableCell>
-            <TableCell align="right">{t.totalTime}</TableCell>
-            <TableCell align="right">{t.stints}</TableCell>
-            <TableCell align="right">{t.minGap}</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {result.stats.perEmployee.map((row) => (
-            <TableRow key={row.employeeId} data-testid={`summary-${row.employeeId}`}>
-              <TableCell>{row.name}</TableCell>
-              <TableCell align="right">{formatDuration(row.minutes)}</TableCell>
-              <TableCell align="right">{row.stints}</TableCell>
-              <TableCell align="right">
-                {row.minGapMinutes == null ? '—' : formatDuration(row.minGapMinutes)}
-              </TableCell>
+      {/* Scrolls sideways on a narrow screen rather than wrapping the headers
+          into unreadable stacks of single words. */}
+      <TableContainer sx={{ overflowX: 'auto' }}>
+        <Table size="small" sx={{ minWidth: 360 }}>
+          <TableHead>
+            <TableRow>
+              <TableCell sx={{ whiteSpace: 'nowrap' }}>{t.employeeName}</TableCell>
+              <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>{t.totalTime}</TableCell>
+              <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>{t.stints}</TableCell>
+              <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>{t.minGap}</TableCell>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+          </TableHead>
+          <TableBody>
+            {result.stats.perEmployee.map((row) => (
+              <TableRow key={row.employeeId} data-testid={`summary-${row.employeeId}`}>
+                <TableCell sx={{ overflowWrap: 'break-word' }}>{row.name}</TableCell>
+                <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>{formatDuration(row.minutes)}</TableCell>
+                <TableCell align="right">{row.stints}</TableCell>
+                <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+                  {row.minGapMinutes == null ? '—' : formatDuration(row.minGapMinutes)}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
       <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
         {`${t.spread}: ${formatDuration(result.stats.spreadMinutes)}`}
       </Typography>
@@ -92,14 +96,15 @@ export default function SchedulePage() {
   const nowSlot = useMemo(() => findNowSlot(days, now), [days, now]);
   const nowSlotKey = nowSlot ? `${nowSlot.start}|${nowSlot.end}` : null;
   const [confirmClearPins, setConfirmClearPins] = useState(false);
-  const [includeOffDuty, setIncludeOffDuty] = useState(false);
 
   return (
     <Box>
       {decodeFailed && <Alert severity="warning" sx={{ mb: 2 }}>{t.badLink}</Alert>}
 
-      <Stack direction="row" spacing={1} useFlexGap sx={{ mb: 2, alignItems: 'center', flexWrap: 'wrap' }}>
-        <Typography variant="h6" sx={{ flex: 1 }}>{t.schedule}</Typography>
+      <Stack direction="row" spacing={1} useFlexGap sx={{ mb: 1, alignItems: 'center', flexWrap: 'wrap' }}>
+        <Typography variant="h6" sx={{ flex: 1, fontSize: { xs: '1.05rem', sm: '1.25rem' } }}>
+          {t.schedule}
+        </Typography>
         {nowSlotKey != null && (
           <Button size="small" onClick={jumpToNow} data-testid="jump-to-now">
             {t.jumpToNow}
@@ -130,13 +135,8 @@ export default function SchedulePage() {
 
       {result && (
         <>
-          <Box sx={{ mb: 2 }}>
-            <ShareBar
-              doc={doc}
-              result={result}
-              includeOffDuty={includeOffDuty}
-              setIncludeOffDuty={setIncludeOffDuty}
-            />
+          <Box sx={{ mb: { xs: 1, sm: 2 } }}>
+            <ShareBar doc={doc} result={result} />
           </Box>
 
           {result.warnings.map((w, i) => (
@@ -159,7 +159,6 @@ export default function SchedulePage() {
               employees={sortedEmployees}
               now={now}
               nowSlotKey={nowSlotKey}
-              includeOffDuty={includeOffDuty}
               onSwap={(shift, employeeId) => pinShift(
                 shift.missionId, employeeId, shift.start, shift.end, shift.employeeId,
               )}

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { shiftsToCsv } from '../src/lib/exportCsv.js';
 import { whatsappText, whatsappShareLink } from '../src/lib/exportText.js';
-import { groupAgenda, offDutyDuring } from '../src/lib/agenda.js';
+import { groupAgenda } from '../src/lib/agenda.js';
 import { employeeIcs, overviewIcs } from '../src/lib/exportIcal.js';
 import { plan } from '../src/lib/planner.js';
 
@@ -110,17 +110,6 @@ test('WhatsApp text falls back to a default heading', () => {
   assert.equal(text.split('\n')[0], '*סידור משמרות*');
 });
 
-test('WhatsApp text can append the off-duty list', () => {
-  const result = schedule();
-  const employeeNames = new Map([['e1', 'אבי'], ['e2', 'דנה'], ['e3', 'יוסי']]);
-
-  const without = whatsappText(result, { employeeNames });
-  assert.ok(!without.includes('פנויים:'));
-
-  const withOff = whatsappText(result, { employeeNames, includeOffDuty: true });
-  assert.ok(withOff.includes('פנויים:'), 'off-duty line is present when asked for');
-});
-
 test('an empty schedule produces a readable message rather than a bare heading', () => {
   const result = plan({
     start: START,
@@ -153,15 +142,10 @@ test('groupAgenda buckets shifts by day and slot', () => {
   }
 });
 
-test('offDutyDuring only lists people free for the whole slot', () => {
+test('the message lists only who is on duty', () => {
   const result = schedule();
-  const slot = groupAgenda(result)[0].slots[0];
-  const free = offDutyDuring(result, slot.start, slot.end);
-  const onDuty = result.shifts
-    .filter((s) => s.start < slot.end && s.end > slot.start)
-    .map((s) => s.employeeId);
-  for (const id of onDuty) assert.ok(!free.includes(id), 'someone on duty was listed as free');
-  assert.equal(free.length + onDuty.length, 3);
+  const text = whatsappText(result, { title: 'סופ״ש' });
+  assert.ok(!text.includes('פנויים'), 'the off-duty list was removed from the product');
 });
 
 /* --- range formatting ------------------------------------------------ */
@@ -175,6 +159,17 @@ test('a range that crosses midnight shows the end date', async () => {
   const overnight = formatRange(START, START + 24 * HOUR);
   assert.ok(overnight.includes('('), `expected a date suffix, got ${overnight}`);
   assert.ok(overnight.startsWith('08:00–08:00 ('), overnight);
+});
+
+test('the two-line range keeps the end date on the end line', async () => {
+  const { formatRangeLines } = await import('../src/lib/format.js');
+  assert.deepEqual(formatRangeLines(START, START + 2 * HOUR), ['08:00', '10:00']);
+
+  // The portrait agenda stacks these, so without the suffix a 24-hour mission
+  // would read as "08:00" over "08:00".
+  const [from, to] = formatRangeLines(START, START + 24 * HOUR);
+  assert.equal(from, '08:00');
+  assert.ok(to.startsWith('08:00 ('), to);
 });
 
 /* --- iCal -------------------------------------------------------------- */
