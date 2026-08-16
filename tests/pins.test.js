@@ -95,6 +95,29 @@ test('swapping one seat of a multi-person mission leaves the other seat pinned',
   assert.deepEqual(ids, ['e2', 'e3'], "only the replaced person's pin was removed");
 });
 
+test('swapping one seat of a multi-person mission leaves the other seat\'s per-shift pin alone', () => {
+  // Both seats of the same slot pinned individually (not via the whole-mission
+  // picker), so both pins share the exact same (missionId, start, end).
+  const base = doc({
+    missions: [{ id: 'm1', name: 'Gate', type: 'local', start: null, end: null, count: 2 }],
+    pins: [
+      { missionId: 'm1', employeeId: 'e1', start: START, end: START + HOUR },
+      { missionId: 'm1', employeeId: 'e2', start: START, end: START + HOUR },
+    ],
+  });
+
+  const after = applySwap(base, {
+    missionId: 'm1',
+    employeeId: 'e3',
+    start: START,
+    end: START + HOUR,
+    replacingEmployeeId: 'e2',
+  });
+
+  const ids = after.pins.map((p) => p.employeeId).sort();
+  assert.deepEqual(ids, ['e1', 'e3'], "e1's pin on the same slot must survive");
+});
+
 test('swapping does not disturb pins on other missions', () => {
   const base = doc({
     missions: [
