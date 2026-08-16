@@ -101,7 +101,7 @@ test('pinned time counts toward the fairness totals', () => {
   assert.equal(totals.get('e3'), 120);
 });
 
-test('a person pinned to two overlapping missions keeps the first and warns', () => {
+test('a person pinned to two overlapping missions keeps the latest and warns', () => {
   const start = START;
   const end = start + 2 * HOUR;
   const result = plan({
@@ -113,6 +113,8 @@ test('a person pinned to two overlapping missions keeps the first and warns', ()
       { id: 'a', name: 'A', type: 'local', start, end, count: 1 },
       { id: 'b', name: 'B', type: 'local', start, end, count: 1 },
     ],
+    // 'a' was pinned first, then the person was manually reassigned to 'b' -
+    // the more recent edit must win, not the stale one.
     pins: [
       { missionId: 'a', employeeId: 'e1' },
       { missionId: 'b', employeeId: 'e1' },
@@ -121,9 +123,40 @@ test('a person pinned to two overlapping missions keeps the first and warns', ()
 
   assert.ok(result.warnings.some((w) => w.code === WARN.PIN_CONFLICT && w.employeeId === 'e1'));
   const e1 = result.shifts.filter((s) => s.employeeId === 'e1');
-  assert.ok(e1.every((s) => s.missionId === 'a'), 'only the first pin was honoured');
-  // Mission B is still staffed, just by somebody else.
-  assert.ok(result.shifts.some((s) => s.missionId === 'b'));
+  assert.ok(e1.every((s) => s.missionId === 'b'), 'only the latest pin was honoured');
+  // Mission A is still staffed, just by somebody else.
+  assert.ok(result.shifts.some((s) => s.missionId === 'a'));
+});
+
+test('reassigning someone off a whole-mission pin onto a specific shift wins, not the old pin', () => {
+  // e1 is pinned to a remote mission for the whole window (e.g. from the
+  // Missions page), then separately hand-assigned to one shift of a local
+  // mission that falls inside that same window - a manual swap made on the
+  // schedule page. The newer, more specific pin must win even though the
+  // wider pin was never explicitly cleared.
+  const start = START;
+  const end = start + 4 * HOUR;
+  const result = plan({
+    start,
+    end,
+    shiftMinutes: 60,
+    employees: people(4),
+    missions: [
+      { id: 'r', name: 'Remote', type: 'remote', start, end, count: 1 },
+      { id: 'l', name: 'Gate', type: 'local', start, end, count: 1 },
+    ],
+    pins: [
+      { missionId: 'r', employeeId: 'e1' },
+      { missionId: 'l', employeeId: 'e1', start: start + HOUR, end: start + 2 * HOUR },
+    ],
+  });
+
+  assert.ok(result.warnings.some((w) => w.code === WARN.PIN_CONFLICT && w.employeeId === 'e1'));
+  const e1Local = result.shifts.filter((s) => s.missionId === 'l' && s.employeeId === 'e1');
+  assert.equal(e1Local.length, 1, 'the specific manual shift still belongs to e1');
+  assert.equal(e1Local[0].start, start + HOUR);
+  // The remote mission is not left empty - someone else covers it instead.
+  assert.ok(result.shifts.some((s) => s.missionId === 'r'));
 });
 
 test('pins beyond the headcount are dropped with a warning', () => {

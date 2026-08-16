@@ -129,16 +129,29 @@ function normalizePins(pins, employeeById, missionById, warnings) {
       continue;
     }
 
-    // A person cannot be in two places at once; the first pin in document order
-    // wins so the result stays stable as more pins are added.
-    const clash = out.find(
+    // A person cannot be in two places at once. Pins are appended to the
+    // document in edit order, so the *latest* one written wins - a fresh
+    // manual assignment must never be silently discarded in favour of a
+    // stale pin the same person happens to still hold elsewhere; the older,
+    // now-conflicting pin is the one that gets superseded.
+    const clashIndex = out.findIndex(
       (q) => q.employeeId === employee.id && overlaps(q.start, q.end, start, end),
     );
-    if (clash) {
+    if (clashIndex !== -1) {
+      const displaced = out[clashIndex];
       warnings.push({
-        code: WARN.PIN_CONFLICT, missionId: mission.id, employeeId: employee.id, start, end,
+        code: WARN.PIN_CONFLICT,
+        missionId: displaced.missionId,
+        employeeId: employee.id,
+        start: displaced.start,
+        end: displaced.end,
       });
-      continue;
+      out.splice(clashIndex, 1);
+      const displacedSiblings = perMission.get(displaced.missionId);
+      if (displacedSiblings) {
+        const idx = displacedSiblings.indexOf(displaced);
+        if (idx !== -1) displacedSiblings.splice(idx, 1);
+      }
     }
 
     // More pins than the mission has seats at some instant: keep the earliest.
