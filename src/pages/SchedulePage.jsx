@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Alert, Box, Button, Paper, Stack, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, Typography,
@@ -10,6 +10,7 @@ import { usePlan } from '../state/PlanContext.jsx';
 import { plan as runPlanner, WARN } from '../lib/planner.js';
 import { toPlannerInput } from '../lib/planSchema.js';
 import { findNowSlot, groupAgenda } from '../lib/agenda.js';
+import { freezePastShifts } from '../lib/pins.js';
 import { formatDuration } from '../lib/format.js';
 import { sortByHebrewName } from '../lib/sort.js';
 import useNow from '../hooks/useNow.js';
@@ -90,7 +91,9 @@ function SummaryTable({ result }) {
 }
 
 export default function SchedulePage() {
-  const { doc, pinShift, clearPin, clearAllPins, decodeFailed } = usePlan();
+  const {
+    doc, setDoc, pinShift, clearPin, clearAllPins, decodeFailed,
+  } = usePlan();
   const { result, error } = useSchedule(doc);
 
   const days = useMemo(() => (result ? groupAgenda(result) : []), [result]);
@@ -99,6 +102,17 @@ export default function SchedulePage() {
   const nowSlot = useMemo(() => findNowSlot(days, now), [days, now]);
   const nowSlotKey = nowSlot ? `${nowSlot.start}|${nowSlot.end}` : null;
   const [confirmClearPins, setConfirmClearPins] = useState(false);
+
+  // Once a shift's window has closed, whoever the engine put on it is what
+  // actually happened - a later edit elsewhere (a new employee, a widened
+  // availability window) must not be able to reshuffle it. Locking it in as a
+  // pin is the only "storage" the document has, and it is exactly what a
+  // manual swap on that same shift would have produced by hand.
+  useEffect(() => {
+    if (!result) return;
+    const frozen = freezePastShifts(doc, result, now);
+    if (frozen !== doc) setDoc(frozen);
+  }, [doc, result, now, setDoc]);
 
   return (
     <Box>

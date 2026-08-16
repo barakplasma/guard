@@ -75,6 +75,30 @@ export function applyClearPin(doc, { missionId, employeeId, start, end }) {
 }
 
 /**
+ * Turn every already-elapsed, auto-assigned shift in `result` into a pin, so
+ * that a later edit elsewhere in the document can never reshuffle who already
+ * worked a shift that is in the past. `result` must be the schedule computed
+ * from `doc` itself - a shift only counts as "already decided" once the
+ * engine actually produced it that way for this document.
+ *
+ * Returns `doc` unchanged (same reference) when there is nothing to freeze,
+ * so callers can cheaply tell whether anything changed.
+ *
+ * This only locks in the outcome; it does not stop anyone from editing the
+ * past on purpose - a frozen shift is a normal pin, swappable and clearable
+ * like any other.
+ */
+export function freezePastShifts(doc, result, now) {
+  const newPins = result.shifts
+    .filter((s) => !s.pinned && s.end <= now)
+    .map((s) => ({
+      missionId: s.missionId, employeeId: s.employeeId, start: s.start, end: s.end,
+    }));
+  if (newPins.length === 0) return doc;
+  return { ...doc, pins: [...doc.pins, ...newPins] };
+}
+
+/**
  * Set a mission's fixed roster from the Missions page. Only whole-window pins
  * are replaced; per-shift pins are manual swaps made on the schedule and are
  * edited there.

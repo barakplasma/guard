@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyClearPin, applyMissionAssignees, applySwap, pinCovers } from '../src/lib/pins.js';
+import {
+  applyClearPin, applyMissionAssignees, applySwap, freezePastShifts, pinCovers,
+} from '../src/lib/pins.js';
 import { plan } from '../src/lib/planner.js';
 import { toPlannerInput } from '../src/lib/planSchema.js';
 
@@ -171,6 +173,70 @@ test('clearing only removes the named person', () => {
 });
 
 /* --- mission roster -------------------------------------------------- */
+
+/* --- freezing the past ------------------------------------------------ */
+
+test('freezePastShifts pins every elapsed, auto-assigned shift and leaves the future alone', () => {
+  const d = doc({
+    end: START + 4 * HOUR,
+    missions: [{ id: 'm1', name: 'Gate', type: 'local', start: null, end: null, count: 1 }],
+  });
+  const result = plan(toPlannerInput(d));
+  const now = START + 2 * HOUR; // the first two hourly shifts have already happened
+
+  const frozen = freezePastShifts(d, result, now);
+  assert.equal(frozen.pins.length, 2, 'only the two elapsed shifts are pinned');
+  for (const pin of frozen.pins) assert.ok(pin.end <= now, 'a pinned shift must actually be in the past');
+
+  // The frozen pins reproduce exactly what the engine already decided.
+  const past = result.shifts.filter((s) => s.end <= now);
+  const pinnedIds = frozen.pins.map((p) => `${p.employeeId}@${p.start}`).sort();
+  const pastIds = past.map((s) => `${s.employeeId}@${s.start}`).sort();
+  assert.deepEqual(pinnedIds, pastIds);
+});
+
+test('freezePastShifts returns the same document when nothing has elapsed', () => {
+  const d = doc({
+    missions: [{ id: 'm1', name: 'Gate', type: 'local', start: null, end: null, count: 1 }],
+  });
+  const result = plan(toPlannerInput(d));
+  const frozen = freezePastShifts(d, result, START - HOUR);
+  assert.equal(frozen, d, 'no elapsed shifts means no document change at all');
+});
+
+test('freezePastShifts does not re-pin a shift that is already pinned', () => {
+  const d = doc({
+    missions: [{ id: 'm1', name: 'Gate', type: 'local', start: null, end: null, count: 1 }],
+    pins: [{ missionId: 'm1', employeeId: 'e2', start: START, end: START + HOUR }],
+  });
+  const result = plan(toPlannerInput(d));
+  const frozen = freezePastShifts(d, result, START + HOUR);
+  assert.equal(frozen.pins.length, 1, 'the already-pinned shift is not duplicated');
+});
+
+test('a frozen shift survives an unrelated later edit to the document', () => {
+  const d = doc({
+    end: START + 2 * HOUR,
+    missions: [{ id: 'm1', name: 'Gate', type: 'local', start: null, end: null, count: 1 }],
+  });
+  const before = plan(toPlannerInput(d));
+  const firstHour = before.shifts.find((s) => s.start === START);
+
+  const frozen = freezePastShifts(d, before, START + HOUR);
+
+  // Adding a new employee reshuffles the balancer's choices for a local
+  // mission - this is exactly the kind of edit that would otherwise rewrite
+  // who already worked the first hour.
+  const edited = {
+    ...frozen,
+    employees: [...frozen.employees, { id: 'e4', name: 'D', start: null, end: null }],
+  };
+  const after = plan(toPlannerInput(edited));
+  const stillFirstHour = after.shifts.find((s) => s.start === START);
+
+  assert.equal(stillFirstHour.employeeId, firstHour.employeeId, 'the past shift did not change hands');
+  assert.equal(stillFirstHour.pinned, true);
+});
 
 test('setting a mission roster replaces whole-window pins but keeps per-shift ones', () => {
   const d = doc({

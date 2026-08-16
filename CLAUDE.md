@@ -29,6 +29,15 @@ that. Pin edits live in `src/lib/pins.js`, deliberately pure and outside the Rea
 rule stays testable. On a remote mission a pin always means the whole mission — a partial range can
 survive a local→remote toggle, and honouring it literally leaves the rest of the window short.
 
+A shift whose window has already closed must never change hands because of an unrelated later
+edit — the engine has no notion of "past" (see the `Date.now()` rule above), so nothing stops a
+new employee or a widened availability window from silently reshuffling history unless something
+locks it in. `SchedulePage.jsx` does that by calling `freezePastShifts` (`src/lib/pins.js`) on
+every render: any already-elapsed, auto-assigned shift becomes a real pin, indistinguishable from
+one a person swapped by hand. That is deliberate — a frozen shift stays swappable and clearable
+like any other pin, because the point is to let someone correct the record to match reality, not
+to make the past read-only.
+
 `tests/planner.invariants.test.js` is the real safety net: it asserts across ~1600 generated plans
 that nobody is ever double-booked, no mission is overstaffed, availability is respected, and the
 same input always gives the same output. Do not weaken it to make a change pass.
