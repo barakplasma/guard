@@ -140,8 +140,8 @@ await page.getByTestId('copy-whatsapp').click();
 await page.waitForTimeout(400);
 const clip = await page.evaluate(() => navigator.clipboard.readText());
 check('WhatsApp text has a bold heading', clip.startsWith('*בדיקה*'), clip.slice(0, 40));
-check('WhatsApp text bullets the missions',
-  clip.includes('• *שער*:') && clip.includes('• *סיור מרוחק*:'));
+check('WhatsApp text uses a plain time - names table, not bulleted mission rows',
+  !clip.includes('•') && clip.includes('*שער*') && /\*[^*\n]*סיור מרוחק\*/.test(clip), clip);
 check('WhatsApp text lists only who is on duty', !clip.includes('פנויים'));
 
 /* ---------- the shared link ---------- */
