@@ -91,18 +91,53 @@ test('CSV marks manual assignments', () => {
 
 /* --- WhatsApp -------------------------------------------------------- */
 
-test('WhatsApp text uses WhatsApp markup and lists people per mission', () => {
+test('WhatsApp text uses a simple time - names table, not a bulleted mission row', () => {
   const result = schedule();
   const text = whatsappText(result, { title: 'סופ״ש' });
   const lines = text.split('\n');
 
   assert.equal(lines[0], '*סופ״ש*');
   assert.ok(lines.some((l) => /^\*.+\*$/.test(l) && l !== '*סופ״ש*'), 'a bold day header');
-  assert.ok(lines.some((l) => /^\d{2}:\d{2}–\d{2}:\d{2}$/.test(l)), 'a time range line');
-  assert.ok(lines.some((l) => l.startsWith('• *שער*: ')), 'a bulleted mission line');
+  assert.ok(lines.includes('*שער*'), 'the mission name is its own bold header, once');
+  assert.ok(lines.some((l) => /^\d{1,2}:\d{2} - .+$/.test(l)), 'a plain "time - names" row');
+  assert.ok(!lines.some((l) => l.includes('•')), 'no bullet characters');
+  assert.ok(!lines.some((l) => l.includes(': ')), 'no repeated "mission: names" label per row');
 
   // Every scheduled person appears somewhere in the message.
   for (const s of result.shifts) assert.ok(text.includes(s.employeeName));
+});
+
+test('WhatsApp text joins two names with ו and puts the time range in the header for a single-occurrence mission', () => {
+  const result = plan({
+    start: START,
+    end: START + HOUR,
+    shiftMinutes: 60,
+    employees: [
+      { id: 'e1', name: 'אבי' },
+      { id: 'e2', name: 'דנה' },
+    ],
+    missions: [{ id: 'm1', name: 'שער כפול', type: 'local', count: 2 }],
+  });
+  const lines = whatsappText(result, { title: 'סופ״ש' }).split('\n');
+
+  assert.ok(lines.some((l) => /^\*8:00–9:00 שער כפול\*$/.test(l)), 'the single occurrence carries its range in the header');
+  assert.ok(lines.includes('אבי ודנה') || lines.includes('דנה ואבי'), 'two names joined with ו, no comma');
+});
+
+test('WhatsApp text joins three or more names as a comma list with ו before the last', () => {
+  const result = plan({
+    start: START,
+    end: START + HOUR,
+    shiftMinutes: 60,
+    employees: [
+      { id: 'e1', name: 'אבי' },
+      { id: 'e2', name: 'דנה' },
+      { id: 'e3', name: 'יוסי' },
+    ],
+    missions: [{ id: 'm1', name: 'שער משולש', type: 'local', count: 3 }],
+  });
+  const lines = whatsappText(result, { title: 'סופ״ש' }).split('\n');
+  assert.ok(lines.some((l) => /^[^,]+, [^,]+ ו[^,]+$/.test(l)), `expected an "A, B וC" row, got ${JSON.stringify(lines)}`);
 });
 
 test('WhatsApp text falls back to a default heading', () => {
