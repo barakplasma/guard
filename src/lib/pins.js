@@ -31,21 +31,29 @@ export function pinCovers(doc, pin, start, end) {
  * Record a manual swap: `employeeId` takes the shift `[start, end)` on
  * `missionId`, replacing `replacingEmployeeId`.
  *
- * The displaced person's pin must be removed as well as the row's own previous
- * pin. Their assignment may be a whole-mission pin written from the Missions
- * page, which no exact-range match would find - leaving it in place means both
- * people stay pinned and compete on the next plan, so the swap either does
- * nothing (the newcomer is dropped as overflow) or quietly adds a person
- * instead of replacing one.
+ * The displaced person's pin must be removed, matched by coverage rather than
+ * exact range: their assignment may be a whole-mission pin written from the
+ * Missions page, which no exact-range match would find - leaving it in place
+ * means both people stay pinned and compete on the next plan, so the swap
+ * either does nothing (the newcomer is dropped as overflow) or quietly adds a
+ * person instead of replacing one.
+ *
+ * That removal must stay scoped to `replacingEmployeeId`. A mission with more
+ * than one seat can have two different people each individually pinned to the
+ * exact same [start, end) - one pin per seat - and an earlier version of this
+ * function matched on (missionId, start, end) alone, so swapping one seat
+ * deleted the other seat's pin too. Only when the caller has no named
+ * predecessor (a direct API call, not the schedule UI) do we fall back to
+ * clearing whatever pin exactly held this row, since there is nothing more
+ * specific to key on.
  */
 export function applySwap(doc, { missionId, employeeId, start, end, replacingEmployeeId }) {
   const kept = doc.pins.filter((p) => {
     if (p.missionId !== missionId) return true;
-    if (p.start === start && p.end === end) return false;
-    if (replacingEmployeeId != null
-      && p.employeeId === replacingEmployeeId
-      && pinCovers(doc, p, start, end)) return false;
-    return true;
+    if (replacingEmployeeId != null) {
+      return !(p.employeeId === replacingEmployeeId && pinCovers(doc, p, start, end));
+    }
+    return !(p.start === start && p.end === end);
   });
   return { ...doc, pins: [...kept, { missionId, employeeId, start, end }] };
 }

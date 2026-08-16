@@ -103,7 +103,7 @@ export const t = {
   warnEmployeeUnused: (name) => `${name} לא שובץ לאף משמרת.`,
   warnMissionOutside: (name) => `"${name}" חורגת מתחום התקופה וקוצצה.`,
   warnEmployeeOutside: (name) => `הזמינות של ${name} נמצאת מחוץ לתקופה.`,
-  warnPinConflict: (name) => `${name} משובץ ידנית לשתי משימות חופפות — השיבוץ השני בוטל.`,
+  warnPinConflict: (name) => `${name} משובץ ידנית לשתי משימות חופפות — השיבוץ הישן בוטל.`,
   warnPinOverflow: (name) => `אין מספיק מקומות למשימה — השיבוץ הידני של ${name} בוטל.`,
   warnPinUnavailable: (name) => `${name} לא זמין בזמן שנבחר — השיבוץ הידני בוטל.`,
 };

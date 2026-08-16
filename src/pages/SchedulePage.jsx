@@ -53,16 +53,19 @@ function SummaryTable({ result }) {
   return (
     <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2 }, mb: 2 }}>
       <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1 }}>{t.summary}</Typography>
-      {/* Scrolls sideways on a narrow screen rather than wrapping the headers
-          into unreadable stacks of single words. */}
+      {/* Headers wrap onto a second line on a phone instead of forcing the
+          table wider than the screen: a forced min-width here overflowed a
+          360px phone, and since the table is RTL, the browser's default
+          scroll position hid the far column completely rather than showing
+          a truncated header - there was no visible way to reach it. */}
       <TableContainer sx={{ overflowX: 'auto' }}>
-        <Table size="small" sx={{ minWidth: 360 }}>
+        <Table size="small">
           <TableHead>
             <TableRow>
-              <TableCell sx={{ whiteSpace: 'nowrap' }}>{t.employeeName}</TableCell>
-              <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>{t.totalTime}</TableCell>
-              <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>{t.stints}</TableCell>
-              <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>{t.minGap}</TableCell>
+              <TableCell sx={{ whiteSpace: { xs: 'normal', sm: 'nowrap' } }}>{t.employeeName}</TableCell>
+              <TableCell align="right" sx={{ whiteSpace: { xs: 'normal', sm: 'nowrap' } }}>{t.totalTime}</TableCell>
+              <TableCell align="right" sx={{ whiteSpace: { xs: 'normal', sm: 'nowrap' } }}>{t.stints}</TableCell>
+              <TableCell align="right" sx={{ whiteSpace: { xs: 'normal', sm: 'nowrap' } }}>{t.minGap}</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
