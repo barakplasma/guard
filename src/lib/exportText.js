@@ -1,12 +1,42 @@
-import { formatDay, formatRange } from './format.js';
+import {
+  formatDay, formatRangeShort, formatTimeShort,
+} from './format.js';
 import { groupAgenda } from './agenda.js';
 
+/** Reshape a day's slot->mission tree into mission->slots, the order this export reads in. */
+function missionsInDay(day) {
+  const missions = new Map();
+  for (const slot of day.slots) {
+    for (const mission of slot.missions) {
+      if (!missions.has(mission.missionId)) {
+        missions.set(mission.missionId, { missionName: mission.missionName, slots: [] });
+      }
+      missions.get(mission.missionId).slots.push({ start: slot.start, end: slot.end, entries: mission.entries });
+    }
+  }
+  return [...missions.values()].sort((a, b) => (
+    a.missionName < b.missionName ? -1 : a.missionName > b.missionName ? 1 : 0
+  ));
+}
+
+/** "A ו-B" for two names, "A, B ו-C" for more - how the group actually writes a roster. */
+function joinNames(entries) {
+  const names = entries.map((e) => e.employeeName);
+  if (names.length < 2) return names.join('');
+  if (names.length === 2) return `${names[0]} ו${names[1]}`;
+  return `${names.slice(0, -1).join(', ')} ו${names[names.length - 1]}`;
+}
+
 /**
- * Render the schedule as text suitable for pasting into WhatsApp.
+ * Render the schedule as text suitable for pasting into WhatsApp: a bold mission
+ * header followed by one plain line per shift time, in the "7:00 שם ושם" style
+ * people actually type by hand, rather than a repeated "mission: names" table row.
  *
  * WhatsApp's own markup is deliberately minimal - `*bold*` is the only thing it
- * reliably renders, and it eats leading whitespace, so indentation is done with
- * bullet characters rather than spaces.
+ * reliably renders, and it eats leading whitespace, so there is no indentation.
+ *
+ * A mission with a single occurrence (a remote mission, a one-off pin) puts its
+ * time range in the header instead, since there is no list of rows to hang it on.
  *
  * Pure on purpose: this is unit-tested directly, and the copy button is just a
  * thin wrapper around it.
@@ -20,11 +50,15 @@ export function whatsappText(result, { title = '' } = {}) {
 
   for (const day of groupAgenda(result)) {
     lines.push('', `*${formatDay(day.day)}*`);
-    for (const slot of day.slots) {
-      lines.push(`${formatRange(slot.start, slot.end)}`);
-      for (const mission of slot.missions) {
-        const people = mission.entries.map((e) => e.employeeName).join(', ');
-        lines.push(`• *${mission.missionName}*: ${people}`);
+    for (const mission of missionsInDay(day)) {
+      if (mission.slots.length === 1) {
+        const { start, end, entries } = mission.slots[0];
+        lines.push('', `*${formatRangeShort(start, end)} ${mission.missionName}*`, joinNames(entries));
+      } else {
+        lines.push('', `*${mission.missionName}*`);
+        for (const slot of mission.slots) {
+          lines.push(`${formatTimeShort(slot.start)} - ${joinNames(slot.entries)}`);
+        }
       }
     }
   }

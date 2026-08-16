@@ -24,6 +24,20 @@ export const formatTime = (ms) => timeFmt.format(new Date(ms));
 export const formatDay = (ms) => dayFmt.format(new Date(ms));
 export const formatDate = (ms) => dateFmt.format(new Date(ms));
 
+const timeFmtShort = new Intl.DateTimeFormat(LOCALE, {
+  hour: 'numeric', minute: '2-digit', hourCycle: 'h23',
+});
+
+/** "7:00" rather than "07:00" - the unpadded style the WhatsApp table export uses. */
+export const formatTimeShort = (ms) => timeFmtShort.format(new Date(ms));
+
+/** Like `formatRange`, but with `formatTimeShort` - same midnight-crossing suffix, shorter hours. */
+export function formatRangeShort(start, end) {
+  const from = formatTimeShort(start);
+  const to = formatTimeShort(end);
+  return dayKey(start) === dayKey(end) ? `${from}–${to}` : `${from}–${to} (${shortDayFmt.format(new Date(end))})`;
+}
+
 /**
  * A time range, with the end date appended when the range crosses midnight.
  * Without this a 24-hour remote mission reads as "22:00–22:00", which looks
