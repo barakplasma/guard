@@ -180,7 +180,9 @@ function normalizePins(pins, employeeById, missionById, warnings) {
       continue;
     }
 
-    const pin = { missionId: mission.id, employeeId: employee.id, start, end };
+    const pin = {
+      missionId: mission.id, employeeId: employee.id, start, end, frozen: Boolean(p.frozen),
+    };
     out.push(pin);
     sameMission.push(pin);
     perMission.set(mission.id, sameMission);
@@ -252,7 +254,7 @@ function occupy(st, missionId, start, end, counter) {
  *   already-elapsed shift (see pins.js's freezeElapsedBeforeEdit) - it skips
  *   the availability check below, since the past cannot become "unavailable".
  * @returns {{
- *   shifts: {missionId:string,missionName:string,type:string,employeeId:string,employeeName:string,start:number,end:number,pinned:boolean}[],
+ *   shifts: {missionId:string,missionName:string,type:string,employeeId:string,employeeName:string,start:number,end:number,pinned:boolean,frozen:boolean}[],
  *   timeline: {start:number,end:number,onDuty:{employeeId:string,missionId:string}[],offDuty:string[],unavailable:string[]}[],
  *   stats: {perEmployee:{employeeId:string,name:string,minutes:number,stints:number,minGapMinutes:number|null}[], spreadMinutes:number},
  *   warnings: object[],
@@ -285,7 +287,7 @@ export function plan({ start, end, shiftMinutes, employees = [], missions = [], 
 
   /** Raw assignments before adjacent-row merging. */
   const rows = [];
-  const addRow = (mission, st, blockStart, blockEnd, pinned) => {
+  const addRow = (mission, st, blockStart, blockEnd, pinned, frozen = false) => {
     occupy(st, mission.id, blockStart, blockEnd, nextSeq);
     rows.push({
       missionId: mission.id,
@@ -296,12 +298,13 @@ export function plan({ start, end, shiftMinutes, employees = [], missions = [], 
       start: blockStart,
       end: blockEnd,
       pinned,
+      frozen,
     });
   };
 
   /* --- 1. pins are immovable: place them before anything else competes --- */
   for (const pin of goodPins) {
-    addRow(missionById.get(pin.missionId), state.get(pin.employeeId), pin.start, pin.end, true);
+    addRow(missionById.get(pin.missionId), state.get(pin.employeeId), pin.start, pin.end, true, pin.frozen);
   }
 
   /* --- 2. remote missions: hard constraints, so they claim people first --- */
@@ -449,7 +452,9 @@ export function plan({ start, end, shiftMinutes, employees = [], missions = [], 
  * Join back-to-back rows for the same person on the same mission, so a segment
  * split caused by an unrelated mission edge doesn't surface as two half rows.
  * Pinned and generated rows never merge into each other - `pinned` has to stay
- * meaningful per row for the UI's clear-pin action.
+ * meaningful per row for the UI's clear-pin action. Frozen and non-frozen
+ * pinned rows are kept apart the same way, so a merged row's lock/pin icon
+ * never misrepresents part of the range it covers.
  */
 function mergeRows(rows) {
   const sorted = [...rows].sort((a, b) => (
@@ -465,6 +470,7 @@ function mergeRows(rows) {
       (r) => r.missionId === row.missionId
         && r.employeeId === row.employeeId
         && r.pinned === row.pinned
+        && r.frozen === row.frozen
         && r.end === row.start,
     );
     if (prev) prev.end = row.end;

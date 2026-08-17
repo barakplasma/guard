@@ -226,6 +226,24 @@ test('a frozen pin survives even when the employee is no longer available for it
   const firstSlot = result.shifts.find((s) => s.start === start);
   assert.equal(firstSlot.employeeId, 'e1', 'the frozen assignment was not reshuffled');
   assert.equal(firstSlot.pinned, true);
+  assert.equal(firstSlot.frozen, true, 'the shift carries the pin\'s frozen flag, for the UI to tell it apart from a manual pin');
+});
+
+test('a manual (non-frozen) pin produces a shift with frozen: false', () => {
+  const start = START;
+  const end = start + HOUR;
+  const result = plan({
+    start,
+    end,
+    shiftMinutes: 60,
+    employees: [{ id: 'e1', name: 'A' }, { id: 'e2', name: 'B' }],
+    missions: [{ id: 'l', name: 'Gate', type: 'local', start, end, count: 1 }],
+    pins: [{ missionId: 'l', employeeId: 'e1', start, end }],
+  });
+
+  const shift = result.shifts.find((s) => s.employeeId === 'e1');
+  assert.equal(shift.pinned, true);
+  assert.equal(shift.frozen, false);
 });
 
 test('a frozen pin loses its bypass when the mission is later switched to remote, widening its range', () => {

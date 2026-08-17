@@ -50,6 +50,8 @@ export const t = {
   missionEnd: 'סיום',
   assignedPeople: 'משובצים קבועים',
   assignedHelp: 'אנשים שישובצו למשימה הזו לכל אורכה. השאר ריק לשיבוץ אוטומטי.',
+  missionReturnedNow: 'חזרו עכשיו',
+  missionReturnedNowHelp: 'מעדכן את שעת הסיום לשעה העגולה הקרובה, ומשחרר את האנשים לשיבוץ במשימות אחרות מאותה שעה.',
   noMissions: 'עדיין לא הוגדרו משימות.',
   emptyMissionsHint: 'לחצו על "הוסף משימה" כדי להתחיל.',
   confirmRemoveMissionTitle: 'הסרת משימה?',

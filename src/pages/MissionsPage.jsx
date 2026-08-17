@@ -2,7 +2,7 @@ import { useState } from 'react';
 import {
   Box, Button, Chip, FormControl, IconButton, InputLabel, MenuItem,
   OutlinedInput, Paper, Select, Stack, TextField, ToggleButton,
-  ToggleButtonGroup, Typography,
+  ToggleButtonGroup, Tooltip, Typography,
 } from '@mui/material';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
 import AddIcon from '@mui/icons-material/Add';
@@ -10,6 +10,7 @@ import DateTimeField from '../components/DateTimeField.jsx';
 import ConfirmDialog from '../components/ConfirmDialog.jsx';
 import { usePlan } from '../state/PlanContext.jsx';
 import { sortByHebrewName } from '../lib/sort.js';
+import { nextTopOfHour } from '../lib/planSchema.js';
 import { t } from '../strings.js';
 
 function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
@@ -87,18 +88,20 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
           {mission.type === 'remote' ? t.typeRemoteHelp : t.typeLocalHelp}
         </Typography>
 
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ alignItems: { xs: 'stretch', sm: 'center' } }}>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} useFlexGap sx={{ flexWrap: 'wrap', alignItems: { xs: 'stretch', sm: 'center' } }}>
           {mission.start != null || mission.end != null ? (
             <>
               <DateTimeField
                 label={t.missionStart}
                 value={mission.start ?? doc.start}
                 onChange={(v) => onChange({ start: v })}
+                testId={`mission-start-${mission.id}`}
               />
               <DateTimeField
                 label={t.missionEnd}
                 value={mission.end ?? doc.end}
                 onChange={(v) => onChange({ end: v })}
+                testId={`mission-end-${mission.id}`}
               />
               <Button size="small" onClick={() => onChange({ start: null, end: null })}>
                 {t.wholePeriod}
@@ -111,6 +114,18 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
               onClick={() => onChange({ start: doc.start, end: doc.end })}
               data-testid={`limit-mission-${mission.id}`}
             />
+          )}
+          {mission.type === 'remote' && (
+            <Tooltip title={t.missionReturnedNowHelp}>
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={() => onChange({ end: nextTopOfHour(Date.now()) })}
+                data-testid={`mission-returned-now-${mission.id}`}
+              >
+                {t.missionReturnedNow}
+              </Button>
+            </Tooltip>
           )}
         </Stack>
 

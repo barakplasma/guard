@@ -3,20 +3,20 @@ import {
 } from './format.js';
 import { groupAgenda } from './agenda.js';
 
-/** Reshape a day's slot->mission tree into mission->slots, the order this export reads in. */
-function missionsInDay(day) {
-  const missions = new Map();
+/**
+ * How many of the day's slots each mission appears in. A mission seen once (a
+ * remote mission, a one-off pin) gets its own range-in-header block; anything
+ * seen more than once rotates through the day and is eligible to merge with
+ * any other rotating mission active at the same clock time.
+ */
+function countOccurrences(day) {
+  const counts = new Map();
   for (const slot of day.slots) {
     for (const mission of slot.missions) {
-      if (!missions.has(mission.missionId)) {
-        missions.set(mission.missionId, { missionName: mission.missionName, slots: [] });
-      }
-      missions.get(mission.missionId).slots.push({ start: slot.start, end: slot.end, entries: mission.entries });
+      counts.set(mission.missionId, (counts.get(mission.missionId) ?? 0) + 1);
     }
   }
-  return [...missions.values()].sort((a, b) => (
-    a.missionName < b.missionName ? -1 : a.missionName > b.missionName ? 1 : 0
-  ));
+  return counts;
 }
 
 /** "A ו-B" for two names, "A, B ו-C" for more - how the group actually writes a roster. */
@@ -38,6 +38,15 @@ function joinNames(entries) {
  * A mission with a single occurrence (a remote mission, a one-off pin) puts its
  * time range in the header instead, since there is no list of rows to hang it on.
  *
+ * Rotating missions active at the same clock time share one header and one row -
+ * e.g. two guard posts rotating hourly read as one "*post A, post B*" block with
+ * "7:00 - X, Y" underneath, rather than two separate blocks repeating every hour.
+ * The row is positional: each mission's names appear in the same left-to-right
+ * order the header lists the missions in, not resorted by name. The header
+ * reprints whenever the active mission set changes, or anything else (a one-off
+ * mission's own block) is rendered in between - so a reader scanning down never
+ * has to guess which header a row still belongs to.
+ *
  * Pure on purpose: this is unit-tested directly, and the copy button is just a
  * thin wrapper around it.
  *
@@ -50,15 +59,31 @@ export function whatsappText(result, { title = '' } = {}) {
 
   for (const day of groupAgenda(result)) {
     lines.push('', `*${formatDay(day.day)}*`);
-    for (const mission of missionsInDay(day)) {
-      if (mission.slots.length === 1) {
-        const { start, end, entries } = mission.slots[0];
-        lines.push('', `*${formatRangeShort(start, end)} ${mission.missionName}*`, joinNames(entries));
-      } else {
-        lines.push('', `*${mission.missionName}*`);
-        for (const slot of mission.slots) {
-          lines.push(`${formatTimeShort(slot.start)} - ${joinNames(slot.entries)}`);
+    const occurrences = countOccurrences(day);
+    // The mission ids of the currently open rotating-row header, or null when
+    // the next rotating row must start a fresh one instead of continuing it.
+    let run = null;
+
+    for (const slot of day.slots) {
+      const singleOccurrence = slot.missions.filter((m) => occurrences.get(m.missionId) === 1);
+      const rotating = slot.missions.filter((m) => occurrences.get(m.missionId) !== 1);
+
+      for (const mission of singleOccurrence) {
+        lines.push('', `*${formatRangeShort(slot.start, slot.end)} ${mission.missionName}*`, joinNames(mission.entries));
+        run = null;
+      }
+
+      if (rotating.length > 0) {
+        const missionIds = rotating.map((m) => m.missionId);
+        const continuesRun = run
+          && run.length === missionIds.length
+          && run.every((id, i) => id === missionIds[i]);
+        if (!continuesRun) {
+          lines.push('', `*${rotating.map((m) => m.missionName).join(', ')}*`);
+          run = missionIds;
         }
+        const names = rotating.map((m) => joinNames(m.entries)).join(', ');
+        lines.push(`${formatTimeShort(slot.start)} - ${names}`);
       }
     }
   }

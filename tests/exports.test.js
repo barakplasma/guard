@@ -140,6 +140,66 @@ test('WhatsApp text joins three or more names as a comma list with ו before the
   assert.ok(lines.some((l) => /^[^,]+, [^,]+ ו[^,]+$/.test(l)), `expected an "A, B וC" row, got ${JSON.stringify(lines)}`);
 });
 
+test('WhatsApp text merges rotating missions sharing a start time into one header, positionally', () => {
+  // Two guard posts, one seat each, rotating hourly. Pin the two employees so
+  // they swap posts between the two hours - a naive "sort the names" merge
+  // would print the same two names in the same order both times; a correct,
+  // positional merge must not.
+  const result = plan({
+    start: START,
+    end: START + 2 * HOUR,
+    shiftMinutes: 60,
+    employees: [
+      { id: 'e1', name: 'תמר' },
+      { id: 'e2', name: 'אבי' },
+    ],
+    missions: [
+      { id: 'm1', name: 'שער א', type: 'local', count: 1 },
+      { id: 'm2', name: 'שער ב', type: 'local', count: 1 },
+    ],
+    pins: [
+      { missionId: 'm1', employeeId: 'e1', start: START, end: START + HOUR },
+      { missionId: 'm2', employeeId: 'e2', start: START, end: START + HOUR },
+      { missionId: 'm1', employeeId: 'e2', start: START + HOUR, end: START + 2 * HOUR },
+      { missionId: 'm2', employeeId: 'e1', start: START + HOUR, end: START + 2 * HOUR },
+    ],
+  });
+  const lines = whatsappText(result, { title: 'ת' }).split('\n');
+
+  assert.equal(
+    lines.filter((l) => l === '*שער א, שער ב*').length,
+    1,
+    `one contiguous run should print the header once, got ${JSON.stringify(lines)}`,
+  );
+  assert.ok(lines.includes('8:00 - תמר, אבי'), `expected the first hour positional row, got ${JSON.stringify(lines)}`);
+  assert.ok(lines.includes('9:00 - אבי, תמר'), `expected the swapped second hour row, got ${JSON.stringify(lines)}`);
+});
+
+test('WhatsApp text reprints a rotating mission\'s header after a single-occurrence block interrupts the run', () => {
+  // Built directly rather than through plan(): only groupAgenda's slot shape
+  // matters here, and hand-picking the shifts keeps the two runs of "שער"
+  // genuinely separated by a real time gap, with the one-off "פשיטה" mission
+  // filling it - no fighting the engine's own auto-fill to get there.
+  const result = {
+    shifts: [
+      {
+        missionId: 'm1', missionName: 'שער', type: 'local', employeeId: 'e1', employeeName: 'אבי', start: START, end: START + HOUR,
+      },
+      {
+        missionId: 'm2', missionName: 'פשיטה', type: 'remote', employeeId: 'e2', employeeName: 'דנה', start: START + HOUR, end: START + 2 * HOUR,
+      },
+      {
+        missionId: 'm1', missionName: 'שער', type: 'local', employeeId: 'e2', employeeName: 'דנה', start: START + 2 * HOUR, end: START + 3 * HOUR,
+      },
+    ],
+  };
+  const lines = whatsappText(result, { title: 'ת' }).split('\n');
+
+  const headerLines = lines.map((l, i) => (l === '*שער*' ? i : -1)).filter((i) => i !== -1);
+  assert.equal(headerLines.length, 2, `expected the header to reprint once the remote block interrupted the run, got ${JSON.stringify(lines)}`);
+  assert.ok(lines.includes('*9:00–10:00 פשיטה*'), `the interrupting single-occurrence block keeps its own header, got ${JSON.stringify(lines)}`);
+});
+
 test('WhatsApp text falls back to a default heading', () => {
   const text = whatsappText(schedule(), {});
   assert.equal(text.split('\n')[0], '*סידור משמרות*');
