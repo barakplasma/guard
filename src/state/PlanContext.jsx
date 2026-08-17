@@ -4,7 +4,9 @@ import {
 import { useLocation, useNavigate } from 'react-router-dom';
 import { decodePlan, encodePlan, PARAM } from '../lib/urlState.js';
 import { emptyPlan, makeId, planSchema, prunePins } from '../lib/planSchema.js';
-import { applyClearPin, applyMissionAssignees, applySwap } from '../lib/pins.js';
+import {
+  applyClearPin, applyMissionAssignees, applySwap, freezeElapsedBeforeEdit,
+} from '../lib/pins.js';
 
 const PlanContext = createContext(null);
 
@@ -49,15 +51,18 @@ export function PlanProvider({ children }) {
     return { doc: result.plan, decodeFailed: false };
   }, [location.search]);
 
+  // Every mutation passes through here, which is what makes freezing the past
+  // work regardless of which page the edit was made on - see freezeElapsedBeforeEdit.
   const setDoc = useCallback((next) => {
-    const parsed = planSchema.parse(prunePins(next));
+    const frozen = freezeElapsedBeforeEdit(doc, next);
+    const parsed = planSchema.parse(prunePins(frozen));
     const encoded = encodePlan(parsed);
     lastBlob.current = encoded;
     lastDoc.current = parsed;
     const params = new URLSearchParams(location.search);
     params.set(PARAM, encoded);
     navigate({ pathname: location.pathname, search: `?${params}` }, { replace: true });
-  }, [location.pathname, location.search, navigate]);
+  }, [doc, location.pathname, location.search, navigate]);
 
   const update = useCallback((fn) => setDoc(fn(doc)), [doc, setDoc]);
 

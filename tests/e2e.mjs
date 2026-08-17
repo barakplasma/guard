@@ -140,8 +140,8 @@ await page.getByTestId('copy-whatsapp').click();
 await page.waitForTimeout(400);
 const clip = await page.evaluate(() => navigator.clipboard.readText());
 check('WhatsApp text has a bold heading', clip.startsWith('*בדיקה*'), clip.slice(0, 40));
-check('WhatsApp text bullets the missions',
-  clip.includes('• *שער*:') && clip.includes('• *סיור מרוחק*:'));
+check('WhatsApp text uses a plain time - names table, not bulleted mission rows',
+  !clip.includes('•') && clip.includes('*שער*') && /\*[^*\n]*סיור מרוחק\*/.test(clip), clip);
 check('WhatsApp text lists only who is on duty', !clip.includes('פנויים'));
 
 /* ---------- the shared link ---------- */
@@ -179,6 +179,80 @@ check('the app still renders with the network off',
   offlineText.slice(0, 120));
 await page.screenshot({ path: `${SHOT}/04-offline.png` });
 await context.setOffline(false);
+
+/* ---------- freezing the past across pages ----------------------------
+ * A plan whose window already started, edited from a page other than the
+ * schedule - the exact case a render-effect-only freeze would miss, since
+ * that effect is unmounted while on Employees/Missions.
+ */
+const ctx3 = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
+const page3 = await ctx3.newPage();
+page3.on('pageerror', (e) => { console.log('PAGEERROR(freeze)', e.message); failures++; });
+
+const pad2 = (n) => String(n).padStart(2, '0');
+const localInput = (ms) => {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+};
+
+await page3.goto(`${BASE}/`, { waitUntil: 'networkidle' });
+await page3.getByTestId('bulk-names').fill(['רותם', 'עדי'].join('\n'));
+await page3.getByTestId('add-bulk').click();
+await page3.waitForTimeout(300);
+
+// Push the window's start three hours into the past, so the first few hourly
+// shifts are already-elapsed history by the time the mission below exists.
+await page3.getByTestId('plan-start').fill(localInput(Date.now() - 3 * 3600 * 1000));
+await page3.waitForTimeout(200);
+
+await page3.getByTestId('tab-missions').click();
+await page3.waitForTimeout(200);
+// Deliberately not naming the mission: filling the name field would itself be
+// a second edit, and this check wants to observe the state right after the
+// single edit that created the mission - before anything has a chance to freeze.
+await page3.getByTestId('add-mission').click();
+await page3.waitForTimeout(250);
+
+await page3.getByTestId('tab-schedule').click();
+await page3.waitForTimeout(500);
+const firstShift = page3.locator('[data-testid^="shift-select-m1-"]').first();
+const firstShiftTestId = await firstShift.getAttribute('data-testid');
+const [, , missionId, shiftStart] = firstShiftTestId.split('-');
+const beforeAssignee = norm(await firstShift.innerText());
+const pinnedBefore = await page3.locator('[data-testid^="pinned-m1-"]').count();
+check('the elapsed shift is not yet pinned before any further edit', pinnedBefore === 0, String(pinnedBefore));
+
+// An edit made from the Employees page, not the schedule screen.
+await page3.getByTestId('tab-employees').click();
+await page3.waitForTimeout(200);
+await page3.getByTestId('bulk-names').fill('שיר');
+await page3.getByTestId('add-bulk').click();
+await page3.waitForTimeout(300);
+
+await page3.getByTestId('tab-schedule').click();
+await page3.waitForTimeout(500);
+const afterAssignee = norm(await page3.locator(`[data-testid="${firstShiftTestId}"]`).innerText());
+check('an edit made on the Employees page did not reshuffle an elapsed shift',
+  afterAssignee === beforeAssignee, `${beforeAssignee} -> ${afterAssignee}`);
+const pinnedAfter = await page3.locator('[data-testid^="pinned-m1-"]').count();
+check('the elapsed shift was frozen into a real pin by that edit', pinnedAfter > 0, String(pinnedAfter));
+
+// Clearing that frozen shift must stick, not bounce back on the next render.
+const clearTestId = `clear-pin-${missionId}-${shiftStart}`;
+await page3.getByTestId(clearTestId).click();
+await page3.waitForTimeout(300);
+const pinnedStillThere = await page3.locator(`[data-testid="pinned-${missionId}-${shiftStart}"]`).count();
+check('clearing a frozen elapsed shift actually clears it', pinnedStillThere === 0, String(pinnedStillThere));
+
+await page3.getByTestId('tab-employees').click();
+await page3.waitForTimeout(200);
+await page3.getByTestId('tab-schedule').click();
+await page3.waitForTimeout(400);
+const pinnedAfterNavigation = await page3.locator(`[data-testid="pinned-${missionId}-${shiftStart}"]`).count();
+check('the clear survives navigating away and back, with no other edit in between',
+  pinnedAfterNavigation === 0, String(pinnedAfterNavigation));
+
+await ctx3.close();
 
 await browser.close();
 console.log(failures === 0 ? '\nALL E2E CHECKS PASSED' : `\n${failures} E2E CHECK(S) FAILED`);

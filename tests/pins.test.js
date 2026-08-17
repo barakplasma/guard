@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyClearPin, applyMissionAssignees, applySwap, pinCovers } from '../src/lib/pins.js';
+import {
+  applyClearPin, applyMissionAssignees, applySwap, freezeElapsedBeforeEdit, freezePastShifts, pinCovers,
+} from '../src/lib/pins.js';
 import { plan } from '../src/lib/planner.js';
 import { toPlannerInput } from '../src/lib/planSchema.js';
 
@@ -168,6 +170,150 @@ test('clearing only removes the named person', () => {
   });
   assert.equal(after.pins.length, 1);
   assert.equal(after.pins[0].employeeId, 'e2');
+});
+
+/* --- freezing the past ------------------------------------------------ */
+
+test('freezePastShifts pins every elapsed, auto-assigned shift and leaves the future alone', () => {
+  const d = doc({
+    end: START + 4 * HOUR,
+    missions: [{ id: 'm1', name: 'Gate', type: 'local', start: null, end: null, count: 1 }],
+  });
+  const result = plan(toPlannerInput(d));
+  const now = START + 2 * HOUR; // the first two hourly shifts have already happened
+
+  const frozen = freezePastShifts(d, result, now);
+  assert.equal(frozen.pins.length, 2, 'only the two elapsed shifts are pinned');
+  for (const pin of frozen.pins) assert.ok(pin.end <= now, 'a pinned shift must actually be in the past');
+
+  // The frozen pins reproduce exactly what the engine already decided.
+  const past = result.shifts.filter((s) => s.end <= now);
+  const pinnedIds = frozen.pins.map((p) => `${p.employeeId}@${p.start}`).sort();
+  const pastIds = past.map((s) => `${s.employeeId}@${s.start}`).sort();
+  assert.deepEqual(pinnedIds, pastIds);
+});
+
+test('freezePastShifts returns the same document when nothing has elapsed', () => {
+  const d = doc({
+    missions: [{ id: 'm1', name: 'Gate', type: 'local', start: null, end: null, count: 1 }],
+  });
+  const result = plan(toPlannerInput(d));
+  const frozen = freezePastShifts(d, result, START - HOUR);
+  assert.equal(frozen, d, 'no elapsed shifts means no document change at all');
+});
+
+test('freezePastShifts does not re-pin a shift that is already pinned', () => {
+  const d = doc({
+    missions: [{ id: 'm1', name: 'Gate', type: 'local', start: null, end: null, count: 1 }],
+    pins: [{ missionId: 'm1', employeeId: 'e2', start: START, end: START + HOUR }],
+  });
+  const result = plan(toPlannerInput(d));
+  const frozen = freezePastShifts(d, result, START + HOUR);
+  assert.equal(frozen.pins.length, 1, 'the already-pinned shift is not duplicated');
+});
+
+test('a frozen shift survives an unrelated later edit to the document', () => {
+  const d = doc({
+    end: START + 2 * HOUR,
+    missions: [{ id: 'm1', name: 'Gate', type: 'local', start: null, end: null, count: 1 }],
+  });
+  const before = plan(toPlannerInput(d));
+  const firstHour = before.shifts.find((s) => s.start === START);
+
+  const frozen = freezePastShifts(d, before, START + HOUR);
+
+  // Adding a new employee reshuffles the balancer's choices for a local
+  // mission - this is exactly the kind of edit that would otherwise rewrite
+  // who already worked the first hour.
+  const edited = {
+    ...frozen,
+    employees: [...frozen.employees, { id: 'e4', name: 'D', start: null, end: null }],
+  };
+  const after = plan(toPlannerInput(edited));
+  const stillFirstHour = after.shifts.find((s) => s.start === START);
+
+  assert.equal(stillFirstHour.employeeId, firstHour.employeeId, 'the past shift did not change hands');
+  assert.equal(stillFirstHour.pinned, true);
+});
+
+/* --- freezing centrally, before every edit ---------------------------- */
+
+test('freezeElapsedBeforeEdit locks in the past even on an edit that never went through the schedule screen', () => {
+  // The regression this guards against: freezing only while SchedulePage is
+  // mounted misses edits made from Employees/Missions, so by the time the
+  // schedule is viewed again the past has already been reshuffled. Basing the
+  // freeze on `prev` - the document as it stood right before this edit -
+  // means it doesn't matter which page made the edit.
+  const prev = doc({
+    end: START + 2 * HOUR,
+    missions: [{ id: 'm1', name: 'Gate', type: 'local', start: null, end: null, count: 1 }],
+  });
+  const before = plan(toPlannerInput(prev));
+  const firstHour = before.shifts.find((s) => s.start === START);
+
+  // An edit elsewhere in the document - e.g. adding an employee from the
+  // Employees page - made after the first hour has already elapsed.
+  const next = {
+    ...prev,
+    employees: [...prev.employees, { id: 'e4', name: 'D', start: null, end: null }],
+  };
+  const merged = freezeElapsedBeforeEdit(prev, next, START + HOUR);
+
+  const after = plan(toPlannerInput(merged));
+  const stillFirstHour = after.shifts.find((s) => s.start === START);
+  assert.equal(stillFirstHour.employeeId, firstHour.employeeId, 'the past shift did not change hands');
+  assert.equal(stillFirstHour.pinned, true);
+});
+
+test('freezeElapsedBeforeEdit lets an intentional clear of a frozen shift stick', () => {
+  const prev = doc({
+    end: START + 2 * HOUR,
+    missions: [{ id: 'm1', name: 'Gate', type: 'local', start: null, end: null, count: 1 }],
+  });
+  const before = plan(toPlannerInput(prev));
+  const firstHour = before.shifts.find((s) => s.start === START);
+
+  // An earlier edit already froze the elapsed shift.
+  const frozen = freezeElapsedBeforeEdit(prev, prev, START + HOUR);
+  assert.equal(frozen.pins.length, 1, 'the elapsed shift got pinned');
+
+  // The user clears that pin on purpose, then this clear is applied the same
+  // way any other edit is - through freezeElapsedBeforeEdit.
+  const cleared = applyClearPin(frozen, {
+    missionId: 'm1', employeeId: firstHour.employeeId, start: firstHour.start, end: firstHour.end,
+  });
+  assert.equal(cleared.pins.length, 0);
+
+  const result = freezeElapsedBeforeEdit(frozen, cleared, START + HOUR);
+  assert.equal(result.pins.length, 0, 'the clear must survive, not be undone by the next freeze pass');
+});
+
+test('freezeElapsedBeforeEdit lets clearAllPins wipe frozen shifts too', () => {
+  const prev = doc({
+    end: START + 2 * HOUR,
+    missions: [{ id: 'm1', name: 'Gate', type: 'local', start: null, end: null, count: 1 }],
+  });
+  const frozen = freezeElapsedBeforeEdit(prev, prev, START + HOUR);
+  assert.ok(frozen.pins.length > 0, 'sanity check: something was actually frozen');
+
+  const clearedAll = { ...frozen, pins: [] };
+  const result = freezeElapsedBeforeEdit(frozen, clearedAll, START + HOUR);
+  assert.equal(result.pins.length, 0, 'clearAllPins is not fought by the freeze step');
+});
+
+test('freezeElapsedBeforeEdit is a no-op before anything has elapsed', () => {
+  const prev = doc({
+    missions: [{ id: 'm1', name: 'Gate', type: 'local', start: null, end: null, count: 1 }],
+  });
+  const next = { ...prev, title: 'renamed' };
+  const result = freezeElapsedBeforeEdit(prev, next, START - HOUR);
+  assert.equal(result, next, 'nothing elapsed yet, so next is returned unchanged');
+});
+
+test('freezeElapsedBeforeEdit skips freezing when the previous document has no employees or missions yet', () => {
+  const prev = doc({ employees: [], missions: [] });
+  const next = { ...prev, title: 'x' };
+  assert.equal(freezeElapsedBeforeEdit(prev, next, START + HOUR), next);
 });
 
 /* --- mission roster -------------------------------------------------- */
