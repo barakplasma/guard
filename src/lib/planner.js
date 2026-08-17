@@ -127,7 +127,18 @@ function normalizePins(pins, employeeById, missionById, warnings) {
     // must not retroactively make that shift "invalid" - the past cannot
     // become unavailable - or the engine would reassign it to someone else
     // on the next render, which is exactly what freezing exists to prevent.
-    if (!p.frozen && (employee.start > start || employee.end < end)) {
+    //
+    // The bypass must only protect the exact interval it was frozen for,
+    // never whatever range this pin resolves to *now*: a remote pin always
+    // expands to the mission's current window above, and a completed remote
+    // mission's window can itself be extended later. Either can turn a pin
+    // that was frozen for one already-elapsed hour into one that resolves to
+    // hours that have not happened yet - comparing against the pin's own
+    // literal start/end (always concrete for a frozen pin, never null) is
+    // what tells a still-faithful frozen interval apart from an expanded one
+    // that has to go through the ordinary check like any live pin.
+    const isFrozenOriginal = p.frozen && p.start === start && p.end === end;
+    if (!isFrozenOriginal && (employee.start > start || employee.end < end)) {
       warnings.push({
         code: WARN.PIN_UNAVAILABLE, missionId: mission.id, employeeId: employee.id, start, end,
       });

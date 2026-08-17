@@ -1,4 +1,5 @@
 import { formatDate, formatRange, formatTime } from './format.js';
+import { pinRange } from './pins.js';
 import { t } from '../strings.js';
 
 /**
@@ -44,9 +45,14 @@ export function planToReadableText(doc) {
     const employeeName = employeeById.get(p.employeeId)?.name ?? p.employeeId;
     const mission = missionById.get(p.missionId);
     const missionName = mission?.name ?? p.missionId;
+    // A pin's start and end are nullable independently, each inheriting the
+    // mission's (then the plan's) boundary - the same resolution pinRange
+    // already does for the engine, reused here so a start-only or end-only
+    // pin doesn't print a literal `null` as the Unix epoch.
+    const resolved = pinRange(doc, p);
     const window = p.start == null && p.end == null
       ? t.wholeMission
-      : formatRange(p.start, p.end);
+      : formatRange(resolved.start, resolved.end);
     const suffix = p.frozen ? ` (${t.frozenPinNote})` : '';
     lines.push(`- ${employeeName} ← ${missionName}: ${window}${suffix}`);
   }

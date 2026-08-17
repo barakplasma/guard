@@ -52,6 +52,18 @@ test('a whole-mission pin reads distinctly from a per-shift one', () => {
   assert.ok(text.includes('דנה ← שער: 08:00'));
 });
 
+test('a pin with only one endpoint set resolves the other from the mission/plan, not a literal null', () => {
+  const text = planToReadableText(doc({
+    pins: [
+      // Only `start` set - `end` must inherit the mission's end (START + 4h),
+      // not print as the Unix epoch.
+      { missionId: 'm1', employeeId: 'e1', start: START + HOUR, end: null },
+    ],
+  }));
+  assert.ok(text.includes('אבי ← שער: 09:00'));
+  assert.ok(!text.includes('1970'));
+});
+
 test('a frozen pin is noted as such', () => {
   const text = planToReadableText(doc({
     pins: [{ missionId: 'm1', employeeId: 'e1', start: null, end: null, frozen: true }],
