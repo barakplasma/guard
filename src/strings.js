@@ -106,4 +106,16 @@ export const t = {
   warnPinConflict: (name) => `${name} משובץ ידנית לשתי משימות חופפות — השיבוץ הישן בוטל.`,
   warnPinOverflow: (name) => `אין מספיק מקומות למשימה — השיבוץ הידני של ${name} בוטל.`,
   warnPinUnavailable: (name) => `${name} לא זמין בזמן שנבחר — השיבוץ הידני בוטל.`,
+  dismissWarning: 'הסתר אזהרה',
+  removeBadPin: 'הסר שיבוץ זה',
+
+  // human-readable plan data
+  showPlanData: 'הצג נתונים לקריאה אנושית',
+  hidePlanData: 'הסתר נתונים',
+  copyPlanData: 'העתק טקסט',
+  planDataTitle: 'תוכן הסידור (מהקישור)',
+  pinsSection: 'שיבוצים ידניים',
+  noPins: 'אין שיבוצים ידניים.',
+  wholeMission: 'כל המשימה',
+  frozenPinNote: 'הוקפא אוטומטית מהעבר',
 };

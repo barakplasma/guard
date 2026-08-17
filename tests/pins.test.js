@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  applyClearPin, applyMissionAssignees, applySwap, freezeElapsedBeforeEdit, freezePastShifts, pinCovers,
+  applyClearPin, applyClearPinsForMission, applyMissionAssignees, applySwap,
+  freezeElapsedBeforeEdit, freezePastShifts, pinCovers,
 } from '../src/lib/pins.js';
 import { plan } from '../src/lib/planner.js';
 import { toPlannerInput } from '../src/lib/planSchema.js';
@@ -172,6 +173,20 @@ test('clearing only removes the named person', () => {
   assert.equal(after.pins[0].employeeId, 'e2');
 });
 
+test('clearing by mission+employee removes every pin regardless of range', () => {
+  const d = doc({
+    missions: [{ id: 'm1', name: 'Gate', type: 'local', start: null, end: null, count: 2 }],
+    pins: [
+      { missionId: 'm1', employeeId: 'e1', start: START, end: START + HOUR },
+      { missionId: 'm1', employeeId: 'e1', start: START + HOUR, end: START + 2 * HOUR },
+      { missionId: 'm1', employeeId: 'e2', start: START, end: START + HOUR },
+    ],
+  });
+  const after = applyClearPinsForMission(d, { missionId: 'm1', employeeId: 'e1' });
+  assert.equal(after.pins.length, 1);
+  assert.equal(after.pins[0].employeeId, 'e2');
+});
+
 /* --- freezing the past ------------------------------------------------ */
 
 test('freezePastShifts pins every elapsed, auto-assigned shift and leaves the future alone', () => {
@@ -184,7 +199,10 @@ test('freezePastShifts pins every elapsed, auto-assigned shift and leaves the fu
 
   const frozen = freezePastShifts(d, result, now);
   assert.equal(frozen.pins.length, 2, 'only the two elapsed shifts are pinned');
-  for (const pin of frozen.pins) assert.ok(pin.end <= now, 'a pinned shift must actually be in the past');
+  for (const pin of frozen.pins) {
+    assert.ok(pin.end <= now, 'a pinned shift must actually be in the past');
+    assert.equal(pin.frozen, true, 'freeze-created pins are marked frozen, unlike a manual pin');
+  }
 
   // The frozen pins reproduce exactly what the engine already decided.
   const past = result.shifts.filter((s) => s.end <= now);

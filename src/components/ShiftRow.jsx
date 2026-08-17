@@ -25,11 +25,14 @@ export default function ShiftRow({ shift, employees, busyElsewhere, onSwap, onCl
         alignItems: 'center',
         gap: 0.5,
         rowGap: 0.5,
-        // On a phone it grows into whatever the row has left and stacks when it
-        // runs out, so two people on one mission sit side by side when there is
-        // room and one per line when there is not. On a wide screen the column
-        // is roomy already, and a name-wide control beats a stretched one.
-        flex: { xs: '1 1 6rem', sm: '0 0 auto' },
+        // Always the full row width on a phone: a two-column packing (each
+        // person given only a ~6rem share) reads fine for a two-person
+        // mission, but a mission with a large headcount turns into a wall of
+        // cramped, hard-to-read dropdowns. One assignment per line costs more
+        // vertical space but stays legible regardless of headcount. On a wide
+        // screen the column is roomy already, and a name-wide control beats a
+        // stretched one.
+        flex: { xs: '1 1 100%', sm: '0 0 auto' },
         maxWidth: '100%',
         minWidth: 0,
         ...(shift.pinned && {

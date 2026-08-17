@@ -200,6 +200,56 @@ test('a pin outside the person\'s availability is dropped with a warning', () =>
   assert.equal(firstSlot.employeeId, 'e2', 'the slot is covered by whoever is actually available');
 });
 
+test('a frozen pin survives even when the employee is no longer available for it', () => {
+  // The scenario freezeElapsedBeforeEdit exists to protect: an already-elapsed
+  // shift was locked in for e1, then e1's availability was tightened afterwards
+  // (e.g. they can only work from some later time on). The frozen pin must not
+  // be treated as a fresh, invalid manual assignment - the past cannot become
+  // "unavailable".
+  const start = START;
+  const end = start + 2 * HOUR;
+  const result = plan({
+    start,
+    end,
+    shiftMinutes: 60,
+    employees: [
+      { id: 'e1', name: 'Late', start: start + HOUR },
+      { id: 'e2', name: 'Full' },
+    ],
+    missions: [{ id: 'l', name: 'Gate', type: 'local', start, end, count: 1 }],
+    pins: [{
+      missionId: 'l', employeeId: 'e1', start, end: start + HOUR, frozen: true,
+    }],
+  });
+
+  assert.ok(!result.warnings.some((w) => w.code === WARN.PIN_UNAVAILABLE));
+  const firstSlot = result.shifts.find((s) => s.start === start);
+  assert.equal(firstSlot.employeeId, 'e1', 'the frozen assignment was not reshuffled');
+  assert.equal(firstSlot.pinned, true);
+});
+
+test('an unfrozen pin is still dropped when the employee is unavailable, frozen or not', () => {
+  const start = START;
+  const end = start + 2 * HOUR;
+  const result = plan({
+    start,
+    end,
+    shiftMinutes: 60,
+    employees: [
+      { id: 'e1', name: 'Late', start: start + HOUR },
+      { id: 'e2', name: 'Full' },
+    ],
+    missions: [{ id: 'l', name: 'Gate', type: 'local', start, end, count: 1 }],
+    pins: [{
+      missionId: 'l', employeeId: 'e1', start, end: start + HOUR, frozen: false,
+    }],
+  });
+
+  assert.ok(result.warnings.some((w) => w.code === WARN.PIN_UNAVAILABLE && w.employeeId === 'e1'));
+  const firstSlot = result.shifts.find((s) => s.start === start);
+  assert.equal(firstSlot.employeeId, 'e2');
+});
+
 test('pins naming a deleted employee or mission are ignored silently', () => {
   const start = START;
   const end = start + 2 * HOUR;

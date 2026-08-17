@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import lzString from 'lz-string';
 import { decodePlan, encodePlan, PARAM } from '../src/lib/urlState.js';
 import { emptyPlan, planSchema, prunePins, toPlannerInput } from '../src/lib/planSchema.js';
 import { plan } from '../src/lib/planner.js';
@@ -39,7 +40,9 @@ test('pins survive the round trip, including whole-mission ones', () => {
   const doc = sample();
   const { plan: back } = decodePlan(encodePlan(doc));
   assert.equal(back.pins.length, 2);
-  assert.deepEqual(back.pins[0], { missionId: 'm2', employeeId: 'e1', start: null, end: null });
+  assert.deepEqual(back.pins[0], {
+    missionId: 'm2', employeeId: 'e1', start: null, end: null, frozen: false,
+  });
   assert.equal(back.pins[1].start, START + HOUR);
 });
 
@@ -99,6 +102,41 @@ test('emptyPlan is a valid document', () => {
   assert.equal(planSchema.parse(doc).start, doc.start);
   assert.ok(doc.end > doc.start);
   assert.equal(decodePlan(encodePlan(doc)).ok, true);
+});
+
+test('the frozen flag survives the round trip', () => {
+  const doc = planSchema.parse({
+    ...sample(),
+    pins: [
+      { missionId: 'm2', employeeId: 'e1', start: null, end: null, frozen: true },
+      { missionId: 'm1', employeeId: 'e3', start: START + HOUR, end: START + 2 * HOUR, frozen: false },
+    ],
+  });
+  const { plan: back } = decodePlan(encodePlan(doc));
+  assert.equal(back.pins[0].frozen, true);
+  assert.equal(back.pins[1].frozen, false);
+});
+
+test('a link encoded before the frozen flag existed decodes as unfrozen', () => {
+  // Old links only have 4 elements per pin tuple; the decoder must not choke
+  // on the missing 5th slot, and must treat it as an ordinary, unfrozen pin.
+  const doc = sample();
+  const legacyCompact = {
+    v: doc.version,
+    t: doc.title,
+    s: doc.start,
+    e: doc.end,
+    m: doc.shiftMinutes,
+    emp: doc.employees.map((x) => [x.id, x.name, x.start ?? 0, x.end ?? 0]),
+    mis: doc.missions.map((x) => (
+      [x.id, x.name, x.type === 'remote' ? 1 : 0, x.start ?? 0, x.end ?? 0, x.count]
+    )),
+    pin: doc.pins.map((x) => [x.missionId, x.employeeId, x.start ?? 0, x.end ?? 0]),
+  };
+  const legacyBlob = lzString.compressToEncodedURIComponent(JSON.stringify(legacyCompact));
+  const { ok, plan: back } = decodePlan(legacyBlob);
+  assert.equal(ok, true);
+  assert.equal(back.pins.every((p) => p.frozen === false), true);
 });
 
 test('prunePins drops references to deleted employees and missions', () => {

@@ -20,6 +20,21 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
     .filter((p) => p.missionId === mission.id && p.start == null && p.end == null)
     .map((p) => p.employeeId);
 
+  // A whole-mission assignment needs the person available for the mission's
+  // entire window - the planner clamps it to that regardless (see
+  // normalizePins in planner.js), so anyone who does not cover it gets their
+  // pin silently dropped with a warning the picker itself never showed.
+  // Flagging it here, the same way the schedule's per-shift dropdown already
+  // does, is what stops someone from disappearing after being "assigned" with
+  // no visible reason why.
+  const missionStart = mission.start ?? doc.start;
+  const missionEnd = mission.end ?? doc.end;
+  const unavailableFor = (employeeId) => {
+    const e = doc.employees.find((x) => x.id === employeeId);
+    if (!e) return false;
+    return (e.start ?? -Infinity) > missionStart || (e.end ?? Infinity) < missionEnd;
+  };
+
   return (
     <Paper variant="outlined" sx={{ p: 2 }}>
       <Stack spacing={2}>
@@ -117,6 +132,7 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
                   <Chip
                     key={id}
                     size="small"
+                    color={unavailableFor(id) ? 'warning' : 'default'}
                     label={doc.employees.find((e) => e.id === id)?.name ?? id}
                   />
                 ))}
@@ -125,7 +141,10 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
             data-testid={`assign-${mission.id}`}
           >
             {sortByHebrewName(doc.employees).map((e) => (
-              <MenuItem key={e.id} value={e.id}>{e.name}</MenuItem>
+              <MenuItem key={e.id} value={e.id} sx={unavailableFor(e.id) ? { color: 'warning.main' } : undefined}>
+                {e.name}
+                {unavailableFor(e.id) ? ` — ${t.unavailable}` : ''}
+              </MenuItem>
             ))}
           </Select>
           <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
