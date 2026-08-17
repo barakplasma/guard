@@ -1,5 +1,6 @@
 import { Box, Chip, IconButton, MenuItem, Select, Tooltip } from '@mui/material';
 import PushPinIcon from '@mui/icons-material/PushPin';
+import LockIcon from '@mui/icons-material/Lock';
 import CloseIcon from '@mui/icons-material/Close';
 import { t } from '../strings.js';
 
@@ -67,15 +68,27 @@ export default function ShiftRow({ shift, employees, busyElsewhere, onSwap, onCl
 
       {shift.pinned && (
         // Badge and its clear button stay one unit so they never wrap apart.
+        // Icon-only: a lock means the engine froze this shift because its time
+        // already elapsed, a pin means a person chose it by hand - the text
+        // label this used to carry is gone, so the distinction has to survive
+        // on the icon and the tooltip alone.
         <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.25 }}>
-          <Tooltip title={t.pinned}>
+          <Tooltip title={shift.frozen ? t.frozenPinNote : t.pinned}>
             <Chip
               size="small"
-              icon={<PushPinIcon fontSize="small" />}
-              label={t.pinned}
+              icon={shift.frozen ? <LockIcon fontSize="small" /> : <PushPinIcon fontSize="small" />}
+              label=""
               color="primary"
               variant="outlined"
-              sx={{ maxWidth: '100%' }}
+              aria-label={shift.frozen ? t.frozenPinNote : t.pinned}
+              sx={{
+                maxWidth: '100%',
+                // The icon's built-in margin assumes a label follows it; with
+                // the label hidden that leaves lopsided padding on one side.
+                '& .MuiChip-label': { display: 'none' },
+                '& .MuiChip-icon': { m: 0 },
+                px: 0.75,
+              }}
               data-testid={`pinned-${shift.missionId}-${shift.start}`}
             />
           </Tooltip>

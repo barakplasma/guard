@@ -71,6 +71,15 @@ await page.getByTestId('mission-count-m2').fill('2');
 await page.waitForTimeout(250);
 check('two missions defined', (await page.locator('[data-testid^="mission-name-"]').count()) === 2);
 
+/* ---------- "returned now" rounds a remote mission's end up to the hour ---------- */
+await page.getByTestId('mission-returned-now-m1').click();
+await page.waitForTimeout(200);
+const returnedEnd = await page.getByTestId('mission-end-m1').inputValue();
+check('returned-now sets an end time', returnedEnd !== '', returnedEnd);
+check('returned-now rounds to the top of the hour', /T\d{2}:00$/.test(returnedEnd), returnedEnd);
+check('local mission has no returned-now button',
+  (await page.locator('[data-testid="mission-returned-now-m2"]').count()) === 0);
+
 /* ---------- assign specific people to the remote mission ---------- */
 await page.getByTestId('assign-m1').click();
 await page.waitForTimeout(300);
