@@ -32,11 +32,17 @@ survive a local→remote toggle, and honouring it literally leaves the rest of t
 A shift whose window has already closed must never change hands because of an unrelated later
 edit — the engine has no notion of "past" (see the `Date.now()` rule above), so nothing stops a
 new employee or a widened availability window from silently reshuffling history unless something
-locks it in. `SchedulePage.jsx` does that by calling `freezePastShifts` (`src/lib/pins.js`) on
-every render: any already-elapsed, auto-assigned shift becomes a real pin, indistinguishable from
-one a person swapped by hand. That is deliberate — a frozen shift stays swappable and clearable
-like any other pin, because the point is to let someone correct the record to match reality, not
-to make the past read-only.
+locks it in. `PlanContext`'s `setDoc` does that by running `freezeElapsedBeforeEdit`
+(`src/lib/pins.js`) on every mutation, before the edit is applied: whatever the engine had already
+decided for an already-elapsed, auto-assigned shift becomes a real pin, indistinguishable from one
+a person swapped by hand. This has to sit in `setDoc`, not a `SchedulePage` render effect — every
+mutator (`addEmployee`, `updateMission`, a swap, …) funnels through it, so an edit made from the
+Employees or Missions page freezes history exactly like one made from the schedule screen. The
+freeze snapshot is taken from the *previous* document, not the one the edit produces: a shift
+already pinned in the previous document is left alone, which is what lets clearing a frozen pin
+actually stick instead of being immediately re-pinned by the same edit. That is deliberate — a
+frozen shift stays swappable and clearable like any other pin, because the point is to let someone
+correct the record to match reality, not to make the past read-only.
 
 `tests/planner.invariants.test.js` is the real safety net: it asserts across ~1600 generated plans
 that nobody is ever double-booked, no mission is overstaffed, availability is respected, and the

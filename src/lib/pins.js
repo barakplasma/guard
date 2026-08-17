@@ -12,6 +12,9 @@
  * miss one of them.
  */
 
+import { plan as runPlanner } from './planner.js';
+import { toPlannerInput } from './planSchema.js';
+
 /** Resolve a pin's effective range, following the null-inheritance chain. */
 export function pinRange(doc, pin) {
   const mission = doc.missions.find((m) => m.id === pin.missionId);
@@ -96,6 +99,33 @@ export function freezePastShifts(doc, result, now) {
     }));
   if (newPins.length === 0) return doc;
   return { ...doc, pins: [...doc.pins, ...newPins] };
+}
+
+/**
+ * Carry `prev`'s already-elapsed assignments forward into `next`, before
+ * `next`'s own edit takes effect. This is the actual guard against the past
+ * changing hands: every document mutation goes through this (`PlanContext`'s
+ * `setDoc`), not just ones made from the schedule screen, so an edit on the
+ * Employees or Missions page can't reshuffle history either.
+ *
+ * The snapshot is taken from `prev` on purpose. Freezing what `next` looks
+ * like instead would immediately re-pin a shift the caller just cleared on
+ * purpose - `applyClearPin`/`clearAllPins` remove a pin from `next`, but that
+ * same shift is already pinned in `prev`, so `freezePastShifts` skips it
+ * there and the clear survives.
+ */
+export function freezeElapsedBeforeEdit(prev, next, now = Date.now()) {
+  if (prev.employees.length === 0 || prev.missions.length === 0) return next;
+  let result;
+  try {
+    result = runPlanner(toPlannerInput(prev));
+  } catch {
+    return next;
+  }
+  const frozenPrev = freezePastShifts(prev, result, now);
+  if (frozenPrev === prev) return next;
+  const newPins = frozenPrev.pins.slice(prev.pins.length);
+  return { ...next, pins: [...next.pins, ...newPins] };
 }
 
 /**
