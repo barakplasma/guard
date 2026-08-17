@@ -200,6 +200,134 @@ test('a pin outside the person\'s availability is dropped with a warning', () =>
   assert.equal(firstSlot.employeeId, 'e2', 'the slot is covered by whoever is actually available');
 });
 
+test('a frozen pin survives even when the employee is no longer available for it', () => {
+  // The scenario freezeElapsedBeforeEdit exists to protect: an already-elapsed
+  // shift was locked in for e1, then e1's availability was tightened afterwards
+  // (e.g. they can only work from some later time on). The frozen pin must not
+  // be treated as a fresh, invalid manual assignment - the past cannot become
+  // "unavailable".
+  const start = START;
+  const end = start + 2 * HOUR;
+  const result = plan({
+    start,
+    end,
+    shiftMinutes: 60,
+    employees: [
+      { id: 'e1', name: 'Late', start: start + HOUR },
+      { id: 'e2', name: 'Full' },
+    ],
+    missions: [{ id: 'l', name: 'Gate', type: 'local', start, end, count: 1 }],
+    pins: [{
+      missionId: 'l', employeeId: 'e1', start, end: start + HOUR, frozen: true,
+    }],
+  });
+
+  assert.ok(!result.warnings.some((w) => w.code === WARN.PIN_UNAVAILABLE));
+  const firstSlot = result.shifts.find((s) => s.start === start);
+  assert.equal(firstSlot.employeeId, 'e1', 'the frozen assignment was not reshuffled');
+  assert.equal(firstSlot.pinned, true);
+});
+
+test('a frozen pin loses its bypass when the mission is later switched to remote, widening its range', () => {
+  // The pin was frozen while the mission was local, covering just the first
+  // hour. Once the mission is remote, normalizePins expands any pin on it to
+  // the mission's whole window *before* the frozen check runs - so this must
+  // no longer count as "the original frozen interval" and must go through
+  // the ordinary availability check like a live pin would.
+  const start = START;
+  const end = start + 4 * HOUR;
+  const result = plan({
+    start,
+    end,
+    shiftMinutes: 60,
+    employees: [
+      { id: 'e1', name: 'Early', end: start + HOUR },
+      { id: 'e2', name: 'Full' },
+    ],
+    missions: [{ id: 'm', name: 'M', type: 'remote', start, end, count: 1 }],
+    pins: [{
+      missionId: 'm', employeeId: 'e1', start, end: start + HOUR, frozen: true,
+    }],
+  });
+
+  assert.ok(result.warnings.some((w) => w.code === WARN.PIN_UNAVAILABLE && w.employeeId === 'e1'));
+  const own = result.shifts.filter((s) => s.missionId === 'm');
+  assert.equal(own.length, 1);
+  assert.equal(own[0].employeeId, 'e2', 'covered by someone actually available for the full remote window');
+});
+
+test('a frozen whole-mission pin loses its bypass when the remote mission window is later extended', () => {
+  const start = START;
+  const originalEnd = start + 2 * HOUR;
+  const extendedEnd = start + 4 * HOUR;
+  const result = plan({
+    start,
+    end: extendedEnd,
+    shiftMinutes: 60,
+    employees: [
+      { id: 'e1', name: 'Early', end: originalEnd },
+      { id: 'e2', name: 'Full' },
+    ],
+    // The mission's own window has already been extended past what e1 was
+    // frozen for.
+    missions: [{ id: 'm', name: 'M', type: 'remote', start, end: extendedEnd, count: 1 }],
+    pins: [{
+      missionId: 'm', employeeId: 'e1', start, end: originalEnd, frozen: true,
+    }],
+  });
+
+  assert.ok(result.warnings.some((w) => w.code === WARN.PIN_UNAVAILABLE && w.employeeId === 'e1'));
+  const own = result.shifts.filter((s) => s.missionId === 'm');
+  assert.equal(own.length, 1);
+  assert.equal(own[0].employeeId, 'e2');
+});
+
+test('a frozen pin whose resolved range still matches exactly what it was frozen for keeps its bypass', () => {
+  const start = START;
+  const end = start + 2 * HOUR;
+  const result = plan({
+    start,
+    end,
+    shiftMinutes: 60,
+    employees: [
+      { id: 'e1', name: 'Early', end: start + HOUR },
+      { id: 'e2', name: 'Full' },
+    ],
+    missions: [{ id: 'm', name: 'M', type: 'remote', start, end, count: 1 }],
+    // Frozen for exactly the mission's current (unchanged) whole window.
+    pins: [{
+      missionId: 'm', employeeId: 'e1', start, end, frozen: true,
+    }],
+  });
+
+  assert.ok(!result.warnings.some((w) => w.code === WARN.PIN_UNAVAILABLE));
+  const own = result.shifts.filter((s) => s.missionId === 'm');
+  assert.equal(own.length, 1);
+  assert.equal(own[0].employeeId, 'e1');
+});
+
+test('an unfrozen pin is still dropped when the employee is unavailable, frozen or not', () => {
+  const start = START;
+  const end = start + 2 * HOUR;
+  const result = plan({
+    start,
+    end,
+    shiftMinutes: 60,
+    employees: [
+      { id: 'e1', name: 'Late', start: start + HOUR },
+      { id: 'e2', name: 'Full' },
+    ],
+    missions: [{ id: 'l', name: 'Gate', type: 'local', start, end, count: 1 }],
+    pins: [{
+      missionId: 'l', employeeId: 'e1', start, end: start + HOUR, frozen: false,
+    }],
+  });
+
+  assert.ok(result.warnings.some((w) => w.code === WARN.PIN_UNAVAILABLE && w.employeeId === 'e1'));
+  const firstSlot = result.shifts.find((s) => s.start === start);
+  assert.equal(firstSlot.employeeId, 'e2');
+});
+
 test('pins naming a deleted employee or mission are ignored silently', () => {
   const start = START;
   const end = start + 2 * HOUR;

@@ -35,6 +35,11 @@ export const pinSchema = z.object({
   employeeId: id,
   start: ts.nullable().default(null),
   end: ts.nullable().default(null),
+  // Set only by freezeElapsedBeforeEdit (src/lib/pins.js): the engine decided
+  // this before it was ever a shared decision to protect, so unlike a pin a
+  // person actually chose, it must not be invalidated by a later availability
+  // edit - see planner.js's normalizePins.
+  frozen: z.boolean().default(false),
 });
 
 export const planSchema = z.object({
@@ -120,6 +125,7 @@ export function toPlannerInput(doc) {
       employeeId: p.employeeId,
       start: p.start ?? undefined,
       end: p.end ?? undefined,
+      frozen: Boolean(p.frozen),
     })),
   };
 }

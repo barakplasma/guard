@@ -78,6 +78,21 @@ export function applyClearPin(doc, { missionId, employeeId, start, end }) {
 }
 
 /**
+ * Remove every pin naming `employeeId` on `missionId`, regardless of range.
+ * For the rare warning that can't name an exact range to match on (a pin
+ * clamped down to nothing by the mission's own window, e.g. `PIN_UNAVAILABLE`
+ * without a `start`/`end`) - broader than `applyClearPin`, but there is
+ * nothing more specific to key on, and this is only ever offered to clear a
+ * pin the engine already reported as unusable.
+ */
+export function applyClearPinsForMission(doc, { missionId, employeeId }) {
+  return {
+    ...doc,
+    pins: doc.pins.filter((p) => !(p.missionId === missionId && p.employeeId === employeeId)),
+  };
+}
+
+/**
  * Turn every already-elapsed, auto-assigned shift in `result` into a pin, so
  * that a later edit elsewhere in the document can never reshuffle who already
  * worked a shift that is in the past. `result` must be the schedule computed
@@ -89,13 +104,18 @@ export function applyClearPin(doc, { missionId, employeeId, start, end }) {
  *
  * This only locks in the outcome; it does not stop anyone from editing the
  * past on purpose - a frozen shift is a normal pin, swappable and clearable
- * like any other.
+ * like any other. It is marked `frozen: true` for one reason only: so a later
+ * edit to someone's availability can't retroactively make the past "invalid"
+ * and have the engine reshuffle it - see planner.js's normalizePins, which
+ * skips the availability check for these pins specifically. Everything else
+ * about a frozen pin (conflict handling, seat limits, swapping, clearing)
+ * behaves exactly like a pin a person wrote by hand.
  */
 export function freezePastShifts(doc, result, now) {
   const newPins = result.shifts
     .filter((s) => !s.pinned && s.end <= now)
     .map((s) => ({
-      missionId: s.missionId, employeeId: s.employeeId, start: s.start, end: s.end,
+      missionId: s.missionId, employeeId: s.employeeId, start: s.start, end: s.end, frozen: true,
     }));
   if (newPins.length === 0) return doc;
   return { ...doc, pins: [...doc.pins, ...newPins] };

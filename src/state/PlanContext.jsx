@@ -5,7 +5,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { decodePlan, encodePlan, PARAM } from '../lib/urlState.js';
 import { emptyPlan, makeId, planSchema, prunePins } from '../lib/planSchema.js';
 import {
-  applyClearPin, applyMissionAssignees, applySwap, freezeElapsedBeforeEdit,
+  applyClearPin, applyClearPinsForMission, applyMissionAssignees, applySwap, freezeElapsedBeforeEdit,
 } from '../lib/pins.js';
 
 const PlanContext = createContext(null);
@@ -147,6 +147,26 @@ export function PlanProvider({ children }) {
     ),
 
     clearAllPins: () => update((d) => ({ ...d, pins: [] })),
+
+    /**
+     * Remove the specific pin a `pin-conflict`/`pin-overflow`/`pin-unavailable`
+     * warning reported as dropped, so the warning stops recurring on every
+     * render instead of only being explainable. `start`/`end` are omitted for
+     * the one warning shape that can't name an exact range (a pin clamped to
+     * nothing by the mission's own window); that case clears every pin the
+     * person holds on that mission, since there is nothing more specific to
+     * key on.
+     */
+    clearPinByWarning: (warning) => update((d) => (
+      warning.start != null && warning.end != null
+        ? applyClearPin(d, {
+          missionId: warning.missionId,
+          employeeId: warning.employeeId,
+          start: warning.start,
+          end: warning.end,
+        })
+        : applyClearPinsForMission(d, { missionId: warning.missionId, employeeId: warning.employeeId })
+    )),
   }), [update]);
 
   const value = useMemo(

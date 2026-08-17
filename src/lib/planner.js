@@ -122,7 +122,23 @@ function normalizePins(pins, employeeById, missionById, warnings) {
       warnings.push({ code: WARN.PIN_UNAVAILABLE, missionId: mission.id, employeeId: employee.id });
       continue;
     }
-    if (employee.start > start || employee.end < end) {
+    // A frozen pin (freezeElapsedBeforeEdit, src/lib/pins.js) records what
+    // already happened. Someone's availability window changing afterwards
+    // must not retroactively make that shift "invalid" - the past cannot
+    // become unavailable - or the engine would reassign it to someone else
+    // on the next render, which is exactly what freezing exists to prevent.
+    //
+    // The bypass must only protect the exact interval it was frozen for,
+    // never whatever range this pin resolves to *now*: a remote pin always
+    // expands to the mission's current window above, and a completed remote
+    // mission's window can itself be extended later. Either can turn a pin
+    // that was frozen for one already-elapsed hour into one that resolves to
+    // hours that have not happened yet - comparing against the pin's own
+    // literal start/end (always concrete for a frozen pin, never null) is
+    // what tells a still-faithful frozen interval apart from an expanded one
+    // that has to go through the ordinary check like any live pin.
+    const isFrozenOriginal = p.frozen && p.start === start && p.end === end;
+    if (!isFrozenOriginal && (employee.start > start || employee.end < end)) {
       warnings.push({
         code: WARN.PIN_UNAVAILABLE, missionId: mission.id, employeeId: employee.id, start, end,
       });
@@ -228,10 +244,13 @@ function occupy(st, missionId, start, end, counter) {
  * @param {{id:string,name:string,start?:number,end?:number}[]} params.employees
  *   `start`/`end` default to the whole plan window.
  * @param {{id:string,name:string,type:'remote'|'local',start?:number,end?:number,count:number}[]} params.missions
- * @param {{missionId:string,employeeId:string,start?:number,end?:number}[]} [params.pins]
+ * @param {{missionId:string,employeeId:string,start?:number,end?:number,frozen?:boolean}[]} [params.pins]
  *   Hard, hand-made assignments. Omitting `start`/`end` pins the person to the
  *   mission's whole window (how people are assigned to a remote mission);
  *   supplying them pins one specific shift (how a manual swap is recorded).
+ *   `frozen: true` marks a pin the engine wrote for itself to lock in an
+ *   already-elapsed shift (see pins.js's freezeElapsedBeforeEdit) - it skips
+ *   the availability check below, since the past cannot become "unavailable".
  * @returns {{
  *   shifts: {missionId:string,missionName:string,type:string,employeeId:string,employeeName:string,start:number,end:number,pinned:boolean}[],
  *   timeline: {start:number,end:number,onDuty:{employeeId:string,missionId:string}[],offDuty:string[],unavailable:string[]}[],

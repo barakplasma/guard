@@ -38,7 +38,7 @@ export function encodePlan(doc) {
     m: doc.shiftMinutes,
     emp: doc.employees.map((x) => [x.id, x.name, outTs(x.start), outTs(x.end)]),
     mis: doc.missions.map((x) => [x.id, x.name, TYPE_CODE[x.type] ?? 0, outTs(x.start), outTs(x.end), x.count]),
-    pin: doc.pins.map((x) => [x.missionId, x.employeeId, outTs(x.start), outTs(x.end)]),
+    pin: doc.pins.map((x) => [x.missionId, x.employeeId, outTs(x.start), outTs(x.end), x.frozen ? 1 : 0]),
   };
   return compressToEncodedURIComponent(JSON.stringify(compact));
 }
@@ -74,8 +74,8 @@ export function decodePlan(blob) {
       missions: (raw.mis ?? []).map(([id, name, type, s, e, count]) => ({
         id, name, type: CODE_TYPE[type] ?? 'local', start: inTs(s), end: inTs(e), count,
       })),
-      pins: (raw.pin ?? []).map(([missionId, employeeId, s, e]) => ({
-        missionId, employeeId, start: inTs(s), end: inTs(e),
+      pins: (raw.pin ?? []).map(([missionId, employeeId, s, e, f]) => ({
+        missionId, employeeId, start: inTs(s), end: inTs(e), frozen: Boolean(f),
       })),
     });
     return { ok: true, plan: doc };
