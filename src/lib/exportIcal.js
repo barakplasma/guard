@@ -142,11 +142,17 @@ export function employeeIcs(result, { employeeId, employeeName, title = '', now 
 
 /**
  * ICS calendar for a manager: one VEVENT per mission per continuously-staffed
- * interval, listing everyone assigned to it in the description. Missions are
- * sliced independently of each other (and of the shared shift-length grid), so
- * a mission whose own assignments have staggered boundaries still produces
- * accurate, non-overlapping events instead of duplicated ones that each
- * undercount who was actually on duty.
+ * interval, listing everyone assigned to it in both the title and the
+ * description. Missions are sliced independently of each other (and of the
+ * shared shift-length grid), so a mission whose own assignments have
+ * staggered boundaries still produces accurate, non-overlapping events
+ * instead of duplicated ones that each undercount who was actually on duty.
+ *
+ * The names are in the title, not just the description, because most
+ * calendar apps' month/week views only ever show the title - a manager
+ * scanning the calendar needs to see who is on duty without opening every
+ * event. The description repeats the same names for the apps that do show it
+ * (a tooltip, an agenda list), which costs nothing.
  *
  * @param {object} result - the planner engine's output
  * @param {object} [options]
@@ -170,14 +176,17 @@ export function overviewIcs(result, { title = '', now = Date.now() } = {}) {
   slices.sort((a, b) => a.start - b.start || a.end - b.end
     || (a.missionId < b.missionId ? -1 : a.missionId > b.missionId ? 1 : 0));
 
-  const events = slices.map((slice) => toIcsEvent({
-    uid: `${planId}-${slice.missionId}-${slice.start}-${slice.end}@guard.shifts`,
-    dtstamp: now,
-    start: slice.start,
-    end: slice.end,
-    title: slice.rows[0].missionName,
-    description: slice.rows.map((r) => r.employeeName).join(', '),
-  }));
+  const events = slices.map((slice) => {
+    const names = slice.rows.map((r) => r.employeeName).join(', ');
+    return toIcsEvent({
+      uid: `${planId}-${slice.missionId}-${slice.start}-${slice.end}@guard.shifts`,
+      dtstamp: now,
+      start: slice.start,
+      end: slice.end,
+      title: `${slice.rows[0].missionName} — ${names}`,
+      description: names,
+    });
+  });
   return buildCalendar(title.trim() || 'סידור משמרות', events);
 }
 

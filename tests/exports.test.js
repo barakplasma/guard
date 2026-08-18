@@ -298,6 +298,19 @@ test('overviewIcs makes one VEVENT per mission per shift, listing everyone on it
   assert.ok(ics.includes('DESCRIPTION:אבי\\, דנה') || ics.includes('DESCRIPTION:דנה\\, אבי'));
 });
 
+test('overviewIcs puts the roster in the title, not just the description', () => {
+  // A manager scanning a month/week view only ever sees the title - the
+  // names have to be readable there, not just inside an event a reader has
+  // to open. Bug: the title used to be the bare mission name.
+  const result = schedulePair();
+  const ics = overviewIcs(result, { title: 'בדיקה' });
+  const summaryLine = ics.split('\r\n').find((l) => l.startsWith('SUMMARY:'));
+  assert.ok(
+    summaryLine?.includes('אבי') && summaryLine?.includes('דנה'),
+    `expected both names in the title, got ${summaryLine}`,
+  );
+});
+
 test('employeeIcs makes one VEVENT per shift of that employee only', () => {
   const result = schedule();
   const mine = result.shifts.filter((s) => s.employeeId === 'e1');
