@@ -64,6 +64,17 @@ test('a pin with only one endpoint set resolves the other from the mission/plan,
   assert.ok(!text.includes('1970'));
 });
 
+test('an open-ended mission (start set, no end) reads as running to the boundary, not a fabricated end time', () => {
+  const text = planToReadableText(doc({
+    missions: [{ id: 'm1', name: 'שער', type: 'local', start: START + HOUR, end: null, count: 2 }],
+  }));
+  const line = text.split('\n').find((l) => l.startsWith('- שער'));
+  assert.ok(line.endsWith('עד סוף התקופה'));
+  // Only one formatted timestamp (the start) should appear on the line - a
+  // second one would mean the (nonexistent) end got printed as a concrete time.
+  assert.equal((line.match(/\d{2}:\d{2}/g) ?? []).length, 1);
+});
+
 test('a frozen pin is noted as such', () => {
   const text = planToReadableText(doc({
     pins: [{ missionId: 'm1', employeeId: 'e1', start: null, end: null, frozen: true }],

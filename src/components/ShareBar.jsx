@@ -1,17 +1,16 @@
 import { useState } from 'react';
 import {
-  Alert, Box, Button, Collapse, Divider, MenuItem, Paper, Select, Snackbar, Stack, Typography,
+  Box, Button, Divider, MenuItem, Paper, Select, Stack, Typography,
 } from '@mui/material';
 import LinkIcon from '@mui/icons-material/Link';
 import DownloadIcon from '@mui/icons-material/Download';
 import ChatIcon from '@mui/icons-material/Chat';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
-import CodeIcon from '@mui/icons-material/Code';
 import { shareUrl, URL_WARN_LENGTH } from '../lib/urlState.js';
 import { downloadCsv, shiftsToCsv } from '../lib/exportCsv.js';
 import { copyText, whatsappText } from '../lib/exportText.js';
 import { downloadIcs, employeeIcs, overviewIcs } from '../lib/exportIcal.js';
-import { planToReadableText } from '../lib/planText.js';
+import useCopyToast from '../hooks/useCopyToast.jsx';
 import { t } from '../strings.js';
 
 function sanitizeFilename(name) {
@@ -20,17 +19,14 @@ function sanitizeFilename(name) {
 
 /** Copy-link / CSV / WhatsApp / iCal actions for a generated schedule. */
 export default function ShareBar({ doc, result }) {
-  const [toast, setToast] = useState(null);
+  const { copy, setToast, toastNode } = useCopyToast();
   const [icsEmployeeId, setIcsEmployeeId] = useState(doc.employees[0]?.id ?? '');
-  const [showPlanData, setShowPlanData] = useState(false);
-
-  const notify = (ok) => setToast(ok ? t.copied : t.copyFailed);
 
   const onCopyLink = async () => {
     const url = shareUrl(doc, '/schedule');
     const ok = await copyText(url);
     if (ok && url.length > URL_WARN_LENGTH) setToast(t.longUrlWarning);
-    else notify(ok);
+    else setToast(ok ? t.copied : t.copyFailed);
   };
 
   const onCsv = () => {
@@ -38,12 +34,7 @@ export default function ShareBar({ doc, result }) {
   };
 
   const onWhatsapp = async () => {
-    const text = whatsappText(result, { title: doc.title });
-    notify(await copyText(text));
-  };
-
-  const onCopyPlanData = async () => {
-    notify(await copyText(planToReadableText(doc)));
+    await copy(whatsappText(result, { title: doc.title }));
   };
 
   const onIcsOverview = () => {
@@ -128,58 +119,9 @@ export default function ShareBar({ doc, result }) {
             </Box>
           )}
         </Stack>
-
-        <Divider sx={{ my: 1.25 }} />
-
-        <Button
-          size="small"
-          variant="text"
-          startIcon={<CodeIcon />}
-          onClick={() => setShowPlanData((v) => !v)}
-          data-testid="toggle-plan-data"
-        >
-          {showPlanData ? t.hidePlanData : t.showPlanData}
-        </Button>
-        <Collapse in={showPlanData}>
-          <Box sx={{ mt: 1 }}>
-            <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: 'center', mb: 0.5 }}>
-              <Typography variant="caption" color="text.secondary" fontWeight={700} sx={{ flex: 1 }}>
-                {t.planDataTitle}
-              </Typography>
-              <Button size="small" onClick={onCopyPlanData} data-testid="copy-plan-data">
-                {t.copyPlanData}
-              </Button>
-            </Stack>
-            <Box
-              component="pre"
-              data-testid="plan-data-text"
-              sx={{
-                m: 0,
-                p: 1,
-                bgcolor: 'action.hover',
-                borderRadius: 1,
-                fontFamily: 'inherit',
-                fontSize: '0.8rem',
-                whiteSpace: 'pre-wrap',
-                overflowWrap: 'anywhere',
-                maxHeight: 320,
-                overflowY: 'auto',
-              }}
-            >
-              {planToReadableText(doc)}
-            </Box>
-          </Box>
-        </Collapse>
       </Paper>
 
-      <Snackbar
-        open={Boolean(toast)}
-        autoHideDuration={3000}
-        onClose={() => setToast(null)}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      >
-        <Alert severity="info" onClose={() => setToast(null)}>{toast}</Alert>
-      </Snackbar>
+      {toastNode}
     </>
   );
 }

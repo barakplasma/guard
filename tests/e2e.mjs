@@ -105,6 +105,36 @@ check('the hand-assigned people are the ones on it',
   remotePeople.some((p) => p.includes('אבי')) && remotePeople.some((p) => p.includes('דנה')),
   JSON.stringify(remotePeople));
 
+/* ---------- the debug section is collapsed, but advertises its contents ----
+ * The warnings used to be a wall of Alerts above the agenda. They now live
+ * behind one toggle at the bottom, which is only safe as long as the toggle
+ * still says how many there are - that label is the only route left to the
+ * "remove this pin" repair button.
+ */
+check('the plan dump is not visible before opening the debug section',
+  await page.getByTestId('plan-data-text').isHidden());
+check('the debug toggle is below the summary table', await page.evaluate(() => {
+  const summary = document.querySelector('[data-testid^="summary-"]');
+  const toggle = document.querySelector('[data-testid="toggle-debug"]');
+  if (!summary || !toggle) return false;
+  return summary.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING;
+}));
+await page.getByTestId('toggle-debug').click();
+await page.waitForTimeout(400);
+check('opening the debug section reveals the plan dump',
+  await page.getByTestId('plan-data-text').isVisible());
+const debugPlanText = await page.getByTestId('plan-data-text').innerText();
+check('the plan dump is the human-readable document, not the encoded blob',
+  debugPlanText.includes('סיור מרוחק') && debugPlanText.includes('שער') && !debugPlanText.includes('?p='),
+  debugPlanText.slice(0, 80));
+const debugScheduleText = await page.getByTestId('schedule-text').innerText();
+check('the debug section also shows the computed schedule as text',
+  debugScheduleText.includes('סיור מרוחק') && /\d{2}:\d{2}/.test(debugScheduleText),
+  debugScheduleText.slice(0, 80));
+await page.screenshot({ path: `${SHOT}/05-debug-section.png` });
+await page.getByTestId('toggle-debug').click();
+await page.waitForTimeout(300);
+
 /* ---------- manual swap ---------- */
 const firstLocal = page.locator('[data-testid^="shift-select-m2-"]').first();
 const beforeSwap = norm(await firstLocal.innerText());
@@ -262,6 +292,71 @@ check('the clear survives navigating away and back, with no other edit in betwee
   pinnedAfterNavigation === 0, String(pinnedAfterNavigation));
 
 await ctx3.close();
+
+/* ---------- open-ended missions ---------------------------------------
+ * A mission with a start but no chosen end. `end: null` already meant "runs
+ * to the plan's end" in the schema, the codec and the engine - the only thing
+ * missing was a way to say it. Its own context so the checkbox cannot perturb
+ * the main flow's schedule.
+ */
+const ctx4 = await browser.newContext();
+const page4 = await ctx4.newPage();
+page4.on('pageerror', (e) => { console.log('PAGEERROR(open-ended)', e.message); failures++; });
+
+await page4.goto(`${BASE}/`, { waitUntil: 'networkidle' });
+await page4.getByTestId('bulk-names').fill(['אורי', 'נטע'].join('\n'));
+await page4.getByTestId('add-bulk').click();
+await page4.waitForTimeout(300);
+await page4.getByTestId('tab-missions').click();
+await page4.waitForTimeout(200);
+await page4.getByTestId('add-mission').click();
+await page4.waitForTimeout(250);
+
+// Whole-period by default, so the explicit-window editor is behind the chip.
+await page4.getByTestId('limit-mission-m1').click();
+await page4.waitForTimeout(250);
+check('limiting a mission reveals both time fields',
+  (await page4.locator('[data-testid="mission-end-m1"]').count()) === 1);
+
+// A plain click, not Playwright's check()/uncheck(): ticking the box unmounts
+// the end field right next to it, and the resulting layout shift makes
+// check()'s click-then-verify retry, toggling the box straight back off.
+await page4.getByTestId('mission-open-ended-m1').click();
+await page4.waitForTimeout(400);
+check('the open-ended box is ticked', await page4.getByTestId('mission-open-ended-m1').isChecked());
+check('marking a mission open-ended removes the end field entirely',
+  (await page4.locator('[data-testid="mission-end-m1"]').count()) === 0);
+check('the start field survives going open-ended',
+  (await page4.locator('[data-testid="mission-start-m1"]').count()) === 1);
+
+// The whole point of null-not-a-timestamp: it has to survive the codec.
+const openEndedUrl = page4.url();
+const ctx5 = await browser.newContext();
+const page5 = await ctx5.newPage();
+page5.on('pageerror', (e) => { console.log('PAGEERROR(open-ended shared)', e.message); failures++; });
+await page5.goto(openEndedUrl, { waitUntil: 'networkidle' });
+await page5.waitForTimeout(600);
+await page5.getByTestId('tab-missions').click();
+await page5.waitForTimeout(400);
+check('open-ended survives a round trip through the shared link',
+  await page5.getByTestId('mission-open-ended-m1').isChecked()
+  && (await page5.locator('[data-testid="mission-end-m1"]').count()) === 0);
+
+// It must schedule to the plan's end, not stop early or vanish.
+await page5.getByTestId('tab-schedule').click();
+await page5.waitForTimeout(600);
+const openEndedShifts = await page5.locator('[data-testid^="shift-select-m1-"]').count();
+check('an open-ended mission still produces shifts', openEndedShifts > 0, String(openEndedShifts));
+await page5.screenshot({ path: `${SHOT}/06-open-ended.png` });
+
+// Unticking restores an editable end, so the state is not a one-way door.
+await page4.getByTestId('mission-open-ended-m1').click();
+await page4.waitForTimeout(400);
+check('unticking restores an explicit, editable end',
+  (await page4.getByTestId('mission-end-m1').inputValue()) !== '');
+
+await ctx5.close();
+await ctx4.close();
 
 await browser.close();
 console.log(failures === 0 ? '\nALL E2E CHECKS PASSED' : `\n${failures} E2E CHECK(S) FAILED`);

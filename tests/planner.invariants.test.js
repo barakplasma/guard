@@ -105,8 +105,17 @@ test('every assignment falls inside the person\'s availability and the mission w
     for (const s of shifts) {
       const e = input.employees.find((x) => x.id === s.employeeId);
       const m = input.missions.find((x) => x.id === s.missionId);
-      assert.ok(s.start >= (e.start ?? input.start), 'shift starts before the person is available');
-      assert.ok(s.end <= (e.end ?? input.end), 'shift ends after the person leaves');
+      // Availability binds the *engine*, not the planner-of-record. A manual
+      // assignment is a statement about what actually happened, so it outranks
+      // a stale availability window rather than being cancelled by one - see
+      // normalizePins. Only auto-assigned shifts are the engine's own choice
+      // and must therefore respect availability.
+      if (!s.pinned) {
+        assert.ok(s.start >= (e.start ?? input.start), 'shift starts before the person is available');
+        assert.ok(s.end <= (e.end ?? input.end), 'shift ends after the person leaves');
+      }
+      // Geometry never yields, pinned or not: a shift outside the mission's own
+      // window is not a schedule anyone could work.
       assert.ok(s.start >= Math.max(m.start, input.start), 'shift starts before the mission');
       assert.ok(s.end <= Math.min(m.end, input.end), 'shift ends after the mission');
     }

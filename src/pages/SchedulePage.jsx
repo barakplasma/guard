@@ -1,14 +1,14 @@
 import { useMemo, useState } from 'react';
 import {
-  Alert, Box, Button, IconButton, Paper, Stack, Table, TableBody, TableCell,
+  Alert, Box, Button, Paper, Stack, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, Typography,
 } from '@mui/material';
-import CloseIcon from '@mui/icons-material/Close';
 import AgendaDay from '../components/AgendaDay.jsx';
 import ShareBar from '../components/ShareBar.jsx';
+import DebugSection from '../components/DebugSection.jsx';
 import ConfirmDialog from '../components/ConfirmDialog.jsx';
 import { usePlan } from '../state/PlanContext.jsx';
-import { plan as runPlanner, WARN } from '../lib/planner.js';
+import { plan as runPlanner } from '../lib/planner.js';
 import { toPlannerInput } from '../lib/planSchema.js';
 import { findNowSlot, groupAgenda } from '../lib/agenda.js';
 import { formatDuration } from '../lib/format.js';
@@ -34,27 +34,6 @@ function useSchedule(doc) {
 }
 
 const jumpToNow = () => document.getElementById('now-slot')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-
-const PIN_WARNING_CODES = new Set([WARN.PIN_CONFLICT, WARN.PIN_OVERFLOW, WARN.PIN_UNAVAILABLE]);
-
-function warningKey(warning, index) {
-  return `${warning.code}-${warning.missionId ?? ''}-${warning.employeeId ?? ''}-${warning.start ?? index}`;
-}
-
-function warningText(warning, doc) {
-  const employee = doc.employees.find((e) => e.id === warning.employeeId)?.name ?? warning.employeeId;
-  const mission = doc.missions.find((m) => m.id === warning.missionId)?.name ?? warning.missionId;
-  switch (warning.code) {
-    case WARN.UNDERSTAFFED: return t.warnUnderstaffed(mission, warning.needed, warning.got);
-    case WARN.EMPLOYEE_UNUSED: return t.warnEmployeeUnused(employee);
-    case WARN.MISSION_OUTSIDE_WINDOW: return t.warnMissionOutside(mission);
-    case WARN.EMPLOYEE_WINDOW_OUTSIDE_PLAN: return t.warnEmployeeOutside(employee);
-    case WARN.PIN_CONFLICT: return t.warnPinConflict(employee);
-    case WARN.PIN_OVERFLOW: return t.warnPinOverflow(employee);
-    case WARN.PIN_UNAVAILABLE: return t.warnPinUnavailable(employee);
-    default: return warning.code;
-  }
-}
 
 function SummaryTable({ result }) {
   return (
@@ -108,12 +87,6 @@ export default function SchedulePage() {
   const nowSlot = useMemo(() => findNowSlot(days, now), [days, now]);
   const nowSlotKey = nowSlot ? `${nowSlot.start}|${nowSlot.end}` : null;
   const [confirmClearPins, setConfirmClearPins] = useState(false);
-  // Session-only, never written to the URL: dismissing a warning is a "stop
-  // showing me this" for the current visit, not a document edit. Keyed the
-  // same way as the Alert below it, so a warning that changes shape (a
-  // different range, a different person) reappears rather than staying
-  // hidden under a key nobody is dismissing anymore.
-  const [dismissedWarnings, setDismissedWarnings] = useState(() => new Set());
 
   return (
     <Box>
@@ -157,43 +130,6 @@ export default function SchedulePage() {
             <ShareBar doc={doc} result={result} />
           </Box>
 
-          {result.warnings.map((w, i) => {
-            const key = warningKey(w, i);
-            if (dismissedWarnings.has(key)) return null;
-            return (
-              <Alert
-                key={key}
-                severity="warning"
-                sx={{ mb: 1 }}
-                action={(
-                  <Stack direction="row" spacing={0.5} useFlexGap sx={{ alignItems: 'center' }}>
-                    {PIN_WARNING_CODES.has(w.code) && (
-                      <Button
-                        color="inherit"
-                        size="small"
-                        onClick={() => clearPinByWarning(w)}
-                        data-testid={`remove-pin-warning-${key}`}
-                      >
-                        {t.removeBadPin}
-                      </Button>
-                    )}
-                    <IconButton
-                      color="inherit"
-                      size="small"
-                      aria-label={t.dismissWarning}
-                      onClick={() => setDismissedWarnings((prev) => new Set(prev).add(key))}
-                      data-testid={`dismiss-warning-${key}`}
-                    >
-                      <CloseIcon fontSize="small" />
-                    </IconButton>
-                  </Stack>
-                )}
-              >
-                {warningText(w, doc)}
-              </Alert>
-            );
-          })}
-
           {days.length === 0 && <Alert severity="info">{t.emptySchedule}</Alert>}
 
           {days.map((day) => (
@@ -214,6 +150,8 @@ export default function SchedulePage() {
           ))}
 
           {result.shifts.length > 0 && <SummaryTable result={result} />}
+
+          <DebugSection doc={doc} result={result} onClearPinByWarning={clearPinByWarning} />
         </>
       )}
     </Box>

@@ -52,6 +52,12 @@ export const t = {
   assignedHelp: 'אנשים שישובצו למשימה הזו לכל אורכה. השאר ריק לשיבוץ אוטומטי.',
   missionReturnedNow: 'חזרו עכשיו',
   missionReturnedNowHelp: 'מעדכן את שעת הסיום לשעה העגולה הקרובה, ומשחרר את האנשים לשיבוץ במשימות אחרות מאותה שעה.',
+  // A mission with no chosen end. Deliberately not "ללא זמן סיום": the mission
+  // really does end at the plan's end - there is no unbounded schedule here -
+  // and this must read distinctly from `wholePeriod`, which means *both* the
+  // start and the end are inherited.
+  missionNoEnd: 'עד סוף התקופה',
+  missionNoEndHelp: 'המשימה נמשכת עד סוף התקופה, וזזה איתה אם התקופה תוארך.',
   noMissions: 'עדיין לא הוגדרו משימות.',
   emptyMissionsHint: 'לחצו על "הוסף משימה" כדי להתחיל.',
   confirmRemoveMissionTitle: 'הסרת משימה?',
@@ -107,15 +113,26 @@ export const t = {
   warnEmployeeOutside: (name) => `הזמינות של ${name} נמצאת מחוץ לתקופה.`,
   warnPinConflict: (name) => `${name} משובץ ידנית לשתי משימות חופפות — השיבוץ הישן בוטל.`,
   warnPinOverflow: (name) => `אין מספיק מקומות למשימה — השיבוץ הידני של ${name} בוטל.`,
-  warnPinUnavailable: (name) => `${name} לא זמין בזמן שנבחר — השיבוץ הידני בוטל.`,
-  dismissWarning: 'הסתר אזהרה',
+  // A manual assignment now outranks a stale availability window instead of
+  // being cancelled by one, so this is informational: the shift stands, and the
+  // availability is the thing that looks wrong. No repair button is offered -
+  // the only "repair" would be deleting the assignment the planner insisted on.
+  warnPinAvailabilityOverridden: (name) => `${name} מסומן כלא זמין בזמן הזה — השיבוץ הידני נשמר בכל זאת.`,
+  // The one case a manual assignment genuinely cannot be honoured: it falls
+  // outside the mission's own window, so there is no shift to give anyone.
+  warnPinUnavailable: (name) => `השיבוץ הידני של ${name} נמצא מחוץ לחלון המשימה ולא ניתן ליישום.`,
   removeBadPin: 'הסר שיבוץ זה',
 
-  // human-readable plan data
-  showPlanData: 'הצג נתונים לקריאה אנושית',
-  hidePlanData: 'הסתר נתונים',
+  // debug section
+  // The warning count rides in the toggle label: the section is collapsed by
+  // default, and the only path to `removeBadPin` is inside it, so the label has
+  // to advertise that there is something in there to fix.
+  debugToggle: (n) => (n === 0 ? 'מידע לניפוי שגיאות' : `מידע לניפוי שגיאות — ${n} אזהרות`),
+  warningsTitle: 'אזהרות',
+  noWarnings: 'אין אזהרות.',
   copyPlanData: 'העתק טקסט',
   planDataTitle: 'תוכן הסידור (מהקישור)',
+  scheduleTextTitle: 'הסידור המחושב',
   pinsSection: 'שיבוצים ידניים',
   noPins: 'אין שיבוצים ידניים.',
   wholeMission: 'כל המשימה',
