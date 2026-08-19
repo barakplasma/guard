@@ -33,9 +33,16 @@ export function planToReadableText(doc) {
   if (doc.missions.length === 0) lines.push(`- ${t.noMissions}`);
   for (const m of doc.missions) {
     const kind = m.type === 'remote' ? t.typeRemote : t.typeLocal;
+    // An open-ended mission (start set, end null) runs to the plan's end and
+    // follows that boundary if the period is later extended - printing a
+    // concrete end time here would read exactly like a mission someone hand-
+    // set an end for, which is not true and would go stale the moment the
+    // plan period changes.
     const window = m.start == null && m.end == null
       ? t.wholePeriod
-      : formatRange(m.start ?? doc.start, m.end ?? doc.end);
+      : m.end == null
+        ? `${formatDate(m.start)} ${formatTime(m.start)} — ${t.missionNoEnd}`
+        : formatRange(m.start ?? doc.start, m.end);
     lines.push(`- ${m.name || t.missionName} (${kind}, ${m.count}): ${window}`);
   }
 

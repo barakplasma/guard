@@ -128,6 +128,46 @@ test('a person pinned to two overlapping missions keeps the latest and warns', (
   assert.ok(result.shifts.some((s) => s.missionId === 'a'));
 });
 
+test('flipping a mission to open-ended widens its window - a whole-mission pin now stretches with it, with a warning', () => {
+  // Rule 4: availability may never veto a manual pin, so e1's whole-mission
+  // pin is honoured all the way to the widened end, not dropped - it is
+  // reported informationally instead. (This test used to assert the
+  // opposite: that the widened pin was rejected and e1 was capped at their
+  // own availability. That was the pre-"manual assignment is an input fact"
+  // behavior the user explicitly asked to remove - see CLAUDE.md/rule 4.)
+  const start = START;
+  const missionEnd = start + 2 * HOUR;
+  const planEnd = start + 4 * HOUR;
+
+  const employees = [
+    { id: 'e1', name: 'Emp01', start, end: missionEnd },
+    { id: 'e2', name: 'Emp02' },
+  ];
+  const missionWithEnd = (end) => [{ id: 'm', name: 'Gate', type: 'local', start, end, count: 1 }];
+  const pins = [{ missionId: 'm', employeeId: 'e1' }]; // whole-mission pin, no explicit start/end
+
+  // Baseline: the mission's explicit end matches e1's availability, so there
+  // is nothing to override.
+  const before = plan({
+    start, end: planEnd, shiftMinutes: 60, employees, missions: missionWithEnd(missionEnd), pins,
+  });
+  assert.ok(!before.warnings.some((w) => w.code === WARN.PIN_AVAILABILITY_OVERRIDDEN));
+
+  // Now flip the mission open-ended (end: null). normalizeMissions resolves
+  // that to the plan's end, which e1's own window does not cover.
+  const after = plan({
+    start, end: planEnd, shiftMinutes: 60, employees, missions: missionWithEnd(null), pins,
+  });
+  const warning = after.warnings.find(
+    (w) => w.code === WARN.PIN_AVAILABILITY_OVERRIDDEN && w.employeeId === 'e1' && w.missionId === 'm',
+  );
+  assert.ok(warning, 'widening the mission past e1 availability must warn, not silently reject the pin');
+  assert.ok(
+    after.shifts.some((s) => s.employeeId === 'e1' && s.missionId === 'm' && s.end === planEnd),
+    "e1's manual assignment is honoured for the mission's full, widened window - it is a fact, not a suggestion",
+  );
+});
+
 test('reassigning someone off a whole-mission pin onto a specific shift wins, not the old pin', () => {
   // e1 is pinned to a remote mission for the whole window (e.g. from the
   // Missions page), then separately hand-assigned to one shift of a local
@@ -159,7 +199,12 @@ test('reassigning someone off a whole-mission pin onto a specific shift wins, no
   assert.ok(result.shifts.some((s) => s.missionId === 'r'));
 });
 
-test('pins beyond the headcount are dropped with a warning', () => {
+test('pins beyond the headcount are dropped with a warning, keeping the newest', () => {
+  // Rule 5: on a contested seat the newest manual assignment wins. e2 was
+  // pinned after e1, so e2 now keeps the seat and e1 is the one reported
+  // overflowed - the reverse of what this test asserted before "keep the
+  // earliest" was replaced with "keep the newest" as the user's explicit
+  // product decision.
   const start = START;
   const end = start + 2 * HOUR;
   const result = plan({
@@ -174,13 +219,17 @@ test('pins beyond the headcount are dropped with a warning', () => {
     ],
   });
 
-  assert.ok(result.warnings.some((w) => w.code === WARN.PIN_OVERFLOW && w.employeeId === 'e2'));
+  assert.ok(result.warnings.some((w) => w.code === WARN.PIN_OVERFLOW && w.employeeId === 'e1'));
   const remote = result.shifts.filter((s) => s.missionId === 'r');
   assert.equal(remote.length, 1);
-  assert.equal(remote[0].employeeId, 'e1');
+  assert.equal(remote[0].employeeId, 'e2');
 });
 
-test('a pin outside the person\'s availability is dropped with a warning', () => {
+test('a pin outside the person\'s availability is honoured, with an informational warning', () => {
+  // Rule 4: "what I change manually must always win... for the algorithm to
+  // work around" - a stale availability window can no longer cancel a manual
+  // assignment. This test used to assert the opposite (pin dropped, e2 covers
+  // instead); that was exactly the override the user reported as the bug.
   const start = START;
   const end = start + 4 * HOUR;
   const result = plan({
@@ -195,9 +244,10 @@ test('a pin outside the person\'s availability is dropped with a warning', () =>
     pins: [{ missionId: 'l', employeeId: 'e1', start, end: start + HOUR }],
   });
 
-  assert.ok(result.warnings.some((w) => w.code === WARN.PIN_UNAVAILABLE && w.employeeId === 'e1'));
+  assert.ok(result.warnings.some((w) => w.code === WARN.PIN_AVAILABILITY_OVERRIDDEN && w.employeeId === 'e1'));
+  assert.ok(!result.warnings.some((w) => w.code === WARN.PIN_UNAVAILABLE));
   const firstSlot = result.shifts.find((s) => s.start === start);
-  assert.equal(firstSlot.employeeId, 'e2', 'the slot is covered by whoever is actually available');
+  assert.equal(firstSlot.employeeId, 'e1', 'the manual assignment stands even though it overrides availability');
 });
 
 test('a frozen pin survives even when the employee is no longer available for it', () => {
@@ -205,7 +255,10 @@ test('a frozen pin survives even when the employee is no longer available for it
   // shift was locked in for e1, then e1's availability was tightened afterwards
   // (e.g. they can only work from some later time on). The frozen pin must not
   // be treated as a fresh, invalid manual assignment - the past cannot become
-  // "unavailable".
+  // "unavailable". Under rule 4 this is no longer special to frozen pins (no
+  // pin is ever dropped for availability, frozen or not), but it is still the
+  // scenario worth guarding: the mismatch is now reported informationally
+  // rather than being silently swallowed by a bypass.
   const start = START;
   const end = start + 2 * HOUR;
   const result = plan({
@@ -222,6 +275,7 @@ test('a frozen pin survives even when the employee is no longer available for it
     }],
   });
 
+  assert.ok(result.warnings.some((w) => w.code === WARN.PIN_AVAILABILITY_OVERRIDDEN && w.employeeId === 'e1'));
   assert.ok(!result.warnings.some((w) => w.code === WARN.PIN_UNAVAILABLE));
   const firstSlot = result.shifts.find((s) => s.start === start);
   assert.equal(firstSlot.employeeId, 'e1', 'the frozen assignment was not reshuffled');
@@ -246,12 +300,13 @@ test('a manual (non-frozen) pin produces a shift with frozen: false', () => {
   assert.equal(shift.frozen, false);
 });
 
-test('a frozen pin loses its bypass when the mission is later switched to remote, widening its range', () => {
+test('a frozen pin still expands with its mission when switched to remote, now honoured past availability', () => {
   // The pin was frozen while the mission was local, covering just the first
-  // hour. Once the mission is remote, normalizePins expands any pin on it to
-  // the mission's whole window *before* the frozen check runs - so this must
-  // no longer count as "the original frozen interval" and must go through
-  // the ordinary availability check like a live pin would.
+  // hour; once the mission is remote, normalizePins expands it to the whole
+  // window as always. Under the old rules this used to lose a bypass and get
+  // dropped for exceeding e1's availability. Under rule 4 there is no bypass
+  // left to lose - frozen or not, a pin is never dropped for availability, so
+  // e1 keeps the whole remote mission with an informational warning instead.
   const start = START;
   const end = start + 4 * HOUR;
   const result = plan({
@@ -268,13 +323,17 @@ test('a frozen pin loses its bypass when the mission is later switched to remote
     }],
   });
 
-  assert.ok(result.warnings.some((w) => w.code === WARN.PIN_UNAVAILABLE && w.employeeId === 'e1'));
+  assert.ok(result.warnings.some((w) => w.code === WARN.PIN_AVAILABILITY_OVERRIDDEN && w.employeeId === 'e1'));
   const own = result.shifts.filter((s) => s.missionId === 'm');
   assert.equal(own.length, 1);
-  assert.equal(own[0].employeeId, 'e2', 'covered by someone actually available for the full remote window');
+  assert.equal(own[0].employeeId, 'e1', 'the frozen assignment still stands for the whole widened window');
+  assert.equal(own[0].end, end);
 });
 
-test('a frozen whole-mission pin loses its bypass when the remote mission window is later extended', () => {
+test('a frozen whole-mission pin still stands when the remote mission window is later extended', () => {
+  // Same story as above for the other way a remote pin's coverage can widen
+  // past what it was frozen for: the mission's own window growing, rather
+  // than a local-to-remote type change.
   const start = START;
   const originalEnd = start + 2 * HOUR;
   const extendedEnd = start + 4 * HOUR;
@@ -294,13 +353,21 @@ test('a frozen whole-mission pin loses its bypass when the remote mission window
     }],
   });
 
-  assert.ok(result.warnings.some((w) => w.code === WARN.PIN_UNAVAILABLE && w.employeeId === 'e1'));
+  assert.ok(result.warnings.some((w) => w.code === WARN.PIN_AVAILABILITY_OVERRIDDEN && w.employeeId === 'e1'));
   const own = result.shifts.filter((s) => s.missionId === 'm');
   assert.equal(own.length, 1);
-  assert.equal(own[0].employeeId, 'e2');
+  assert.equal(own[0].employeeId, 'e1');
+  assert.equal(own[0].end, extendedEnd);
 });
 
-test('a frozen pin whose resolved range still matches exactly what it was frozen for keeps its bypass', () => {
+test('a frozen pin whose resolved range still matches exactly what it was frozen for is still honoured, with a warning', () => {
+  // e1 is only available for the mission's first hour, but the pin (frozen
+  // for the mission's current, unchanged whole window) covers both. There
+  // used to be a special "still the original frozen interval" case that
+  // bypassed the availability check entirely and produced zero warnings.
+  // That bypass is gone (rule 4 makes it redundant - nothing can drop a pin
+  // for availability anymore, frozen or not), so this now looks exactly like
+  // any other availability mismatch: honoured, with an informational note.
   const start = START;
   const end = start + 2 * HOUR;
   const result = plan({
@@ -318,13 +385,17 @@ test('a frozen pin whose resolved range still matches exactly what it was frozen
     }],
   });
 
-  assert.ok(!result.warnings.some((w) => w.code === WARN.PIN_UNAVAILABLE));
+  assert.ok(result.warnings.some((w) => w.code === WARN.PIN_AVAILABILITY_OVERRIDDEN && w.employeeId === 'e1'));
   const own = result.shifts.filter((s) => s.missionId === 'm');
   assert.equal(own.length, 1);
   assert.equal(own[0].employeeId, 'e1');
 });
 
-test('an unfrozen pin is still dropped when the employee is unavailable, frozen or not', () => {
+test('an unfrozen pin is honoured when the employee is unavailable, exactly like a frozen one', () => {
+  // Rule 4 makes frozen and explicit pins behave identically with respect to
+  // availability: neither can be dropped for it. This test used to be the
+  // frozen test's mirror image, proving the *opposite* still held for a
+  // plain manual pin (dropped, e2 covers). That asymmetry is gone on purpose.
   const start = START;
   const end = start + 2 * HOUR;
   const result = plan({
@@ -341,9 +412,9 @@ test('an unfrozen pin is still dropped when the employee is unavailable, frozen 
     }],
   });
 
-  assert.ok(result.warnings.some((w) => w.code === WARN.PIN_UNAVAILABLE && w.employeeId === 'e1'));
+  assert.ok(result.warnings.some((w) => w.code === WARN.PIN_AVAILABILITY_OVERRIDDEN && w.employeeId === 'e1'));
   const firstSlot = result.shifts.find((s) => s.start === start);
-  assert.equal(firstSlot.employeeId, 'e2');
+  assert.equal(firstSlot.employeeId, 'e1');
 });
 
 test('pins naming a deleted employee or mission are ignored silently', () => {
@@ -440,7 +511,12 @@ test('a partial pin on a remote mission covers the whole mission, not part of it
   assert.ok(!result.warnings.some((w) => w.code === WARN.UNDERSTAFFED));
 });
 
-test('a partial remote pin that outruns availability is dropped, not half-honoured', () => {
+test('a partial remote pin that outruns availability is still widened to the whole mission and honoured', () => {
+  // This used to assert the pin was dropped for outrunning e1's availability
+  // ("not half-honoured", i.e. neither half nor whole). Under rule 4 it is
+  // now honoured in full: the remote-widening rule above still expands it to
+  // the whole mission, and availability can no longer veto that - it only
+  // gets an informational warning.
   const start = START;
   const end = start + 2 * HOUR;
   const result = plan({
@@ -455,10 +531,11 @@ test('a partial remote pin that outruns availability is dropped, not half-honour
     pins: [{ missionId: 'm', employeeId: 'e1', start, end: start + HOUR }],
   });
 
-  assert.ok(result.warnings.some((w) => w.code === WARN.PIN_UNAVAILABLE && w.employeeId === 'e1'));
+  assert.ok(result.warnings.some((w) => w.code === WARN.PIN_AVAILABILITY_OVERRIDDEN && w.employeeId === 'e1'));
   const own = result.shifts.filter((s) => s.missionId === 'm');
   assert.equal(own.length, 1);
-  assert.equal(own[0].employeeId, 'e2', 'the mission is staffed by someone who can cover it all');
+  assert.equal(own[0].employeeId, 'e1', 'the manual assignment holds the whole remote mission despite outrunning availability');
+  assert.equal(own[0].end, end);
 });
 
 test('a swap over a whole-mission pin replaces the assignee rather than competing', () => {

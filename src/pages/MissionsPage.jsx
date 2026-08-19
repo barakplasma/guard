@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import {
-  Box, Button, Chip, FormControl, IconButton, InputLabel, MenuItem,
+  Box, Button, Checkbox, Chip, FormControl, FormControlLabel, IconButton, InputLabel, MenuItem,
   OutlinedInput, Paper, Select, Stack, TextField, ToggleButton,
   ToggleButtonGroup, Tooltip, Typography,
 } from '@mui/material';
@@ -35,6 +35,10 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
     if (!e) return false;
     return (e.start ?? -Infinity) > missionStart || (e.end ?? Infinity) < missionEnd;
   };
+
+  // A mission with a start but no end runs to the plan's end, and keeps
+  // following that boundary if the period is later extended.
+  const openEnded = mission.end == null;
 
   return (
     <Paper variant="outlined" sx={{ p: 2 }}>
@@ -97,11 +101,23 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
                 onChange={(v) => onChange({ start: v })}
                 testId={`mission-start-${mission.id}`}
               />
-              <DateTimeField
-                label={t.missionEnd}
-                value={mission.end ?? doc.end}
-                onChange={(v) => onChange({ end: v })}
-                testId={`mission-end-${mission.id}`}
+              {!openEnded && (
+                <DateTimeField
+                  label={t.missionEnd}
+                  value={mission.end ?? doc.end}
+                  onChange={(v) => onChange({ end: v })}
+                  testId={`mission-end-${mission.id}`}
+                />
+              )}
+              <FormControlLabel
+                control={(
+                  <Checkbox
+                    checked={openEnded}
+                    onChange={(_, checked) => onChange({ end: checked ? null : doc.end })}
+                    slotProps={{ input: { 'data-testid': `mission-open-ended-${mission.id}` } }}
+                  />
+                )}
+                label={t.missionNoEnd}
               />
               <Button size="small" onClick={() => onChange({ start: null, end: null })}>
                 {t.wholePeriod}
@@ -128,6 +144,12 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
             </Tooltip>
           )}
         </Stack>
+
+        {openEnded && (
+          <Typography variant="caption" color="text.secondary">
+            {t.missionNoEndHelp}
+          </Typography>
+        )}
 
         <FormControl fullWidth>
           <InputLabel id={`assign-${mission.id}`}>

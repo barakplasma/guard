@@ -31,6 +31,7 @@ export const WARN = {
   PIN_CONFLICT: 'pin-conflict',
   PIN_OVERFLOW: 'pin-overflow',
   PIN_UNAVAILABLE: 'pin-unavailable',
+  PIN_AVAILABILITY_OVERRIDDEN: 'pin-availability-overridden',
 };
 
 /* ------------------------------------------------------------------ */
@@ -100,12 +101,18 @@ function normalizeMissions(missions, planStart, planEnd, warnings) {
  * cannot be honoured degrades to a warning.
  */
 function normalizePins(pins, employeeById, missionById, warnings) {
-  const out = [];
-  const perMission = new Map();
-  for (const p of pins) {
+  // --- Step 1: resolve every pin to its effective [start, end) coverage ---
+  // Everything downstream (dedup, availability, conflicts, capacity) has to
+  // reason about coverage, never the literal written range - a whole-mission
+  // pin and a per-shift pin can describe the identical assignment while
+  // looking nothing alike (see CLAUDE.md). `index` is the pin's position in
+  // the document - the only thing that lets step 4 tell a fresh manual
+  // decision apart from a stale one.
+  const resolved = [];
+  pins.forEach((p, index) => {
     const mission = missionById.get(p.missionId);
     const employee = employeeById.get(p.employeeId);
-    if (!mission || !employee) continue; // stale reference
+    if (!mission || !employee) return; // stale reference
 
     // On a remote mission a pin always means the whole mission - that is what
     // "remote" means. A partial range can survive a mission being switched from
@@ -119,75 +126,119 @@ function normalizePins(pins, employeeById, missionById, warnings) {
       ? mission.end
       : Math.min(p.end == null ? mission.end : p.end, mission.end);
     if (!(end > start)) {
+      // The one case a manual assignment genuinely cannot be honoured: it
+      // falls entirely outside the mission's own window (clamped to nothing),
+      // so there is no shift left to give anyone - unlike an availability
+      // mismatch below, this is not a fact the engine can work around.
       warnings.push({ code: WARN.PIN_UNAVAILABLE, missionId: mission.id, employeeId: employee.id });
-      continue;
+      return;
     }
-    // A frozen pin (freezeElapsedBeforeEdit, src/lib/pins.js) records what
-    // already happened. Someone's availability window changing afterwards
-    // must not retroactively make that shift "invalid" - the past cannot
-    // become unavailable - or the engine would reassign it to someone else
-    // on the next render, which is exactly what freezing exists to prevent.
-    //
-    // The bypass must only protect the exact interval it was frozen for,
-    // never whatever range this pin resolves to *now*: a remote pin always
-    // expands to the mission's current window above, and a completed remote
-    // mission's window can itself be extended later. Either can turn a pin
-    // that was frozen for one already-elapsed hour into one that resolves to
-    // hours that have not happened yet - comparing against the pin's own
-    // literal start/end (always concrete for a frozen pin, never null) is
-    // what tells a still-faithful frozen interval apart from an expanded one
-    // that has to go through the ordinary check like any live pin.
-    const isFrozenOriginal = p.frozen && p.start === start && p.end === end;
-    if (!isFrozenOriginal && (employee.start > start || employee.end < end)) {
-      warnings.push({
-        code: WARN.PIN_UNAVAILABLE, missionId: mission.id, employeeId: employee.id, start, end,
-      });
-      continue;
-    }
+    resolved.push({
+      mission, employee, start, end, frozen: Boolean(p.frozen), index,
+    });
+  });
 
-    // A person cannot be in two places at once. Pins are appended to the
-    // document in edit order, so the *latest* one written wins - a fresh
-    // manual assignment must never be silently discarded in favour of a
-    // stale pin the same person happens to still hold elsewhere; the older,
-    // now-conflicting pin is the one that gets superseded.
-    const clashIndex = out.findIndex(
-      (q) => q.employeeId === employee.id && overlaps(q.start, q.end, start, end),
+  // --- Step 2: collapse same-coverage duplicates into one claimant --------
+  // A whole-mission pin and a literal range that happens to equal the
+  // mission's own window - or a byte-identical duplicate written twice -
+  // describe one real assignment. Left unmerged they consume two seats,
+  // trigger a bogus PIN_CONFLICT ("assigned to two overlapping missions"
+  // when it is one mission), and double up PIN_OVERFLOW. A merged claimant
+  // only counts as "frozen" (for the seat-contest precedence in step 4) when
+  // *every* raw pin behind it was machine-written - one explicit (human) pin
+  // among the duplicates makes the whole claim explicit - and inherits the
+  // most recent of their document positions, since that is the freshest
+  // decision behind the merged claim.
+  const claimants = [];
+  const claimByKey = new Map();
+  for (const r of resolved) {
+    const key = [r.mission.id, r.employee.id, r.start, r.end].join('|');
+    const existing = claimByKey.get(key);
+    if (existing) {
+      existing.frozen = existing.frozen && r.frozen;
+      existing.index = Math.max(existing.index, r.index);
+      continue;
+    }
+    claimByKey.set(key, r);
+    claimants.push(r);
+  }
+
+  // --- Step 3: availability is informational, never a veto -----------------
+  // "What I change manually must always win and become fact for the
+  // algorithm to work around." A manual assignment (frozen or explicit) is a
+  // statement about what actually happened; a stale availability window is
+  // just that - stale. It no longer drops the pin, only notes the mismatch
+  // for a human to notice. (There used to be a bypass here for frozen pins
+  // specifically, so that a later availability edit could not invalidate an
+  // already-elapsed shift; now that availability can never invalidate *any*
+  // pin, that bypass has nothing left to protect against and is gone.)
+  for (const c of claimants) {
+    if (c.employee.start > c.start || c.employee.end < c.end) {
+      warnings.push({
+        code: WARN.PIN_AVAILABILITY_OVERRIDDEN, missionId: c.mission.id, employeeId: c.employee.id, start: c.start, end: c.end,
+      });
+    }
+  }
+
+  // --- Step 4: settle contested seats and person-conflicts ------------------
+  // Priority, highest first: an explicit (human) pin beats a frozen
+  // (machine-written) one; within the same class, the more recently written
+  // pin wins - pins are appended to the document in edit order, so a later
+  // index is a newer decision; a stable id comparison breaks any remaining
+  // tie, per CLAUDE.md. Processing claimants in this order, instead of
+  // document order, means the walk never has to *evict* anything it already
+  // placed: whichever claim is handled first is, by construction, the one
+  // that should hold the seat, so a later, lower-priority claim for the same
+  // person or the same seat is simply rejected.
+  const ordered = [...claimants].sort((a, b) => (
+    Number(a.frozen) - Number(b.frozen)
+    || b.index - a.index
+    || (a.employee.id < b.employee.id ? -1 : a.employee.id > b.employee.id ? 1 : 0)
+  ));
+
+  const accepted = [];
+  const perMission = new Map();
+  for (const c of ordered) {
+    // A person cannot be in two places at once. Whoever already holds an
+    // overlapping seat outranks this claim (it was placed earlier in this
+    // priority order, i.e. it IS the fresher or more explicit decision), so
+    // this one is the one that loses - "the old assignment was cancelled".
+    const personClash = accepted.some(
+      (q) => q.employeeId === c.employee.id && overlaps(q.start, q.end, c.start, c.end),
     );
-    if (clashIndex !== -1) {
-      const displaced = out[clashIndex];
+    if (personClash) {
       warnings.push({
-        code: WARN.PIN_CONFLICT,
-        missionId: displaced.missionId,
-        employeeId: employee.id,
-        start: displaced.start,
-        end: displaced.end,
+        code: WARN.PIN_CONFLICT, missionId: c.mission.id, employeeId: c.employee.id, start: c.start, end: c.end,
       });
-      out.splice(clashIndex, 1);
-      const displacedSiblings = perMission.get(displaced.missionId);
-      if (displacedSiblings) {
-        const idx = displacedSiblings.indexOf(displaced);
-        if (idx !== -1) displacedSiblings.splice(idx, 1);
-      }
+      continue;
     }
 
-    // More pins than the mission has seats at some instant: keep the earliest.
-    const sameMission = perMission.get(mission.id) || [];
-    const concurrent = sameMission.filter((q) => overlaps(q.start, q.end, start, end));
-    if (concurrent.length >= mission.count) {
+    // More claimants than the mission has seats at some instant: whoever was
+    // already placed (higher priority) keeps the seat, this one overflows.
+    const sameMission = perMission.get(c.mission.id) || [];
+    const concurrent = sameMission.filter((q) => overlaps(q.start, q.end, c.start, c.end));
+    if (concurrent.length >= c.mission.count) {
       warnings.push({
-        code: WARN.PIN_OVERFLOW, missionId: mission.id, employeeId: employee.id, start, end,
+        code: WARN.PIN_OVERFLOW, missionId: c.mission.id, employeeId: c.employee.id, start: c.start, end: c.end,
       });
       continue;
     }
 
     const pin = {
-      missionId: mission.id, employeeId: employee.id, start, end, frozen: Boolean(p.frozen),
+      missionId: c.mission.id, employeeId: c.employee.id, start: c.start, end: c.end, frozen: c.frozen, index: c.index,
     };
-    out.push(pin);
+    accepted.push(pin);
     sameMission.push(pin);
-    perMission.set(mission.id, sameMission);
+    perMission.set(c.mission.id, sameMission);
   }
-  return out;
+
+  // Hand back the accepted pins in document order, not priority order - the
+  // priority walk above only needs to decide *who wins*; nothing downstream
+  // (plan()'s addRow loop, which drives fairness tie-breaking for the people
+  // scheduled around these pins) should have to care that the walk itself
+  // ran newest-first.
+  accepted.sort((a, b) => a.index - b.index);
+  return accepted.map(({ index: _index, ...pin }) => pin);
 }
 
 /* ------------------------------------------------------------------ */
@@ -251,8 +302,12 @@ function occupy(st, missionId, start, end, counter) {
  *   mission's whole window (how people are assigned to a remote mission);
  *   supplying them pins one specific shift (how a manual swap is recorded).
  *   `frozen: true` marks a pin the engine wrote for itself to lock in an
- *   already-elapsed shift (see pins.js's freezeElapsedBeforeEdit) - it skips
- *   the availability check below, since the past cannot become "unavailable".
+ *   already-elapsed shift (see pins.js's freezeElapsedBeforeEdit), as opposed
+ *   to one a person typed by hand - the only thing that distinction affects
+ *   is which one wins when two pins contest the same seat (an explicit pin
+ *   always outranks a frozen one). Neither kind can ever be invalidated by
+ *   availability: a manual assignment is an input fact, not a suggestion the
+ *   engine may veto (see normalizePins).
  * @returns {{
  *   shifts: {missionId:string,missionName:string,type:string,employeeId:string,employeeName:string,start:number,end:number,pinned:boolean,frozen:boolean}[],
  *   timeline: {start:number,end:number,onDuty:{employeeId:string,missionId:string}[],offDuty:string[],unavailable:string[]}[],
