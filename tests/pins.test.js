@@ -2,8 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   applyClearPin, applyClearPinsForMission, applyMissionAssignees, applySwap,
-  freezeElapsedBeforeEdit, freezePastShifts, pinCovers,
+  clearStalePins, countStalePins, freezeElapsedBeforeEdit, freezePastShifts, pinCovers,
+  pruneStalePins,
 } from '../src/lib/pins.js';
+import { WARN } from '../src/lib/planner.js';
 import { plan } from '../src/lib/planner.js';
 import { toPlannerInput } from '../src/lib/planSchema.js';
 
@@ -348,4 +350,177 @@ test('setting a mission roster replaces whole-window pins but keeps per-shift on
     after.pins.map((p) => `${p.employeeId}:${p.start == null ? 'whole' : 'range'}`).sort(),
     ['e2:range', 'e3:whole'],
   );
+});
+
+/* ---------------- assignments left outside the plan period ---------------- */
+
+const stale = (over = {}) => doc({
+  // A local mission: on a remote one a pin means the whole mission whatever
+  // its written range says, so it can never be stranded outside the period.
+  missions: [{ id: 'm1', name: 'Gate', type: 'local', start: null, end: null, count: 1 }],
+  pins: [
+    // Residue from a period the plan has since rolled past.
+    { missionId: 'm1', employeeId: 'e1', start: START - 5 * HOUR, end: START - 4 * HOUR, frozen: true },
+    { missionId: 'm1', employeeId: 'e2', start: START - 3 * HOUR, end: START - 2 * HOUR, frozen: true },
+    // Beyond the end - the user may be about to extend to cover it.
+    { missionId: 'm1', employeeId: 'e1', start: START + 9 * HOUR, end: START + 10 * HOUR },
+    // Live, inside the period.
+    { missionId: 'm1', employeeId: 'e2', start: START + HOUR, end: START + 2 * HOUR },
+  ],
+  ...over,
+});
+
+test('countStalePins counts everything outside the period, both sides', () => {
+  assert.equal(countStalePins(stale()), 3);
+  assert.equal(countStalePins(doc()), 0);
+});
+
+test('clearStalePins removes them all and leaves live pins alone', () => {
+  const cleaned = clearStalePins(stale());
+  assert.equal(cleaned.pins.length, 1);
+  assert.equal(cleaned.pins[0].employeeId, 'e2');
+  assert.equal(cleaned.pins[0].start, START + HOUR);
+});
+
+test('clearStalePins returns the same document when there is nothing to clear', () => {
+  const d = doc();
+  assert.equal(clearStalePins(d), d);
+});
+
+test('a pin on a remote mission is never stale, however its range reads', () => {
+  // It is not honoured literally - it staffs the whole mission - so treating
+  // it as residue would delete an assignment the engine is actively using.
+  const d = doc({
+    pins: [{ missionId: 'm1', employeeId: 'e1', start: START - 5 * HOUR, end: START - 4 * HOUR }],
+  });
+  assert.equal(d.missions[0].type, 'remote');
+  assert.equal(countStalePins(d), 0);
+  assert.equal(clearStalePins(d), d);
+  assert.ok(plan(toPlannerInput(d)).shifts.some((sh) => sh.employeeId === 'e1'));
+});
+
+test('a whole-window pin is never stale, whatever the period is', () => {
+  // Null start/end inherit the mission window, which is itself clamped into
+  // the period, so an inherited pin always overlaps it.
+  const d = doc({ pins: [{ missionId: 'm1', employeeId: 'e1', start: null, end: null }] });
+  assert.equal(countStalePins(d), 0);
+  assert.equal(clearStalePins(d), d);
+});
+
+test('the automatic prune drops finished history but never future assignments', () => {
+  const prev = stale();
+  const pruned = pruneStalePins(prev, { ...prev, title: 'renamed' });
+  assert.equal(pruned.pins.length, 2, 'the two pre-period pins go');
+  assert.ok(pruned.pins.some((p) => p.start === START + 9 * HOUR), 'the post-period one stays');
+  assert.ok(pruned.pins.some((p) => p.start === START + HOUR), 'so does the live one');
+});
+
+test('the automatic prune refuses to act while the period itself is being edited', () => {
+  // The date fields emit an edit on every intermediate value that parses, so a
+  // half-typed year must never be able to delete history: setDoc navigates
+  // with replace, and there is no way back.
+  const prev = stale();
+  const mid = { ...prev, start: START + 500 * HOUR, end: START + 504 * HOUR };
+  assert.equal(pruneStalePins(prev, mid), mid, 'nothing removed while the window moves');
+
+  // Once the window is standing still again, the ordinary cleanup resumes.
+  assert.equal(pruneStalePins(mid, { ...mid, title: 'x' }).pins.length, 0);
+});
+
+test('the planner counts stale pins once instead of warning about each', () => {
+  const r = plan(toPlannerInput(stale()));
+  const outOfPeriod = r.warnings.filter((w) => w.code === WARN.PIN_OUT_OF_PERIOD);
+  assert.equal(outOfPeriod.length, 1, 'one aggregated warning, not three');
+  assert.equal(outOfPeriod[0].count, 3);
+  assert.equal(
+    r.warnings.filter((w) => w.code === WARN.PIN_UNAVAILABLE).length,
+    0,
+    'residue is not reported as a broken assignment',
+  );
+});
+
+test('a pin inside the period that its mission cannot host is still a real warning', () => {
+  const d = doc({
+    missions: [{ id: 'm1', name: 'M1', type: 'local', start: START, end: START + HOUR, count: 1 }],
+    pins: [{ missionId: 'm1', employeeId: 'e1', start: START + 2 * HOUR, end: START + 3 * HOUR }],
+  });
+  const codes = plan(toPlannerInput(d)).warnings.map((w) => w.code);
+  assert.ok(codes.includes(WARN.PIN_UNAVAILABLE), 'the actionable case keeps its own warning');
+  assert.ok(!codes.includes(WARN.PIN_OUT_OF_PERIOD));
+});
+
+/* --- residue on a mission that has itself dropped out of the period --- */
+
+/** One employee, one mission, one pin - varied per case. */
+const residue = (mission, pin) => doc({ missions: [mission], pins: [pin] });
+
+const outOfPeriodCount = (d) => {
+  const w = plan(toPlannerInput(d)).warnings.find((x) => x.code === WARN.PIN_OUT_OF_PERIOD);
+  return w ? w.count : 0;
+};
+
+const BEFORE = { start: START - 10 * HOUR, end: START - 9 * HOUR };
+
+test('residue is collectable even when its mission fell out of the period too', () => {
+  // A missing bound on a pin inherits the *mission's*, not the plan's. Reading
+  // it straight from the plan period answered "not stale" for every pin on a
+  // mission that had itself dropped out, so that history could never be
+  // collected by anything and rode along in the URL forever.
+  const cases = [
+    ['inherited range', { id: 'm1', name: 'M', type: 'local', ...BEFORE, count: 1 },
+      { missionId: 'm1', employeeId: 'e1', start: null, end: null, frozen: true }],
+    ['half-inherited range', { id: 'm1', name: 'M', type: 'local', ...BEFORE, count: 1 },
+      { missionId: 'm1', employeeId: 'e1', start: START - 10 * HOUR, end: null, frozen: true }],
+    ['remote mission', { id: 'm1', name: 'M', type: 'remote', ...BEFORE, count: 1 },
+      { missionId: 'm1', employeeId: 'e1', ...BEFORE, frozen: true }],
+  ];
+
+  for (const [label, mission, pin] of cases) {
+    const d = residue(mission, pin);
+    assert.equal(plan(toPlannerInput(d)).shifts.length, 0, `${label}: staffs nothing`);
+    assert.equal(countStalePins(d), 1, `${label}: is collectable`);
+    assert.equal(clearStalePins(d).pins.length, 0, `${label}: the button removes it`);
+  }
+});
+
+test('a live remote pin is never collected, however stale its range reads', () => {
+  // The written range is not honoured on a remote mission - the pin staffs the
+  // whole thing - so judging it by that range would delete a live assignment.
+  const d = residue(
+    { id: 'm1', name: 'M', type: 'remote', start: null, end: null, count: 1 },
+    { missionId: 'm1', employeeId: 'e1', ...BEFORE, frozen: false },
+  );
+  assert.equal(plan(toPlannerInput(d)).shifts.length, 1, 'it is staffing the mission');
+  assert.equal(countStalePins(d), 0);
+  assert.equal(clearStalePins(d), d);
+});
+
+test('the reported count is exactly what the button will remove', () => {
+  // The button only exists alongside this warning, so a count taken anywhere
+  // that cannot see a dropped mission would strand that history with no way to
+  // reach it. Both sides share one predicate; this is that contract.
+  const cases = [
+    residue({ id: 'm1', name: 'M', type: 'local', ...BEFORE, count: 1 },
+      { missionId: 'm1', employeeId: 'e1', start: null, end: null, frozen: true }),
+    residue({ id: 'm1', name: 'M', type: 'remote', ...BEFORE, count: 1 },
+      { missionId: 'm1', employeeId: 'e1', ...BEFORE, frozen: true }),
+    residue({ id: 'm1', name: 'M', type: 'remote', start: null, end: null, count: 1 },
+      { missionId: 'm1', employeeId: 'e1', ...BEFORE, frozen: false }),
+    stale(),
+  ];
+  for (const d of cases) assert.equal(outOfPeriodCount(d), countStalePins(d));
+});
+
+test('clearing residue never changes a single shift', () => {
+  // The whole safety argument for the button. If this can fail, the button is
+  // not a cleanup, it is an edit.
+  for (const d of [stale(), residue(
+    { id: 'm1', name: 'M', type: 'local', ...BEFORE, count: 1 },
+    { missionId: 'm1', employeeId: 'e1', start: null, end: null, frozen: true },
+  )]) {
+    assert.deepEqual(
+      plan(toPlannerInput(clearStalePins(d))).shifts,
+      plan(toPlannerInput(d)).shifts,
+    );
+  }
 });

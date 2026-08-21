@@ -15,8 +15,11 @@ import { t } from '../strings.js';
 // assignment the planner insisted on - the exact override this app must not do.
 const PIN_WARNING_CODES = new Set([WARN.PIN_CONFLICT, WARN.PIN_OVERFLOW, WARN.PIN_UNAVAILABLE]);
 
-/** Nothing is broken when a pin merely outranks an availability window. */
-const INFO_CODES = new Set([WARN.PIN_AVAILABILITY_OVERRIDDEN]);
+/**
+ * Nothing is broken when a pin merely outranks an availability window, nor
+ * when assignments are left over from a period the plan has moved past.
+ */
+const INFO_CODES = new Set([WARN.PIN_AVAILABILITY_OVERRIDDEN, WARN.PIN_OUT_OF_PERIOD]);
 
 function warningKey(warning, index) {
   return `${warning.code}-${warning.missionId ?? ''}-${warning.employeeId ?? ''}-${warning.start ?? index}`;
@@ -33,9 +36,36 @@ function warningText(warning, doc) {
     case WARN.PIN_CONFLICT: return t.warnPinConflict(employee);
     case WARN.PIN_OVERFLOW: return t.warnPinOverflow(employee);
     case WARN.PIN_UNAVAILABLE: return t.warnPinUnavailable(employee);
+    case WARN.PIN_OUT_OF_PERIOD: return t.warnPinOutOfPeriod(warning.count);
     case WARN.PIN_AVAILABILITY_OVERRIDDEN: return t.warnPinAvailabilityOverridden(employee);
     default: return warning.code;
   }
+}
+
+/**
+ * The repair button an alert carries, if any. The out-of-period alert counts
+ * pins rather than naming one, so its button clears the whole set at once;
+ * the rest name a single dropped pin and remove exactly that one.
+ */
+function warningAction(warning, key, onClearPinByWarning, onClearStalePins) {
+  if (warning.code === WARN.PIN_OUT_OF_PERIOD) {
+    return (
+      <Button color="inherit" size="small" onClick={onClearStalePins} data-testid="remove-stale-pins">
+        {t.removeStalePins}
+      </Button>
+    );
+  }
+  if (!PIN_WARNING_CODES.has(warning.code)) return undefined;
+  return (
+    <Button
+      color="inherit"
+      size="small"
+      onClick={() => onClearPinByWarning(warning)}
+      data-testid={`remove-pin-warning-${key}`}
+    >
+      {t.removeBadPin}
+    </Button>
+  );
 }
 
 const preSx = {
@@ -58,7 +88,7 @@ const preSx = {
  * off a phone screen - collapsed-by-default keeps it reachable without being
  * the first thing anyone sees.
  */
-export default function DebugSection({ doc, result, onClearPinByWarning }) {
+export default function DebugSection({ doc, result, onClearPinByWarning, onClearStalePins }) {
   const [open, setOpen] = useState(false);
   const { copy, toastNode } = useCopyToast();
 
@@ -87,16 +117,7 @@ export default function DebugSection({ doc, result, onClearPinByWarning }) {
                 key={key}
                 severity={INFO_CODES.has(w.code) ? 'info' : 'warning'}
                 sx={{ mb: 1 }}
-                action={PIN_WARNING_CODES.has(w.code) ? (
-                  <Button
-                    color="inherit"
-                    size="small"
-                    onClick={() => onClearPinByWarning(w)}
-                    data-testid={`remove-pin-warning-${key}`}
-                  >
-                    {t.removeBadPin}
-                  </Button>
-                ) : undefined}
+                action={warningAction(w, key, onClearPinByWarning, onClearStalePins)}
               >
                 {warningText(w, doc)}
               </Alert>

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { STRATEGY, DEFAULT_STRATEGY } from './strategies.js';
 
 /**
  * The plan document is the single source of truth: everything the planner
@@ -48,6 +49,9 @@ export const planSchema = z.object({
   start: ts,
   end: ts,
   shiftMinutes: z.number().int().min(5).max(24 * 60),
+  // Which policy decides who works a given slot. Defaulted rather than
+  // required so every link written before it existed still parses.
+  strategy: z.enum([STRATEGY.BALANCED, STRATEGY.ROTATION]).default(DEFAULT_STRATEGY),
   employees: z.array(employeeSchema).default([]),
   missions: z.array(missionSchema).default([]),
   pins: z.array(pinSchema).default([]),
@@ -83,6 +87,7 @@ export function emptyPlan(now = Date.now()) {
     start,
     end: start + 24 * 60 * 60 * 1000,
     shiftMinutes: 60,
+    strategy: DEFAULT_STRATEGY,
     employees: [],
     missions: [],
     pins: [],
@@ -106,6 +111,7 @@ export function toPlannerInput(doc) {
     start: doc.start,
     end: doc.end,
     shiftMinutes: doc.shiftMinutes,
+    strategy: doc.strategy,
     employees: doc.employees.map((e) => ({
       id: e.id,
       name: e.name,

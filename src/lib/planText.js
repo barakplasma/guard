@@ -19,6 +19,7 @@ export function planToReadableText(doc) {
   lines.push(`${t.planStart}: ${formatDate(doc.start)} ${formatTime(doc.start)}`);
   lines.push(`${t.planEnd}: ${formatDate(doc.end)} ${formatTime(doc.end)}`);
   lines.push(`${t.shiftLength}: ${doc.shiftMinutes}`);
+  lines.push(`${t.strategy}: ${t.strategyName(doc.strategy)}`);
 
   lines.push('', `${t.employees} (${doc.employees.length}):`);
   if (doc.employees.length === 0) lines.push(`- ${t.noEmployees}`);

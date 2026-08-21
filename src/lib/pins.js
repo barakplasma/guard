@@ -12,16 +12,13 @@
  * miss one of them.
  */
 
-import { plan as runPlanner } from './planner.js';
+import { plan as runPlanner, isOutOfPeriod, resolvePinWindow } from './planner.js';
 import { toPlannerInput } from './planSchema.js';
 
 /** Resolve a pin's effective range, following the null-inheritance chain. */
 export function pinRange(doc, pin) {
   const mission = doc.missions.find((m) => m.id === pin.missionId);
-  return {
-    start: pin.start ?? mission?.start ?? doc.start,
-    end: pin.end ?? mission?.end ?? doc.end,
-  };
+  return resolvePinWindow(pin, mission, doc.start, doc.end);
 }
 
 /** Does `pin` cover the whole of `[start, end)`? */
@@ -163,4 +160,66 @@ export function applyMissionAssignees(doc, missionId, employeeIds) {
       ...employeeIds.map((employeeId) => ({ missionId, employeeId, start: null, end: null })),
     ],
   };
+}
+
+/** Is this pin residue from a period the plan has moved past? */
+function isStale(doc, pin) {
+  const mission = doc.missions.find((m) => m.id === pin.missionId);
+  return isOutOfPeriod(pin, mission, doc.start, doc.end);
+}
+
+/**
+ * Drop every assignment that falls entirely outside the plan period.
+ *
+ * These accumulate on their own: each edit freezes the elapsed part of the
+ * schedule into pins, and rolling the period forward leaves that history
+ * behind, pointing at hours the plan no longer covers. The engine already
+ * ignores them, so removing them changes no shift - it only stops the record
+ * of long-finished periods riding along in the URL forever.
+ *
+ * This is the *explicit* cleanup, offered as a button. Deletion here is
+ * irreversible - `setDoc` navigates with `replace`, so there is no history
+ * entry to go back to - which is exactly why the automatic path below is much
+ * more cautious than this one.
+ */
+export function clearStalePins(doc) {
+  const pins = doc.pins.filter((p) => !isStale(doc, p));
+  return pins.length === doc.pins.length ? doc : { ...doc, pins };
+}
+
+/** How many pins `clearStalePins` would remove. */
+export function countStalePins(doc) {
+  return doc.pins.filter((p) => isStale(doc, p)).length;
+}
+
+/**
+ * The automatic half of the same cleanup, deliberately timid on two counts.
+ *
+ * It refuses to act when the edit moves the period, because the period fields
+ * fire an edit on every intermediate value that parses - typing a year in the
+ * end-date box walks through several - and a momentarily wild window would
+ * take real history with it, unrecoverably. So the window has to be standing
+ * still for this to run at all.
+ *
+ * And it only ever drops pins that finished *before* the period starts. A pin
+ * beyond the end is far more likely to be wanted: extending the end to cover
+ * it is the documented workflow, so treating it as residue would delete the
+ * assignment a moment before the user reaches for it. Those are left to the
+ * explicit button, where someone has said out loud that they want them gone.
+ *
+ * The guard only holds for the edit that moves the window, which leaves one
+ * accepted gap: land a nonsense period and then edit something else before
+ * correcting it, and that edit collects real history. Closing it would need a
+ * notion of a *settled* window, which this app has no way to form - the engine
+ * has no clock, and there is no undo to fall back on. Note that rolling the
+ * period forward deliberately and then editing anything is not that gap: the
+ * history really is residue by then, and collecting it is the point.
+ */
+export function pruneStalePins(prev, next) {
+  if (prev.start !== next.start || prev.end !== next.end) return next;
+  const pins = next.pins.filter((p) => {
+    if (!isStale(next, p)) return true;
+    return (p.end ?? next.end) > next.start;
+  });
+  return pins.length === next.pins.length ? next : { ...next, pins };
 }

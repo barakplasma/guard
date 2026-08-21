@@ -1,7 +1,8 @@
 /**
  * Shift planner.
  *
- * Pure, dependency-free ES module: no DOM, no `Date.now()`, no `Math.random()`.
+ * Pure ES module: no DOM, no `Date.now()`, no `Math.random()`, and no
+ * dependency outside `strategies.js` (which plays by the same rules).
  * All times are ms-epoch numbers. Given the same input it always produces
  * byte-identical output - that is what lets a plan live entirely in a shared
  * URL and render the same for everyone who opens it.
@@ -10,12 +11,18 @@
  *   - `remote` - the same people staff it for its entire duration and are
  *     locked out of everything else while it runs.
  *   - `local`  - people rotate every `shiftMinutes` among whoever is still
- *     available, balancing total time and spreading each person's turns as far
- *     apart as possible.
+ *     available.
+ *
+ * *Who* gets a given slot is the one decision this file delegates: the engine
+ * works out who is eligible, and the chosen strategy (`strategies.js`) ranks
+ * them. Everything else here - normalization, pins, the segment grid, merging,
+ * the timeline - is the same whichever strategy is in force.
  *
  * Manual assignments ("pins") are inputs, not patches to the output, so
  * hand-edits survive re-planning and sharing. See `plan`'s jsdoc.
  */
+
+import { getStrategy, DEFAULT_STRATEGY } from './strategies.js';
 
 const MINUTE = 60 * 1000;
 
@@ -31,6 +38,7 @@ export const WARN = {
   PIN_CONFLICT: 'pin-conflict',
   PIN_OVERFLOW: 'pin-overflow',
   PIN_UNAVAILABLE: 'pin-unavailable',
+  PIN_OUT_OF_PERIOD: 'pin-out-of-period',
   PIN_AVAILABILITY_OVERRIDDEN: 'pin-availability-overridden',
 };
 
@@ -40,6 +48,48 @@ export const WARN = {
 
 function overlaps(aStart, aEnd, bStart, bEnd) {
   return aStart < bEnd && bStart < aEnd;
+}
+
+/**
+ * Resolve a pin to the window it actually refers to, following the
+ * null-inheritance chain: a pin's missing bound comes from its mission, and a
+ * mission's missing bound from the plan period.
+ *
+ * This lives here, rather than in `pins.js` next to the pin edits, because it
+ * is the engine's own reading of a pin and `pins.js` already depends on this
+ * module. `pinRange` there delegates to it. Two separate walks of the same
+ * chain is exactly how the bug below got in.
+ */
+export function resolvePinWindow(pin, mission, planStart, planEnd) {
+  return {
+    start: pin.start ?? mission?.start ?? planStart,
+    end: pin.end ?? mission?.end ?? planEnd,
+  };
+}
+
+/** A remote pin's own range is not honoured, so it resolves as if unwritten. */
+const WHOLE_MISSION = { start: null, end: null };
+
+/**
+ * Is this pin residue - does the window it refers to fall entirely outside the
+ * plan period?
+ *
+ * On a remote mission the pin's written range is ignored, because a pin there
+ * means the whole mission however it was written. What decides the answer is
+ * the *mission's* window, not the pin's: a remote pin whose range reads as
+ * long past is still staffing the mission right now, and calling it residue
+ * would let the cleanup delete a live assignment.
+ *
+ * The chain has to be walked in full. Resolving a missing bound straight to
+ * the plan period instead of the mission's - which an earlier version did -
+ * silently answers "no" for every pin on a mission that has itself dropped out
+ * of the period, so that mission's frozen history could never be collected by
+ * anything and rode along in the URL forever.
+ */
+export function isOutOfPeriod(pin, mission, planStart, planEnd) {
+  const written = mission?.type === 'remote' ? WHOLE_MISSION : pin;
+  const { start, end } = resolvePinWindow(written, mission, planStart, planEnd);
+  return end <= planStart || start >= planEnd;
 }
 
 /**
@@ -100,7 +150,7 @@ function normalizeMissions(missions, planStart, planEnd, warnings) {
  * shared link must keep working rather than erroring. Everything else that
  * cannot be honoured degrades to a warning.
  */
-function normalizePins(pins, employeeById, missionById, warnings) {
+function normalizePins(pins, employeeById, missionById, planStart, planEnd, warnings) {
   // --- Step 1: resolve every pin to its effective [start, end) coverage ---
   // Everything downstream (dedup, availability, conflicts, capacity) has to
   // reason about coverage, never the literal written range - a whole-mission
@@ -126,11 +176,15 @@ function normalizePins(pins, employeeById, missionById, warnings) {
       ? mission.end
       : Math.min(p.end == null ? mission.end : p.end, mission.end);
     if (!(end > start)) {
-      // The one case a manual assignment genuinely cannot be honoured: it
-      // falls entirely outside the mission's own window (clamped to nothing),
-      // so there is no shift left to give anyone - unlike an availability
-      // mismatch below, this is not a fact the engine can work around.
-      warnings.push({ code: WARN.PIN_UNAVAILABLE, missionId: mission.id, employeeId: employee.id });
+      // Two situations reach here, and conflating them buries the one worth
+      // acting on. Residue from a period the plan has moved past is counted in
+      // aggregate by `plan()` below and says nothing here. A pin still inside
+      // the period that clamps to nothing genuinely cannot be honoured - the
+      // mission does not run when the pin says it does - and unlike an
+      // availability mismatch that is not a fact the engine can work around.
+      if (!isOutOfPeriod(p, mission, planStart, planEnd)) {
+        warnings.push({ code: WARN.PIN_UNAVAILABLE, missionId: mission.id, employeeId: employee.id });
+      }
       return;
     }
     resolved.push({
@@ -251,14 +305,15 @@ function normalizePins(pins, employeeById, missionById, warnings) {
  * maximization, and `seq` - bumped on every pick - round-robins exact ties so
  * the rotation cannot collapse onto whoever happens to sort first.
  */
-function makeState(employees) {
+function makeState(employees, strategy) {
   let seq = 0;
   return new Map(
-    employees.map((e) => [
+    employees.map((e, index) => [
       e.id,
       {
         id: e.id, name: e.name, start: e.start, end: e.end, busy: [], busyUntil: -Infinity,
         minutes: 0, missionMinutes: new Map(), lastEnd: -Infinity, seq: seq++, stints: 0,
+        ...(strategy.seed ? strategy.seed(e, index) : null),
       },
     ]),
   );
@@ -294,6 +349,10 @@ function occupy(st, missionId, start, end, counter) {
  * @param {number} params.start - plan window start, ms epoch
  * @param {number} params.end - plan window end, ms epoch
  * @param {number} params.shiftMinutes - rotation length for local missions
+ * @param {'balanced'|'rotation'} [params.strategy] - which policy picks who
+ *   works a given slot; see `strategies.js`. Defaults to `balanced`, the
+ *   original hours-evening behaviour. An unrecognised name falls back to that
+ *   default rather than throwing.
  * @param {{id:string,name:string,start?:number,end?:number}[]} params.employees
  *   `start`/`end` default to the whole plan window.
  * @param {{id:string,name:string,type:'remote'|'local',start?:number,end?:number,count:number}[]} params.missions
@@ -315,7 +374,10 @@ function occupy(st, missionId, start, end, counter) {
  *   warnings: object[],
  * }}
  */
-export function plan({ start, end, shiftMinutes, employees = [], missions = [], pins = [] }) {
+export function plan({
+  start, end, shiftMinutes, strategy: strategyName = DEFAULT_STRATEGY,
+  employees = [], missions = [], pins = [],
+}) {
   /* --- structural validation: these are bugs in the input, not planner findings --- */
   if (!Number.isFinite(start) || !Number.isFinite(end)) throw new Error('Plan window must be numeric timestamps.');
   if (!(end > start)) throw new Error('Plan must end after it starts.');
@@ -334,9 +396,28 @@ export function plan({ start, end, shiftMinutes, employees = [], missions = [], 
 
   const employeeById = new Map(emps.map((e) => [e.id, e]));
   const missionById = new Map(miss.map((m) => [m.id, m]));
-  const goodPins = normalizePins(pins, employeeById, missionById, warnings);
+  const goodPins = normalizePins(pins, employeeById, missionById, start, end, warnings);
 
-  const state = makeState(emps);
+  // Assignments left behind by a period that has since moved on. Counted once
+  // rather than reported one by one: a rota carried across a few days
+  // accumulates dozens, and a wall of identical "cannot be honoured" alerts
+  // reads as a scheduler malfunction rather than the harmless residue it is.
+  //
+  // Counted from the *raw* missions, deliberately. A mission that has itself
+  // dropped out of the period is gone from `missionById`, so everything pinned
+  // to it disappears inside normalizePins before anything can notice - and the
+  // button that clears residue only exists alongside this warning, so a count
+  // taken in there would leave that history with no way to reach it. Sharing
+  // the predicate with `clearStalePins` is what keeps the number honest: what
+  // is reported here is exactly what the button removes.
+  const rawMissionById = new Map(missions.map((m) => [m.id, m]));
+  const outOfPeriod = pins.filter(
+    (p) => isOutOfPeriod(p, rawMissionById.get(p.missionId), start, end),
+  ).length;
+  if (outOfPeriod > 0) warnings.push({ code: WARN.PIN_OUT_OF_PERIOD, count: outOfPeriod });
+
+  const strategy = getStrategy(strategyName);
+  const state = makeState(emps, strategy);
   let seqCounter = emps.length;
   const nextSeq = () => seqCounter++;
 
@@ -385,11 +466,9 @@ export function plan({ start, end, shiftMinutes, employees = [], missions = [], 
     if (need <= 0) continue;
 
     const candidates = eligibleForRemote(m);
-    candidates.sort((a, b) => (
-      a.minutes - b.minutes
-      || a.lastEnd - b.lastEnd
-      || a.seq - b.seq
-    ));
+    candidates.sort((a, b) => strategy.compare(a, b, {
+      mission: m, start: m.start, end: m.end, kind: 'remote',
+    }));
 
     const picked = candidates.slice(0, need);
     for (const st of picked) addRow(m, st, m.start, m.end, false);
@@ -453,20 +532,11 @@ export function plan({ start, end, shiftMinutes, employees = [], missions = [], 
     const candidates = [...state.values()].filter(
       (st) => isAvailable(st, d.start, d.end) && isFree(st, d.start, d.end),
     );
-    // The fairness core:
-    //   1. fewest minutes so far      -> even rotation
-    //   2. earliest `lastEnd`         -> maximizes the gap since last on duty
-    //   3. fewest minutes on *this* mission -> rotates people across mission types,
-    //      not just across time - otherwise two concurrent local missions can settle
-    //      into "always the same person on A, always the other on B" even though their
-    //      total minutes stay perfectly balanced.
-    //   4. `seq`                      -> round-robin among exact ties
-    candidates.sort((a, b) => (
-      a.minutes - b.minutes
-      || a.lastEnd - b.lastEnd
-      || (a.missionMinutes.get(d.mission.id) ?? 0) - (b.missionMinutes.get(d.mission.id) ?? 0)
-      || a.seq - b.seq
-    ));
+    // Who among them actually gets it is the strategy's call - see
+    // `strategies.js` for what each one optimizes for.
+    candidates.sort((a, b) => strategy.compare(a, b, {
+      mission: d.mission, start: d.start, end: d.end, kind: 'local',
+    }));
 
     const picked = candidates.slice(0, d.need);
     for (const st of picked) addRow(d.mission, st, d.start, d.end, false);
