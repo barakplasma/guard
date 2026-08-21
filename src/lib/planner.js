@@ -38,6 +38,7 @@ export const WARN = {
   PIN_CONFLICT: 'pin-conflict',
   PIN_OVERFLOW: 'pin-overflow',
   PIN_UNAVAILABLE: 'pin-unavailable',
+  PIN_OUT_OF_PERIOD: 'pin-out-of-period',
   PIN_AVAILABILITY_OVERRIDDEN: 'pin-availability-overridden',
 };
 
@@ -47,6 +48,27 @@ export const WARN = {
 
 function overlaps(aStart, aEnd, bStart, bEnd) {
   return aStart < bEnd && bStart < aEnd;
+}
+
+/**
+ * Does this pin's written range fall entirely outside the plan period?
+ *
+ * Only an explicit range can: a null start or end inherits the mission window,
+ * which is itself clamped into the period, so an inherited pin always overlaps
+ * it.
+ *
+ * On a remote mission the answer is always no, whatever the range says. A pin
+ * there means the whole mission - the written range is not honoured, so it
+ * cannot strand the pin outside the period either. Reading it literally would
+ * mark a pin stale while the engine is busy staffing a mission with it, and
+ * the cleanup built on this predicate would then delete a live assignment.
+ */
+export function isOutOfPeriod(pin, mission, planStart, planEnd) {
+  if (mission?.type === 'remote') return false;
+  if (pin.start == null && pin.end == null) return false;
+  const start = pin.start ?? planStart;
+  const end = pin.end ?? planEnd;
+  return end <= planStart || start >= planEnd;
 }
 
 /**
@@ -107,7 +129,13 @@ function normalizeMissions(missions, planStart, planEnd, warnings) {
  * shared link must keep working rather than erroring. Everything else that
  * cannot be honoured degrades to a warning.
  */
-function normalizePins(pins, employeeById, missionById, warnings) {
+function normalizePins(pins, employeeById, missionById, planStart, planEnd, warnings) {
+  // Assignments left behind by a plan window that has since moved on. They are
+  // not broken - they were true when they were written - so they are counted
+  // once rather than reported one by one: a rota rolled forward a few days
+  // carries dozens, and forty identical "cannot be honoured" alerts read as a
+  // scheduler malfunction instead of the harmless residue they are.
+  let outOfPeriod = 0;
   // --- Step 1: resolve every pin to its effective [start, end) coverage ---
   // Everything downstream (dedup, availability, conflicts, capacity) has to
   // reason about coverage, never the literal written range - a whole-mission
@@ -133,11 +161,15 @@ function normalizePins(pins, employeeById, missionById, warnings) {
       ? mission.end
       : Math.min(p.end == null ? mission.end : p.end, mission.end);
     if (!(end > start)) {
-      // The one case a manual assignment genuinely cannot be honoured: it
-      // falls entirely outside the mission's own window (clamped to nothing),
-      // so there is no shift left to give anyone - unlike an availability
-      // mismatch below, this is not a fact the engine can work around.
-      warnings.push({ code: WARN.PIN_UNAVAILABLE, missionId: mission.id, employeeId: employee.id });
+      // Two different situations reach here, and conflating them buries the
+      // one worth acting on. A pin wholly outside the *plan period* is just
+      // residue from a window that has moved; a pin inside the period that
+      // still clamps to nothing genuinely cannot be honoured, because the
+      // mission does not run when the pin says it does - unlike an
+      // availability mismatch below, that is not a fact the engine can work
+      // around.
+      if (isOutOfPeriod(p, mission, planStart, planEnd)) outOfPeriod += 1;
+      else warnings.push({ code: WARN.PIN_UNAVAILABLE, missionId: mission.id, employeeId: employee.id });
       return;
     }
     resolved.push({
@@ -244,6 +276,8 @@ function normalizePins(pins, employeeById, missionById, warnings) {
   // (plan()'s addRow loop, which drives fairness tie-breaking for the people
   // scheduled around these pins) should have to care that the walk itself
   // ran newest-first.
+  if (outOfPeriod > 0) warnings.push({ code: WARN.PIN_OUT_OF_PERIOD, count: outOfPeriod });
+
   accepted.sort((a, b) => a.index - b.index);
   return accepted.map(({ index: _index, ...pin }) => pin);
 }
@@ -349,7 +383,7 @@ export function plan({
 
   const employeeById = new Map(emps.map((e) => [e.id, e]));
   const missionById = new Map(miss.map((m) => [m.id, m]));
-  const goodPins = normalizePins(pins, employeeById, missionById, warnings);
+  const goodPins = normalizePins(pins, employeeById, missionById, start, end, warnings);
 
   const strategy = getStrategy(strategyName);
   const state = makeState(emps, strategy);

@@ -45,6 +45,23 @@ actually stick instead of being immediately re-pinned by the same edit. That is 
 frozen shift stays swappable and clearable like any other pin, because the point is to let someone
 correct the record to match reality, not to make the past read-only.
 
+Freezing means the document only grows, and rolling the period forward strands that history
+outside the window. Those pins are *residue*, not errors: the engine ignores them, so they are
+counted once as `PIN_OUT_OF_PERIOD` rather than reported one per pin — a rota carried across a
+few days accumulates dozens, and a wall of "cannot be honoured" alerts reads as a scheduler
+malfunction. `isOutOfPeriod` (`planner.js`) is the shared predicate, and it answers **no** for a
+remote mission whatever the range says: a pin there means the whole mission, so its written
+range is not honoured and cannot strand it — reading it literally would let the cleanup delete a
+pin that is actively staffing something.
+
+Cleanup comes in two halves, and the asymmetry is deliberate. `clearStalePins` is the button:
+explicit, and it takes both sides of the window. `pruneStalePins` runs inside `setDoc` and is
+much more timid — it declines entirely when the edit moves `start`/`end`, because the date
+fields emit an edit on every intermediate value that parses and a half-typed year would take
+real history with it, unrecoverably (`setDoc` navigates with `replace`; there is no way back).
+It also only ever drops pins that finished *before* the period starts: a pin past the end is
+one the user is probably about to extend to cover.
+
 ### Strategies
 
 *Who* gets a given slot is the one decision the engine delegates. `planner.js` works out who is

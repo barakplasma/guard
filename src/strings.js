@@ -132,6 +132,14 @@ export const t = {
   // outside the mission's own window, so there is no shift to give anyone.
   warnPinUnavailable: (name) => `השיבוץ הידני של ${name} נמצא מחוץ לחלון המשימה ולא ניתן ליישום.`,
   removeBadPin: 'הסר שיבוץ זה',
+  // Counted, not listed: rolling the period forward a few days leaves dozens
+  // of these behind, and one alert per pin reads as a malfunction rather than
+  // the harmless residue it is. The wording says "ignored", not "failed" -
+  // nothing is broken, the plan simply no longer covers those hours.
+  warnPinOutOfPeriod: (count) => (count === 1
+    ? 'שיבוץ ידני אחד נמצא מחוץ לתקופת הסידור ולכן לא נלקח בחשבון.'
+    : `${count} שיבוצים ידניים נמצאים מחוץ לתקופת הסידור ולכן לא נלקחו בחשבון.`),
+  removeStalePins: 'נקה שיבוצים ישנים',
 
   // debug section
   // The warning count rides in the toggle label: the section is collapsed by

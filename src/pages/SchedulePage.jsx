@@ -77,7 +77,7 @@ function SummaryTable({ result }) {
 
 export default function SchedulePage() {
   const {
-    doc, pinShift, clearPin, clearAllPins, clearPinByWarning, decodeFailed,
+    doc, pinShift, clearPin, clearAllPins, clearPinByWarning, clearStalePins, decodeFailed,
   } = usePlan();
   const { result, error } = useSchedule(doc);
 
@@ -151,7 +151,12 @@ export default function SchedulePage() {
 
           {result.shifts.length > 0 && <SummaryTable result={result} />}
 
-          <DebugSection doc={doc} result={result} onClearPinByWarning={clearPinByWarning} />
+          <DebugSection
+            doc={doc}
+            result={result}
+            onClearPinByWarning={clearPinByWarning}
+            onClearStalePins={clearStalePins}
+          />
         </>
       )}
     </Box>

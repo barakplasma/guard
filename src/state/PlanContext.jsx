@@ -5,7 +5,8 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { decodePlan, encodePlan, PARAM } from '../lib/urlState.js';
 import { emptyPlan, makeId, planSchema, prunePins } from '../lib/planSchema.js';
 import {
-  applyClearPin, applyClearPinsForMission, applyMissionAssignees, applySwap, freezeElapsedBeforeEdit,
+  applyClearPin, applyClearPinsForMission, applyMissionAssignees, applySwap,
+  clearStalePins, freezeElapsedBeforeEdit, pruneStalePins,
 } from '../lib/pins.js';
 
 const PlanContext = createContext(null);
@@ -55,7 +56,7 @@ export function PlanProvider({ children }) {
   // work regardless of which page the edit was made on - see freezeElapsedBeforeEdit.
   const setDoc = useCallback((next) => {
     const frozen = freezeElapsedBeforeEdit(doc, next);
-    const parsed = planSchema.parse(prunePins(frozen));
+    const parsed = planSchema.parse(prunePins(pruneStalePins(doc, frozen)));
     const encoded = encodePlan(parsed);
     lastBlob.current = encoded;
     lastDoc.current = parsed;
@@ -147,6 +148,13 @@ export function PlanProvider({ children }) {
     ),
 
     clearAllPins: () => update((d) => ({ ...d, pins: [] })),
+
+    /**
+     * Drop assignments left behind outside the plan period. Offered as a
+     * button rather than done silently: it deletes real history, and the
+     * automatic prune in `setDoc` deliberately declines the cases this covers.
+     */
+    clearStalePins: () => update(clearStalePins),
 
     /**
      * Remove the specific pin a `pin-conflict`/`pin-overflow`/`pin-unavailable`

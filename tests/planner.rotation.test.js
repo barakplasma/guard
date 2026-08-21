@@ -17,6 +17,9 @@ const ring = (n) => Array.from({ length: n }, (_, i) => ({
   name: `Emp${String(i + 1).padStart(2, '0')}`,
 }));
 
+/** Every recorded rest gap, so two strategies can be compared on the worst one. */
+const gaps = (r) => r.stats.perEmployee.map((p) => p.minGapMinutes).filter((g) => g != null);
+
 /** Auto-assigned rows for one mission, in clock order, as employee ids. */
 function order(result, missionId = 'l') {
   return result.shifts
@@ -207,4 +210,56 @@ test('mergedRuns joins touching and overlapping intervals, and sorts', () => {
     [{ start: 0, end: 20 }, { start: 30, end: 40 }],
   );
   assert.deepEqual(mergedRuns([]), []);
+});
+
+test('a lopsided frozen past does not let a fresh guard double up', () => {
+  // The shape of a real report. The frozen block is uneven: e1, e2 and e3 each
+  // worked it twice, e4 not at all, and e4 is then named by hand for 14:00.
+  //
+  // Balancing hours sees e4 as the least-worked person alive and hands them
+  // 15:00 as well - a second turn immediately after their first - while e1,
+  // who came off at 12:00, waits. Ranking on rest instead sends it to e1.
+  const employees = ring(4);
+  const END = START + 10 * HOUR;
+  const frozen = [['e1', 0], ['e2', 1], ['e3', 2], ['e1', 3], ['e2', 4], ['e3', 5]]
+    .map(([employeeId, h]) => ({
+      missionId: 'l',
+      employeeId,
+      start: START + h * HOUR,
+      end: START + (h + 1) * HOUR,
+      frozen: true,
+    }));
+
+  const input = {
+    start: START,
+    end: END,
+    shiftMinutes: 60,
+    employees,
+    missions: [{ id: 'l', name: 'Local', type: 'local', start: START, end: END, count: 1 }],
+    pins: [
+      ...frozen,
+      { missionId: 'l', employeeId: 'e4', start: START + 6 * HOUR, end: START + 7 * HOUR },
+    ],
+  };
+
+  const at = (r, h) => r.shifts.find((s) => s.start === START + h * HOUR).employeeId;
+
+  const balanced = plan({ ...input, strategy: 'balanced' });
+  assert.equal(at(balanced, 7), 'e4', 'fewest hours wins, so e4 goes straight back on');
+  assert.equal(Math.min(...gaps(balanced)), 0, 'back to back, with no rest at all');
+
+  const rotated = plan({ ...input, strategy: 'rotation' });
+  assert.equal(at(rotated, 7), 'e1', 'longest rested goes next');
+  assert.equal(at(rotated, 8), 'e2');
+  assert.equal(at(rotated, 9), 'e3');
+
+  const e4 = rotated.stats.perEmployee.find((p) => p.employeeId === 'e4');
+  assert.equal(e4.stints, 1, 'e4 keeps the single turn they were named for');
+  // 120 is the spacing baked into the frozen block itself; what matters is
+  // that no fresh decision drags the worst gap below what it inherited.
+  assert.equal(Math.min(...gaps(rotated)), 2 * 60);
+  assert.ok(
+    Math.min(...gaps(rotated)) > Math.min(...gaps(balanced)),
+    'rotation leaves everyone better rested than balancing hours did',
+  );
 });
