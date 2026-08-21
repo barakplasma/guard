@@ -51,23 +51,44 @@ function overlaps(aStart, aEnd, bStart, bEnd) {
 }
 
 /**
- * Does this pin's written range fall entirely outside the plan period?
+ * Resolve a pin to the window it actually refers to, following the
+ * null-inheritance chain: a pin's missing bound comes from its mission, and a
+ * mission's missing bound from the plan period.
  *
- * Only an explicit range can: a null start or end inherits the mission window,
- * which is itself clamped into the period, so an inherited pin always overlaps
- * it.
+ * This lives here, rather than in `pins.js` next to the pin edits, because it
+ * is the engine's own reading of a pin and `pins.js` already depends on this
+ * module. `pinRange` there delegates to it. Two separate walks of the same
+ * chain is exactly how the bug below got in.
+ */
+export function resolvePinWindow(pin, mission, planStart, planEnd) {
+  return {
+    start: pin.start ?? mission?.start ?? planStart,
+    end: pin.end ?? mission?.end ?? planEnd,
+  };
+}
+
+/** A remote pin's own range is not honoured, so it resolves as if unwritten. */
+const WHOLE_MISSION = { start: null, end: null };
+
+/**
+ * Is this pin residue - does the window it refers to fall entirely outside the
+ * plan period?
  *
- * On a remote mission the answer is always no, whatever the range says. A pin
- * there means the whole mission - the written range is not honoured, so it
- * cannot strand the pin outside the period either. Reading it literally would
- * mark a pin stale while the engine is busy staffing a mission with it, and
- * the cleanup built on this predicate would then delete a live assignment.
+ * On a remote mission the pin's written range is ignored, because a pin there
+ * means the whole mission however it was written. What decides the answer is
+ * the *mission's* window, not the pin's: a remote pin whose range reads as
+ * long past is still staffing the mission right now, and calling it residue
+ * would let the cleanup delete a live assignment.
+ *
+ * The chain has to be walked in full. Resolving a missing bound straight to
+ * the plan period instead of the mission's - which an earlier version did -
+ * silently answers "no" for every pin on a mission that has itself dropped out
+ * of the period, so that mission's frozen history could never be collected by
+ * anything and rode along in the URL forever.
  */
 export function isOutOfPeriod(pin, mission, planStart, planEnd) {
-  if (mission?.type === 'remote') return false;
-  if (pin.start == null && pin.end == null) return false;
-  const start = pin.start ?? planStart;
-  const end = pin.end ?? planEnd;
+  const written = mission?.type === 'remote' ? WHOLE_MISSION : pin;
+  const { start, end } = resolvePinWindow(written, mission, planStart, planEnd);
   return end <= planStart || start >= planEnd;
 }
 
@@ -130,12 +151,6 @@ function normalizeMissions(missions, planStart, planEnd, warnings) {
  * cannot be honoured degrades to a warning.
  */
 function normalizePins(pins, employeeById, missionById, planStart, planEnd, warnings) {
-  // Assignments left behind by a plan window that has since moved on. They are
-  // not broken - they were true when they were written - so they are counted
-  // once rather than reported one by one: a rota rolled forward a few days
-  // carries dozens, and forty identical "cannot be honoured" alerts read as a
-  // scheduler malfunction instead of the harmless residue they are.
-  let outOfPeriod = 0;
   // --- Step 1: resolve every pin to its effective [start, end) coverage ---
   // Everything downstream (dedup, availability, conflicts, capacity) has to
   // reason about coverage, never the literal written range - a whole-mission
@@ -161,15 +176,15 @@ function normalizePins(pins, employeeById, missionById, planStart, planEnd, warn
       ? mission.end
       : Math.min(p.end == null ? mission.end : p.end, mission.end);
     if (!(end > start)) {
-      // Two different situations reach here, and conflating them buries the
-      // one worth acting on. A pin wholly outside the *plan period* is just
-      // residue from a window that has moved; a pin inside the period that
-      // still clamps to nothing genuinely cannot be honoured, because the
-      // mission does not run when the pin says it does - unlike an
-      // availability mismatch below, that is not a fact the engine can work
-      // around.
-      if (isOutOfPeriod(p, mission, planStart, planEnd)) outOfPeriod += 1;
-      else warnings.push({ code: WARN.PIN_UNAVAILABLE, missionId: mission.id, employeeId: employee.id });
+      // Two situations reach here, and conflating them buries the one worth
+      // acting on. Residue from a period the plan has moved past is counted in
+      // aggregate by `plan()` below and says nothing here. A pin still inside
+      // the period that clamps to nothing genuinely cannot be honoured - the
+      // mission does not run when the pin says it does - and unlike an
+      // availability mismatch that is not a fact the engine can work around.
+      if (!isOutOfPeriod(p, mission, planStart, planEnd)) {
+        warnings.push({ code: WARN.PIN_UNAVAILABLE, missionId: mission.id, employeeId: employee.id });
+      }
       return;
     }
     resolved.push({
@@ -276,8 +291,6 @@ function normalizePins(pins, employeeById, missionById, planStart, planEnd, warn
   // (plan()'s addRow loop, which drives fairness tie-breaking for the people
   // scheduled around these pins) should have to care that the walk itself
   // ran newest-first.
-  if (outOfPeriod > 0) warnings.push({ code: WARN.PIN_OUT_OF_PERIOD, count: outOfPeriod });
-
   accepted.sort((a, b) => a.index - b.index);
   return accepted.map(({ index: _index, ...pin }) => pin);
 }
@@ -384,6 +397,24 @@ export function plan({
   const employeeById = new Map(emps.map((e) => [e.id, e]));
   const missionById = new Map(miss.map((m) => [m.id, m]));
   const goodPins = normalizePins(pins, employeeById, missionById, start, end, warnings);
+
+  // Assignments left behind by a period that has since moved on. Counted once
+  // rather than reported one by one: a rota carried across a few days
+  // accumulates dozens, and a wall of identical "cannot be honoured" alerts
+  // reads as a scheduler malfunction rather than the harmless residue it is.
+  //
+  // Counted from the *raw* missions, deliberately. A mission that has itself
+  // dropped out of the period is gone from `missionById`, so everything pinned
+  // to it disappears inside normalizePins before anything can notice - and the
+  // button that clears residue only exists alongside this warning, so a count
+  // taken in there would leave that history with no way to reach it. Sharing
+  // the predicate with `clearStalePins` is what keeps the number honest: what
+  // is reported here is exactly what the button removes.
+  const rawMissionById = new Map(missions.map((m) => [m.id, m]));
+  const outOfPeriod = pins.filter(
+    (p) => isOutOfPeriod(p, rawMissionById.get(p.missionId), start, end),
+  ).length;
+  if (outOfPeriod > 0) warnings.push({ code: WARN.PIN_OUT_OF_PERIOD, count: outOfPeriod });
 
   const strategy = getStrategy(strategyName);
   const state = makeState(emps, strategy);

@@ -12,16 +12,13 @@
  * miss one of them.
  */
 
-import { plan as runPlanner, isOutOfPeriod } from './planner.js';
+import { plan as runPlanner, isOutOfPeriod, resolvePinWindow } from './planner.js';
 import { toPlannerInput } from './planSchema.js';
 
 /** Resolve a pin's effective range, following the null-inheritance chain. */
 export function pinRange(doc, pin) {
   const mission = doc.missions.find((m) => m.id === pin.missionId);
-  return {
-    start: pin.start ?? mission?.start ?? doc.start,
-    end: pin.end ?? mission?.end ?? doc.end,
-  };
+  return resolvePinWindow(pin, mission, doc.start, doc.end);
 }
 
 /** Does `pin` cover the whole of `[start, end)`? */
@@ -209,6 +206,14 @@ export function countStalePins(doc) {
  * it is the documented workflow, so treating it as residue would delete the
  * assignment a moment before the user reaches for it. Those are left to the
  * explicit button, where someone has said out loud that they want them gone.
+ *
+ * The guard only holds for the edit that moves the window, which leaves one
+ * accepted gap: land a nonsense period and then edit something else before
+ * correcting it, and that edit collects real history. Closing it would need a
+ * notion of a *settled* window, which this app has no way to form - the engine
+ * has no clock, and there is no undo to fall back on. Note that rolling the
+ * period forward deliberately and then editing anything is not that gap: the
+ * history really is residue by then, and collecting it is the point.
  */
 export function pruneStalePins(prev, next) {
   if (prev.start !== next.start || prev.end !== next.end) return next;

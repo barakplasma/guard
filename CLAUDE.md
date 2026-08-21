@@ -49,10 +49,22 @@ Freezing means the document only grows, and rolling the period forward strands t
 outside the window. Those pins are *residue*, not errors: the engine ignores them, so they are
 counted once as `PIN_OUT_OF_PERIOD` rather than reported one per pin — a rota carried across a
 few days accumulates dozens, and a wall of "cannot be honoured" alerts reads as a scheduler
-malfunction. `isOutOfPeriod` (`planner.js`) is the shared predicate, and it answers **no** for a
-remote mission whatever the range says: a pin there means the whole mission, so its written
-range is not honoured and cannot strand it — reading it literally would let the cleanup delete a
-pin that is actively staffing something.
+malfunction. `isOutOfPeriod` (`planner.js`) is the shared predicate. It resolves the pin's window through the
+whole chain — pin → mission → plan — via `resolvePinWindow`, which `pinRange` in `pins.js` also
+delegates to; resolving a missing bound straight to the plan period instead of the mission's
+answers "not stale" for every pin on a mission that has itself dropped out of the period, and
+that history then rides along uncollectable forever. On a **remote** mission the pin's written
+range is ignored and the mission's own window decides, because a pin there means the whole
+mission however it was written — a remote pin whose range reads as long past is still staffing
+the mission right now.
+
+The count reported as `PIN_OUT_OF_PERIOD` is computed in `plan()` from the **raw** missions, not
+inside `normalizePins`. A mission that fell out of the period is already gone from
+`missionById`, so its pins vanish before anything in there can count them — and since the button
+that clears residue only exists alongside this warning, a count taken in there would strand that
+history with no way to reach it. Sharing one predicate with `clearStalePins` is what keeps the
+number honest: what the warning reports is exactly what the button removes, and
+`tests/pins.test.js` asserts that.
 
 Cleanup comes in two halves, and the asymmetry is deliberate. `clearStalePins` is the button:
 explicit, and it takes both sides of the window. `pruneStalePins` runs inside `setDoc` and is

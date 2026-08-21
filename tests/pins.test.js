@@ -448,3 +448,79 @@ test('a pin inside the period that its mission cannot host is still a real warni
   assert.ok(codes.includes(WARN.PIN_UNAVAILABLE), 'the actionable case keeps its own warning');
   assert.ok(!codes.includes(WARN.PIN_OUT_OF_PERIOD));
 });
+
+/* --- residue on a mission that has itself dropped out of the period --- */
+
+/** One employee, one mission, one pin - varied per case. */
+const residue = (mission, pin) => doc({ missions: [mission], pins: [pin] });
+
+const outOfPeriodCount = (d) => {
+  const w = plan(toPlannerInput(d)).warnings.find((x) => x.code === WARN.PIN_OUT_OF_PERIOD);
+  return w ? w.count : 0;
+};
+
+const BEFORE = { start: START - 10 * HOUR, end: START - 9 * HOUR };
+
+test('residue is collectable even when its mission fell out of the period too', () => {
+  // A missing bound on a pin inherits the *mission's*, not the plan's. Reading
+  // it straight from the plan period answered "not stale" for every pin on a
+  // mission that had itself dropped out, so that history could never be
+  // collected by anything and rode along in the URL forever.
+  const cases = [
+    ['inherited range', { id: 'm1', name: 'M', type: 'local', ...BEFORE, count: 1 },
+      { missionId: 'm1', employeeId: 'e1', start: null, end: null, frozen: true }],
+    ['half-inherited range', { id: 'm1', name: 'M', type: 'local', ...BEFORE, count: 1 },
+      { missionId: 'm1', employeeId: 'e1', start: START - 10 * HOUR, end: null, frozen: true }],
+    ['remote mission', { id: 'm1', name: 'M', type: 'remote', ...BEFORE, count: 1 },
+      { missionId: 'm1', employeeId: 'e1', ...BEFORE, frozen: true }],
+  ];
+
+  for (const [label, mission, pin] of cases) {
+    const d = residue(mission, pin);
+    assert.equal(plan(toPlannerInput(d)).shifts.length, 0, `${label}: staffs nothing`);
+    assert.equal(countStalePins(d), 1, `${label}: is collectable`);
+    assert.equal(clearStalePins(d).pins.length, 0, `${label}: the button removes it`);
+  }
+});
+
+test('a live remote pin is never collected, however stale its range reads', () => {
+  // The written range is not honoured on a remote mission - the pin staffs the
+  // whole thing - so judging it by that range would delete a live assignment.
+  const d = residue(
+    { id: 'm1', name: 'M', type: 'remote', start: null, end: null, count: 1 },
+    { missionId: 'm1', employeeId: 'e1', ...BEFORE, frozen: false },
+  );
+  assert.equal(plan(toPlannerInput(d)).shifts.length, 1, 'it is staffing the mission');
+  assert.equal(countStalePins(d), 0);
+  assert.equal(clearStalePins(d), d);
+});
+
+test('the reported count is exactly what the button will remove', () => {
+  // The button only exists alongside this warning, so a count taken anywhere
+  // that cannot see a dropped mission would strand that history with no way to
+  // reach it. Both sides share one predicate; this is that contract.
+  const cases = [
+    residue({ id: 'm1', name: 'M', type: 'local', ...BEFORE, count: 1 },
+      { missionId: 'm1', employeeId: 'e1', start: null, end: null, frozen: true }),
+    residue({ id: 'm1', name: 'M', type: 'remote', ...BEFORE, count: 1 },
+      { missionId: 'm1', employeeId: 'e1', ...BEFORE, frozen: true }),
+    residue({ id: 'm1', name: 'M', type: 'remote', start: null, end: null, count: 1 },
+      { missionId: 'm1', employeeId: 'e1', ...BEFORE, frozen: false }),
+    stale(),
+  ];
+  for (const d of cases) assert.equal(outOfPeriodCount(d), countStalePins(d));
+});
+
+test('clearing residue never changes a single shift', () => {
+  // The whole safety argument for the button. If this can fail, the button is
+  // not a cleanup, it is an edit.
+  for (const d of [stale(), residue(
+    { id: 'm1', name: 'M', type: 'local', ...BEFORE, count: 1 },
+    { missionId: 'm1', employeeId: 'e1', start: null, end: null, frozen: true },
+  )]) {
+    assert.deepEqual(
+      plan(toPlannerInput(clearStalePins(d))).shifts,
+      plan(toPlannerInput(d)).shifts,
+    );
+  }
+});
