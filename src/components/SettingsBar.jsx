@@ -1,14 +1,18 @@
 import { useState } from 'react';
 import {
-  Button, Menu, MenuItem, Paper, Stack, TextField,
+  Button, Menu, MenuItem, Paper, Stack, TextField, Tooltip,
 } from '@mui/material';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import DateTimeField from './DateTimeField.jsx';
 import { usePlan } from '../state/PlanContext.jsx';
 import { topOfHour, nextTopOfHour } from '../lib/planSchema.js';
+import { STRATEGY } from '../lib/strategies.js';
 import { t } from '../strings.js';
 
-/** Plan-wide settings: the window everything else defaults to, and the rotation length. */
+/**
+ * Plan-wide settings: the window everything else defaults to, the rotation
+ * length, and which strategy decides who works a given slot.
+ */
 export default function SettingsBar() {
   const { doc, setField, update } = usePlan();
   const [anchorEl, setAnchorEl] = useState(null);
@@ -70,6 +74,27 @@ export default function SettingsBar() {
           slotProps={{ htmlInput: { min: 5, max: 1440, step: 5, 'data-testid': 'shift-minutes' } }}
           sx={{ width: 160 }}
         />
+        <Tooltip
+          title={doc.strategy === STRATEGY.ROTATION
+            ? t.strategyRotationHelp
+            : t.strategyBalancedHelp}
+        >
+          <TextField
+            select
+            label={t.strategy}
+            value={doc.strategy}
+            onChange={(e) => setField('strategy', e.target.value)}
+            slotProps={{ htmlInput: { 'data-testid': 'strategy' } }}
+            sx={{ width: 180 }}
+          >
+            <MenuItem value={STRATEGY.BALANCED} data-testid="strategy-balanced">
+              {t.strategyBalanced}
+            </MenuItem>
+            <MenuItem value={STRATEGY.ROTATION} data-testid="strategy-rotation">
+              {t.strategyRotation}
+            </MenuItem>
+          </TextField>
+        </Tooltip>
       </Stack>
     </Paper>
   );

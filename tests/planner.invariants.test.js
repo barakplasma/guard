@@ -13,6 +13,7 @@ const BASE = new Date(2026, 0, 5, 8, 0, 0, 0).getTime();
  */
 const planArb = fc.record({
   hours: fc.integer({ min: 1, max: 12 }),
+  strategy: fc.constantFrom('balanced', 'rotation'),
   shiftMinutes: fc.constantFrom(30, 60, 90, 120),
   employeeCount: fc.integer({ min: 1, max: 8 }),
   missions: fc.array(
@@ -55,7 +56,9 @@ function build(spec) {
     count: m.count,
   })).filter((m) => m.start < end);
 
-  return { start, end, shiftMinutes: spec.shiftMinutes, employees, missions };
+  return {
+    start, end, shiftMinutes: spec.shiftMinutes, strategy: spec.strategy, employees, missions,
+  };
 }
 
 test('nobody is ever double-booked', () => {

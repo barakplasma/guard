@@ -36,6 +36,7 @@ export function encodePlan(doc) {
     s: doc.start,
     e: doc.end,
     m: doc.shiftMinutes,
+    st: doc.strategy,
     emp: doc.employees.map((x) => [x.id, x.name, outTs(x.start), outTs(x.end)]),
     mis: doc.missions.map((x) => [x.id, x.name, TYPE_CODE[x.type] ?? 0, outTs(x.start), outTs(x.end), x.count]),
     pin: doc.pins.map((x) => [x.missionId, x.employeeId, outTs(x.start), outTs(x.end), x.frozen ? 1 : 0]),
@@ -68,6 +69,9 @@ export function decodePlan(blob) {
       start: raw.s,
       end: raw.e,
       shiftMinutes: raw.m,
+      // A link written before strategies existed carries no `st`; the schema
+      // default is the behaviour those links were made with.
+      strategy: raw.st ?? undefined,
       employees: (raw.emp ?? []).map(([id, name, s, e]) => ({
         id, name, start: inTs(s), end: inTs(e),
       })),

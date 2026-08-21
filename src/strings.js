@@ -13,6 +13,16 @@ export const t = {
   planStart: 'תחילת התקופה',
   planEnd: 'סוף התקופה',
   shiftLength: 'אורך משמרת (דקות)',
+  strategy: 'שיטת חלוקה',
+  strategyBalanced: 'איזון שעות',
+  strategyRotation: 'סבב קבוע',
+  // The two help lines say what each method optimizes for, because the summary
+  // table reads differently under each: under a fixed rotation the "פער" figure
+  // is expected to be large - hours are deliberately not evened out - and the
+  // number of turns is the column that matters.
+  strategyBalancedHelp: 'מי שצבר הכי מעט שעות נכנס הבא. השעות מתחלקות שווה בשווה.',
+  strategyRotationHelp: 'סבב מעגלי קבוע לפי סדר רשימת האנשים. כל תורנות שווה בתור, בין אם היא שעה או יום שלם, ולכן הפער בשעות עשוי להיות גדול.',
+  strategyName: (id) => (id === 'rotation' ? t.strategyRotation : t.strategyBalanced),
   startOptions: 'התחלה מהירה',
   startNow: 'עכשיו',
   startNextHour: 'השעה הבאה',

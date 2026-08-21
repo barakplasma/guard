@@ -152,3 +152,34 @@ test('prunePins drops references to deleted employees and missions', () => {
   // No dangling references means the object is returned untouched.
   assert.equal(prunePins(doc), doc);
 });
+
+test('the strategy survives the round trip', () => {
+  const doc = planSchema.parse({ ...sample(), strategy: 'rotation' });
+  const { plan: back } = decodePlan(encodePlan(doc));
+  assert.equal(back.strategy, 'rotation');
+  assert.equal(toPlannerInput(back).strategy, 'rotation');
+});
+
+test('a link encoded before strategies existed decodes as the original behaviour', () => {
+  // Old links carry no `st` key at all. They were written when there was one
+  // way to schedule, so they have to keep meaning that - silently switching a
+  // shared plan to a different strategy would reshuffle everybody.
+  const doc = sample();
+  const legacyCompact = {
+    v: doc.version,
+    t: doc.title,
+    s: doc.start,
+    e: doc.end,
+    m: doc.shiftMinutes,
+    emp: doc.employees.map((x) => [x.id, x.name, x.start ?? 0, x.end ?? 0]),
+    mis: doc.missions.map((x) => [
+      x.id, x.name, x.type === 'remote' ? 1 : 0, x.start ?? 0, x.end ?? 0, x.count,
+    ]),
+    pin: doc.pins.map((x) => [x.missionId, x.employeeId, x.start ?? 0, x.end ?? 0]),
+  };
+  const blob = lzString.compressToEncodedURIComponent(JSON.stringify(legacyCompact));
+
+  const result = decodePlan(blob);
+  assert.equal(result.ok, true);
+  assert.equal(result.plan.strategy, 'balanced');
+});

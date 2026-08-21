@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { planToReadableText } from '../src/lib/planText.js';
 import { planSchema } from '../src/lib/planSchema.js';
+import { t } from '../src/strings.js';
 
 const HOUR = 3600 * 1000;
 const START = new Date(2026, 0, 5, 8, 0, 0, 0).getTime();
@@ -28,6 +29,7 @@ test('lists the title, period, and shift length', () => {
   const lines = text.split('\n');
   assert.equal(lines[0], 'סוף שבוע');
   assert.ok(lines.some((l) => l.includes('60')));
+  assert.ok(lines.some((l) => l.includes(t.strategyBalanced)), 'the scheduling method is part of the link');
 });
 
 test('an unrestricted employee reads as "whole period", a limited one shows its range', () => {

@@ -1,7 +1,8 @@
 /**
  * Shift planner.
  *
- * Pure, dependency-free ES module: no DOM, no `Date.now()`, no `Math.random()`.
+ * Pure ES module: no DOM, no `Date.now()`, no `Math.random()`, and no
+ * dependency outside `strategies.js` (which plays by the same rules).
  * All times are ms-epoch numbers. Given the same input it always produces
  * byte-identical output - that is what lets a plan live entirely in a shared
  * URL and render the same for everyone who opens it.
@@ -10,12 +11,18 @@
  *   - `remote` - the same people staff it for its entire duration and are
  *     locked out of everything else while it runs.
  *   - `local`  - people rotate every `shiftMinutes` among whoever is still
- *     available, balancing total time and spreading each person's turns as far
- *     apart as possible.
+ *     available.
+ *
+ * *Who* gets a given slot is the one decision this file delegates: the engine
+ * works out who is eligible, and the chosen strategy (`strategies.js`) ranks
+ * them. Everything else here - normalization, pins, the segment grid, merging,
+ * the timeline - is the same whichever strategy is in force.
  *
  * Manual assignments ("pins") are inputs, not patches to the output, so
  * hand-edits survive re-planning and sharing. See `plan`'s jsdoc.
  */
+
+import { getStrategy, DEFAULT_STRATEGY } from './strategies.js';
 
 const MINUTE = 60 * 1000;
 
@@ -251,14 +258,15 @@ function normalizePins(pins, employeeById, missionById, warnings) {
  * maximization, and `seq` - bumped on every pick - round-robins exact ties so
  * the rotation cannot collapse onto whoever happens to sort first.
  */
-function makeState(employees) {
+function makeState(employees, strategy) {
   let seq = 0;
   return new Map(
-    employees.map((e) => [
+    employees.map((e, index) => [
       e.id,
       {
         id: e.id, name: e.name, start: e.start, end: e.end, busy: [], busyUntil: -Infinity,
         minutes: 0, missionMinutes: new Map(), lastEnd: -Infinity, seq: seq++, stints: 0,
+        ...(strategy.seed ? strategy.seed(e, index) : null),
       },
     ]),
   );
@@ -294,6 +302,10 @@ function occupy(st, missionId, start, end, counter) {
  * @param {number} params.start - plan window start, ms epoch
  * @param {number} params.end - plan window end, ms epoch
  * @param {number} params.shiftMinutes - rotation length for local missions
+ * @param {'balanced'|'rotation'} [params.strategy] - which policy picks who
+ *   works a given slot; see `strategies.js`. Defaults to `balanced`, the
+ *   original hours-evening behaviour. An unrecognised name falls back to that
+ *   default rather than throwing.
  * @param {{id:string,name:string,start?:number,end?:number}[]} params.employees
  *   `start`/`end` default to the whole plan window.
  * @param {{id:string,name:string,type:'remote'|'local',start?:number,end?:number,count:number}[]} params.missions
@@ -315,7 +327,10 @@ function occupy(st, missionId, start, end, counter) {
  *   warnings: object[],
  * }}
  */
-export function plan({ start, end, shiftMinutes, employees = [], missions = [], pins = [] }) {
+export function plan({
+  start, end, shiftMinutes, strategy: strategyName = DEFAULT_STRATEGY,
+  employees = [], missions = [], pins = [],
+}) {
   /* --- structural validation: these are bugs in the input, not planner findings --- */
   if (!Number.isFinite(start) || !Number.isFinite(end)) throw new Error('Plan window must be numeric timestamps.');
   if (!(end > start)) throw new Error('Plan must end after it starts.');
@@ -336,7 +351,8 @@ export function plan({ start, end, shiftMinutes, employees = [], missions = [], 
   const missionById = new Map(miss.map((m) => [m.id, m]));
   const goodPins = normalizePins(pins, employeeById, missionById, warnings);
 
-  const state = makeState(emps);
+  const strategy = getStrategy(strategyName);
+  const state = makeState(emps, strategy);
   let seqCounter = emps.length;
   const nextSeq = () => seqCounter++;
 
@@ -385,11 +401,9 @@ export function plan({ start, end, shiftMinutes, employees = [], missions = [], 
     if (need <= 0) continue;
 
     const candidates = eligibleForRemote(m);
-    candidates.sort((a, b) => (
-      a.minutes - b.minutes
-      || a.lastEnd - b.lastEnd
-      || a.seq - b.seq
-    ));
+    candidates.sort((a, b) => strategy.compare(a, b, {
+      mission: m, start: m.start, end: m.end, kind: 'remote',
+    }));
 
     const picked = candidates.slice(0, need);
     for (const st of picked) addRow(m, st, m.start, m.end, false);
@@ -453,20 +467,11 @@ export function plan({ start, end, shiftMinutes, employees = [], missions = [], 
     const candidates = [...state.values()].filter(
       (st) => isAvailable(st, d.start, d.end) && isFree(st, d.start, d.end),
     );
-    // The fairness core:
-    //   1. fewest minutes so far      -> even rotation
-    //   2. earliest `lastEnd`         -> maximizes the gap since last on duty
-    //   3. fewest minutes on *this* mission -> rotates people across mission types,
-    //      not just across time - otherwise two concurrent local missions can settle
-    //      into "always the same person on A, always the other on B" even though their
-    //      total minutes stay perfectly balanced.
-    //   4. `seq`                      -> round-robin among exact ties
-    candidates.sort((a, b) => (
-      a.minutes - b.minutes
-      || a.lastEnd - b.lastEnd
-      || (a.missionMinutes.get(d.mission.id) ?? 0) - (b.missionMinutes.get(d.mission.id) ?? 0)
-      || a.seq - b.seq
-    ));
+    // Who among them actually gets it is the strategy's call - see
+    // `strategies.js` for what each one optimizes for.
+    candidates.sort((a, b) => strategy.compare(a, b, {
+      mission: d.mission, start: d.start, end: d.end, kind: 'local',
+    }));
 
     const picked = candidates.slice(0, d.need);
     for (const st of picked) addRow(d.mission, st, d.start, d.end, false);

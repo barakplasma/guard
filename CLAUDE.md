@@ -8,9 +8,10 @@ A static, backend-free shift planner. See `README.md` for what it does and how t
   belongs in the URL or it does not belong here.
 - **No network at runtime.** No webfonts, no CDNs, no analytics. The app must work offline after
   first load; anything fetched at runtime breaks that.
-- **The engine stays pure.** `src/lib/planner.js` imports nothing, touches no DOM, and calls
-  neither `Date.now()` nor `Math.random()`. Every sort ends in a stable id tiebreak. A shared link
-  must render identically for everyone who opens it, forever.
+- **The engine stays pure.** `src/lib/planner.js` and `src/lib/strategies.js` import nothing
+  outside each other, touch no DOM, and call neither `Date.now()` nor `Math.random()`. Every sort
+  ends in a stable id tiebreak. A shared link must render identically for everyone who opens it,
+  forever.
 
 ## Working on the scheduler
 
@@ -44,6 +45,27 @@ actually stick instead of being immediately re-pinned by the same edit. That is 
 frozen shift stays swappable and clearable like any other pin, because the point is to let someone
 correct the record to match reality, not to make the past read-only.
 
+### Strategies
+
+*Who* gets a given slot is the one decision the engine delegates. `planner.js` works out who is
+eligible — availability, existing bookings, mission windows, pins — and hands the candidates to a
+strategy from `src/lib/strategies.js` to rank. Everything else is policy-free and must stay that
+way: a new strategy should never need a change in `planner.js`.
+
+`balanced` (the default, and what every link written before the setting existed means) evens out
+total time on duty. `rotation` is a fixed circular list: guards take turns round it in document
+order, and hours are never consulted, so a twelve-hour remote mission and a one-hour slot each
+cost exactly one turn. Under `rotation` a large `spreadMinutes` is the expected outcome, not a
+bug — `stints` is the column that means something there.
+
+Rotation ranks on **rest time first**, turn count second. That order is load bearing, not a
+preference: a stint spanning several slots is one unbroken run, so its turn count does not rise
+while it is in progress, and ranking on turns first lets whoever starts a block hold the post
+indefinitely. Both keys are also measured *as of the slot being filled* rather than from a running
+counter — the engine places pins first, then remote missions, then local slots chronologically, so
+a counter would let a pin for a late-evening shift push its holder to the back of the ring before
+the morning slots were even assigned.
+
 `tests/planner.invariants.test.js` is the real safety net: it asserts across ~1600 generated plans
 that nobody is ever double-booked, no mission is overstaffed, availability is respected, and the
 same input always gives the same output. Do not weaken it to make a change pass.
@@ -54,6 +76,13 @@ same input always gives the same output. Do not weaken it to make a change pass.
 tuples, so **field order is part of the wire format** — appending is safe, reordering or inserting
 is not. Bump `SCHEMA_VERSION` when the shape changes; `decodePlan` rejects unknown versions rather
 than misreading them.
+
+A *new plan-level field* does not need a version bump and should not get one: add a new short key
+to the compact object and give the schema field a `.default(...)`, so links written before it
+existed still parse and keep their old meaning (`strategy` is the worked example). Bumping the
+version invalidates every link already shared, and there is no migration path. Whatever you add,
+pass it through `toPlannerInput` too — that adapter is the only route into the engine, and a field
+missed there is silently inert.
 
 Fields may be blank while someone is typing. The schema must tolerate a half-filled row: a
 validation error there takes down the whole document, which is the user's only copy.
