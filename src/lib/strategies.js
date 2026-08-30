@@ -11,10 +11,12 @@
  *   - `seed(employee, index)` returns extra per-employee fields merged into the
  *     engine's scheduling state. Omit it if the shared state is enough.
  *   - `compare(a, b, ctx)` orders candidate states best-first, exactly like an
- *     `Array#sort` comparator. `ctx` is `{ mission, start, end, kind }` where
- *     `kind` is `'local'` (one rotation slot) or `'remote'` (a whole mission
- *     held end to end). It must be a total order - every comparator here ends
- *     in a tiebreak that can never return 0 for two different people.
+ *     `Array#sort` comparator. `ctx` is
+ *     `{ mission, start, end, kind, planStart, shiftMinutes }` where `kind` is
+ *     `'local'` (one rotation slot) or `'remote'` (a whole mission held end to
+ *     end), and `planStart`/`shiftMinutes` describe the shift grid the plan
+ *     rotates on. It must be a total order - every comparator here ends in a
+ *     tiebreak that can never return 0 for two different people.
  *
  * Adding a strategy is one object below plus an entry in `STRATEGY`; the engine
  * itself does not change.
@@ -72,6 +74,12 @@ const balanced = {
  * unrelated person's window can split someone else's otherwise-whole shift in
  * two. Counting those as two turns would charge a guard twice for one stint,
  * so the ring counts merged runs, not rows.
+ *
+ * An interval flagged `remote` never merges, in either direction. A remote
+ * mission is claimed once and held end to end, which the ring charges as a
+ * single turn however long it runs (see `ringKeys`); welding it to a local
+ * slot that happens to start the moment it ends would swallow that local turn
+ * into the same free ride.
  */
 export function mergedRuns(intervals) {
   const sorted = [...intervals].sort((x, y) => x.start - y.start || x.end - y.end);
@@ -79,31 +87,54 @@ export function mergedRuns(intervals) {
   for (const iv of sorted) {
     const last = runs[runs.length - 1];
     // `>=` and not `>`: back-to-back shifts are one unbroken stint on duty.
-    if (last && iv.start <= last.end) last.end = Math.max(last.end, iv.end);
-    else runs.push({ start: iv.start, end: iv.end });
+    if (last && !last.remote && !iv.remote && iv.start <= last.end) {
+      last.end = Math.max(last.end, iv.end);
+    } else {
+      runs.push({ start: iv.start, end: iv.end, ...(iv.remote ? { remote: true } : null) });
+    }
   }
   return runs;
 }
 
 /**
- * The ring's two sort keys for one candidate, measured as of `at`: when their
- * last turn ended, and how many turns they have begun.
+ * How many turns one run costs on a shift grid anchored at `planStart` and
+ * stepping every `step` ms: the number of grid slots the run touches.
+ *
+ * This is the distinction the ring lives or dies on. A run split apart *inside*
+ * a slot - by an unrelated employee's availability edge - still touches one
+ * slot and still costs one turn, which is what `mergedRuns` exists to protect.
+ * A run that carries straight on across three consecutive slots is three turns,
+ * because it is three shifts somebody else did not get.
+ */
+function slotSpan(run, planStart, step) {
+  if (!(step > 0)) return 1;
+  return Math.max(
+    1,
+    Math.ceil((run.end - planStart) / step) - Math.floor((run.start - planStart) / step),
+  );
+}
+
+/**
+ * The ring's two sort keys for one candidate, measured as of `ctx.start`: when
+ * their last turn ended, and how many turns they have taken.
  *
  * A candidate is only ever asked about a slot they are free for, so a run that
- * started before `at` cannot still be running at `at` - which is why one pass
+ * started before the slot cannot still be running at it - which is why one pass
  * yields both keys. The merged run list is cached against `busy.length`, since
  * the engine only ever appends to it.
  */
-function ringKeys(st, at) {
+function ringKeys(st, ctx) {
+  const at = ctx.start;
   if (st.runsFor !== st.busy.length) {
     st.runs = mergedRuns(st.busy);
     st.runsFor = st.busy.length;
   }
+  const step = ctx.shiftMinutes * 60 * 1000;
   let turns = 0;
   let lastEnd = -Infinity;
   for (const run of st.runs) {
     if (run.start >= at) continue;
-    turns += 1;
+    turns += run.remote ? 1 : slotSpan(run, ctx.planStart, step);
     if (run.end > lastEnd) lastEnd = run.end;
   }
   return { turns, lastEnd };
@@ -112,19 +143,30 @@ function ringKeys(st, at) {
 /**
  * Pure rotation: guards sit in a fixed circular list and take turns round it.
  * Total time on duty is deliberately never consulted - a twelve-hour remote
- * mission and a one-hour slot each cost exactly one turn.
+ * mission and a one-hour slot each cost exactly one turn, because each is one
+ * claim taken once. What is counted is turns, and a local block spanning
+ * several rotation slots is several of them (`slotSpan`) - not because of its
+ * length but because it is that many shifts nobody else got a turn at.
  *
  * 1. earliest end of last turn  -> longest rested goes first
  * 2. fewest turns taken so far   -> separates people who came off at the same instant
  * 3. `ringIndex`                 -> the list order, and a total tiebreak
  *
  * Rest time leads rather than the turn count, and that ordering is load
- * bearing. A stint that runs across several slots is one unbroken run, so its
- * turn count does not rise while it is going on; ranked on turns first, whoever
- * started a block would keep winning the slot after it and hold the post
- * indefinitely. Ranked on rest first, the person who just came off is by
- * definition the least rested and goes last - which is also the thing the
- * strategy exists to maximize.
+ * bearing: the person who just came off is by definition the least rested and
+ * goes last, which is the thing the strategy exists to maximize.
+ *
+ * Rest-first is not on its own enough, though, and assuming it was cost three
+ * guards eighty-eight unbroken hours in a real rota. Whenever there are more
+ * seats than there are rested people - seventeen guards against ten seats a
+ * slot, say - somebody *must* work the slot they just finished, and every
+ * candidate's last turn ended on the same grid boundary, so key 1 ties and key
+ * 2 decides. Counting a multi-slot block as a single turn made that key say the
+ * opposite of the truth: the guard who never got a break had the *lowest* turn
+ * count, won the tie, stayed on post, and stayed cheap - and `ringIndex` then
+ * pinned the whole thing to the same lowest-numbered guards for four days.
+ * `slotSpan` is the fix: a block across N slots costs N turns, so the guard who
+ * has been doubling up is the expensive one and the doubling rotates.
  *
  * Both keys are measured *as of the slot being filled* rather than read off a
  * running counter, which is what keeps the result independent of the order the
@@ -145,8 +187,8 @@ const rotation = {
   id: STRATEGY.ROTATION,
   seed: (employee, index) => ({ ringIndex: index, runs: [], runsFor: -1 }),
   compare(a, b, ctx) {
-    const ka = ringKeys(a, ctx.start);
-    const kb = ringKeys(b, ctx.start);
+    const ka = ringKeys(a, ctx);
+    const kb = ringKeys(b, ctx);
     // Compared rather than subtracted: two people who have never been on duty
     // both carry -Infinity, and `-Infinity - -Infinity` is NaN.
     if (ka.lastEnd !== kb.lastEnd) return ka.lastEnd < kb.lastEnd ? -1 : 1;

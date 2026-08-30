@@ -263,3 +263,75 @@ test('a lopsided frozen past does not let a fresh guard double up', () => {
     'rotation leaves everyone better rested than balancing hours did',
   );
 });
+
+test('nobody is left on post when there are more seats than rested guards', () => {
+  // Five guards, three seats every slot: only two can rest, so somebody always
+  // works the slot they just finished. Which somebody is the whole question.
+  // Counting a multi-slot block as a single turn answered "the same three
+  // people, for as long as the plan runs" - a real rota came back with three
+  // guards posted for eighty-eight unbroken hours while everyone else did 48.
+  const END = START + 8 * HOUR;
+  const result = plan({
+    start: START,
+    end: END,
+    shiftMinutes: 60,
+    strategy: 'rotation',
+    employees: ring(5),
+    missions: [{ id: 'l', name: 'Local', type: 'local', start: START, end: END, count: 3 }],
+  });
+
+  // Every row is one shift long - never a multi-day block wearing one row.
+  for (const s of result.shifts) assert.equal(s.end - s.start, HOUR);
+
+  for (const p of result.stats.perEmployee) {
+    const own = result.shifts
+      .filter((s) => s.employeeId === p.employeeId)
+      .sort((a, b) => a.start - b.start);
+    let longest = 0;
+    let consecutive = 0;
+    let prevEnd = null;
+    for (const s of own) {
+      consecutive = prevEnd === s.start ? consecutive + 1 : 1;
+      prevEnd = s.end;
+      longest = Math.max(longest, consecutive);
+    }
+    assert.ok(longest <= 2, `${p.employeeId} held the post for ${longest} slots running`);
+  }
+
+  // And the doubling up is shared out rather than parked on the low numbers.
+  const turns = result.stats.perEmployee.map((p) => p.stints).sort((a, b) => a - b);
+  assert.ok(turns.at(-1) - turns[0] <= 1, `turns are lopsided: ${turns.join()}`);
+});
+
+test('consecutive shifts stay separate rows, a split inside one shift does not', () => {
+  // Two hours, two one-hour slots, one guard: they work both. That is two
+  // shifts and must read as two rows - welding them into a single two-hour row
+  // is what let an eleven-slot block render as one 88-hour shift.
+  const back = plan({
+    start: START,
+    end: START + 2 * HOUR,
+    shiftMinutes: 60,
+    strategy: 'rotation',
+    employees: ring(1),
+    missions: [{ id: 'l', name: 'Local', type: 'local', start: START, end: START + 2 * HOUR, count: 1 }],
+  });
+  assert.equal(back.shifts.length, 2);
+  for (const s of back.shifts) assert.equal(s.end - s.start, HOUR);
+
+  // The converse still holds: one two-hour shift torn in half by an unrelated
+  // guard's availability edge is one stint, and merges back together.
+  const employees = ring(3);
+  employees[2].start = START + 1 * HOUR;
+  const split = plan({
+    start: START,
+    end: START + 2 * HOUR,
+    shiftMinutes: 120,
+    strategy: 'rotation',
+    employees,
+    missions: [{ id: 'l', name: 'Local', type: 'local', start: START, end: START + 2 * HOUR, count: 2 }],
+  });
+  assert.ok(
+    split.shifts.some((s) => s.start === START && s.end === START + 2 * HOUR),
+    'the two halves of one shift should come back as a single row',
+  );
+});

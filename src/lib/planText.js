@@ -44,7 +44,12 @@ export function planToReadableText(doc) {
       : m.end == null
         ? `${formatDate(m.start)} ${formatTime(m.start)} — ${t.missionNoEnd}`
         : formatRange(m.start ?? doc.start, m.end);
-    lines.push(`- ${m.name || t.missionName} (${kind}, ${m.count}): ${window}`);
+    // "4/6" only when the two differ - a mission staffed the same round the
+    // clock should not gain a second number that says nothing.
+    const heads = m.type !== 'remote' && m.nightCount != null && m.nightCount !== m.count
+      ? `${m.count}/${m.nightCount}`
+      : `${m.count}`;
+    lines.push(`- ${m.name || t.missionName} (${kind}, ${heads}): ${window}`);
   }
 
   lines.push('', `${t.pinsSection} (${doc.pins.length}):`);

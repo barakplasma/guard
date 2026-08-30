@@ -22,6 +22,13 @@ export const employeeSchema = z.object({
   end: ts.nullable().default(null),
 });
 
+/** Minutes past midnight, the unit both night boundaries are written in. */
+const minuteOfDay = z.number().int().min(0).max(24 * 60 - 1);
+
+/** 22:00 to 06:00 - the default night, and what every link written before it existed means. */
+export const DEFAULT_NIGHT_START = 22 * 60;
+export const DEFAULT_NIGHT_END = 6 * 60;
+
 export const missionSchema = z.object({
   id,
   name: z.string().max(80),
@@ -29,6 +36,12 @@ export const missionSchema = z.object({
   start: ts.nullable().default(null),
   end: ts.nullable().default(null),
   count: z.number().int().min(1).max(999),
+  // Headcount for the plan's night stretches. `null` means "same as `count`",
+  // which is what a link written before this field existed decodes to - and
+  // what a mission staffed evenly round the clock keeps meaning.
+  nightCount: z.number().int().min(1).max(999)
+    .nullable()
+    .default(null),
 });
 
 export const pinSchema = z.object({
@@ -52,6 +65,11 @@ export const planSchema = z.object({
   // Which policy decides who works a given slot. Defaulted rather than
   // required so every link written before it existed still parses.
   strategy: z.enum([STRATEGY.BALANCED, STRATEGY.ROTATION]).default(DEFAULT_STRATEGY),
+  // When night begins and ends, as wall-clock minutes past midnight. Defaulted
+  // like `strategy`, so older links keep their old meaning: with no mission
+  // carrying a `nightCount`, these two decide nothing at all.
+  nightStart: minuteOfDay.default(DEFAULT_NIGHT_START),
+  nightEnd: minuteOfDay.default(DEFAULT_NIGHT_END),
   employees: z.array(employeeSchema).default([]),
   missions: z.array(missionSchema).default([]),
   pins: z.array(pinSchema).default([]),
@@ -105,6 +123,56 @@ export function prunePins(doc) {
   return pins.length === doc.pins.length ? doc : { ...doc, pins };
 }
 
+const DAY = 24 * 60 * 60 * 1000;
+
+/** `minutes` past midnight, `offset` days on from `day`'s midnight, in local time. */
+function atMinute(day, offset, minutes) {
+  const d = new Date(day);
+  d.setDate(d.getDate() + offset);
+  d.setHours(0, minutes, 0, 0);
+  return d.getTime();
+}
+
+/**
+ * The plan's night stretches, as absolute instants.
+ *
+ * This is where a wall-clock hour becomes a real moment, and it is deliberately
+ * *outside* the engine. "22:00" is not a point in time until a timezone says so,
+ * and `planner.js` may not consult one - it would make the same document
+ * schedule differently for whoever opened the link. So the resolution happens
+ * once, here in the adapter, and the engine only ever sees intervals.
+ *
+ * The trade that leaves: the boundary is read in the *viewer's* timezone, so a
+ * plan opened several timezones away splits its nights where the reader's clock
+ * says 22:00, not the author's. For a Hebrew, Israel-only rota that is the
+ * reading people actually want, and it is the only part of the document that
+ * behaves this way - see CLAUDE.md.
+ *
+ * Boundaries are stepped with `Date` rather than by adding milliseconds so a
+ * daylight-saving change keeps night starting at 22:00 on both sides of it.
+ */
+export function nightWindows(doc) {
+  // Equal bounds mean an empty night, not a 24-hour one: with no width there is
+  // no stretch to staff differently, and treating it as all day would silently
+  // apply every night headcount around the clock.
+  if (doc.nightStart === doc.nightEnd) return [];
+  // Start a day early: a night beginning at 22:00 the evening before the plan
+  // opens still covers the plan's first hours.
+  const cursor = new Date(doc.start);
+  cursor.setHours(0, 0, 0, 0);
+  cursor.setDate(cursor.getDate() - 1);
+
+  const out = [];
+  const days = Math.ceil((doc.end - doc.start) / DAY) + 2;
+  for (let i = 0; i <= days; i++) {
+    const start = atMinute(cursor, i, doc.nightStart);
+    // A night that ends earlier in the day than it starts runs past midnight.
+    const end = atMinute(cursor, doc.nightEnd <= doc.nightStart ? i + 1 : i, doc.nightEnd);
+    if (end > doc.start && start < doc.end) out.push({ start, end });
+  }
+  return out;
+}
+
 /** Shape the document into the planner engine's input. */
 export function toPlannerInput(doc) {
   return {
@@ -112,6 +180,7 @@ export function toPlannerInput(doc) {
     end: doc.end,
     shiftMinutes: doc.shiftMinutes,
     strategy: doc.strategy,
+    nightWindows: nightWindows(doc),
     employees: doc.employees.map((e) => ({
       id: e.id,
       name: e.name,
@@ -125,6 +194,7 @@ export function toPlannerInput(doc) {
       start: m.start ?? undefined,
       end: m.end ?? undefined,
       count: m.count,
+      nightCount: m.nightCount ?? undefined,
     })),
     pins: doc.pins.map((p) => ({
       missionId: p.missionId,

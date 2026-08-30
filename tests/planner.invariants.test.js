@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fc from 'fast-check';
 import { plan } from '../src/lib/planner.js';
+import { nightWindows } from '../src/lib/planSchema.js';
 
 const MIN = 60 * 1000;
 const BASE = new Date(2026, 0, 5, 8, 0, 0, 0).getTime();
@@ -20,6 +21,7 @@ const planArb = fc.record({
     fc.record({
       type: fc.constantFrom('local', 'remote'),
       count: fc.integer({ min: 1, max: 3 }),
+      nightCount: fc.integer({ min: 1, max: 3 }),
       offsetMin: fc.integer({ min: 0, max: 300 }),
       lengthMin: fc.integer({ min: 30, max: 600 }),
     }),
@@ -29,6 +31,9 @@ const planArb = fc.record({
     index: fc.nat(),
     fromMin: fc.integer({ min: 0, max: 300 }),
   }), { maxLength: 3 }),
+  // Boundaries on and off the shift grid, and the degenerate equal pair.
+  nightStart: fc.constantFrom(0, 6 * 60, 22 * 60, 23 * 60 + 30),
+  nightEnd: fc.constantFrom(0, 5 * 60, 6 * 60, 8 * 60),
 });
 
 function build(spec) {
@@ -54,11 +59,31 @@ function build(spec) {
     start: start + m.offsetMin * MIN,
     end: start + (m.offsetMin + m.lengthMin) * MIN,
     count: m.count,
+    nightCount: m.nightCount,
   })).filter((m) => m.start < end);
 
   return {
-    start, end, shiftMinutes: spec.shiftMinutes, strategy: spec.strategy, employees, missions,
+    start,
+    end,
+    shiftMinutes: spec.shiftMinutes,
+    strategy: spec.strategy,
+    employees,
+    missions,
+    nightWindows: nightWindows({
+      start, end, nightStart: spec.nightStart, nightEnd: spec.nightEnd,
+    }),
   };
+}
+
+/**
+ * What a mission is allowed to have on at `t`. A remote mission is held whole
+ * by one set of people and never varies; a local one takes its night headcount
+ * inside a night window.
+ */
+function seatsAt(input, mission, t) {
+  if (mission.type === 'remote') return mission.count;
+  const night = input.nightWindows.some((w) => t >= w.start && t < w.end);
+  return night ? mission.nightCount : mission.count;
 }
 
 test('nobody is ever double-booked', () => {
@@ -93,7 +118,8 @@ test('coverage never exceeds a mission headcount', () => {
       const points = new Set(own.flatMap((s) => [s.start, s.end - 1]));
       for (const p of points) {
         const cover = own.filter((s) => s.start <= p && s.end > p).length;
-        assert.ok(cover <= mission.count, `mission ${mission.id} overstaffed: ${cover}/${mission.count}`);
+        const seats = seatsAt(input, mission, p);
+        assert.ok(cover <= seats, `mission ${mission.id} overstaffed at ${p}: ${cover}/${seats}`);
       }
     }
   }), { numRuns: 300 });
