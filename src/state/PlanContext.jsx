@@ -8,6 +8,7 @@ import {
   applyClearPin, applyClearPinsForMission, applyMissionAssignees, applySwap,
   clearStalePins, freezeElapsedBeforeEdit, pruneStalePins,
 } from '../lib/pins.js';
+import { addUniqueEmployees } from '../lib/employees.js';
 
 const PlanContext = createContext(null);
 
@@ -72,28 +73,25 @@ export function PlanProvider({ children }) {
   const api = useMemo(() => ({
     setField: (key, value) => update((d) => ({ ...d, [key]: value })),
 
-    addEmployee: (name) => update((d) => ({
-      ...d,
-      employees: [...d.employees, {
-        id: makeId('e', d.employees.map((e) => e.id)),
-        name,
-        start: null,
-        end: null,
-      }],
-    })),
+    /**
+     * Both adders funnel through `addUniqueEmployees`, so a name that is
+     * already on the list is refused whichever box it was typed into. They
+     * report what was `skipped` back to the caller instead of swallowing it:
+     * a paste that quietly lands short is worse than the duplicate it avoided.
+     * An add that turns out to be entirely duplicates leaves the document
+     * untouched rather than re-encoding an identical plan.
+     */
+    addEmployee: (name) => {
+      const result = addUniqueEmployees(doc.employees, [name]);
+      if (result.added.length > 0) update((d) => ({ ...d, employees: result.employees }));
+      return result;
+    },
 
-    addEmployees: (names) => update((d) => {
-      const employees = [...d.employees];
-      for (const name of names) {
-        employees.push({
-          id: makeId('e', employees.map((e) => e.id)),
-          name,
-          start: null,
-          end: null,
-        });
-      }
-      return { ...d, employees };
-    }),
+    addEmployees: (names) => {
+      const result = addUniqueEmployees(doc.employees, names);
+      if (result.added.length > 0) update((d) => ({ ...d, employees: result.employees }));
+      return result;
+    },
 
     updateEmployee: (id, patch) => update((d) => ({
       ...d,
@@ -175,7 +173,7 @@ export function PlanProvider({ children }) {
         })
         : applyClearPinsForMission(d, { missionId: warning.missionId, employeeId: warning.employeeId })
     )),
-  }), [update]);
+  }), [doc, update]);
 
   const value = useMemo(
     () => ({ doc, setDoc, update, notice, setNotice, decodeFailed, ...api }),

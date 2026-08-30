@@ -46,6 +46,28 @@ await page.getByTestId('add-bulk').click();
 await page.waitForTimeout(300);
 check('10 employees added', (await page.locator('[data-testid^="employee-name-"]').count()) === 10);
 check('plan is stored in the URL', page.url().includes('?p='));
+check('the count chip reads the roster size',
+  norm(await page.getByTestId('employee-count').innerText()) === '10 אנשים');
+
+// Duplicates are refused on the way in, from both boxes, and the roster is
+// left exactly as it was - the rest of this file counts on these 10 names.
+await page.getByTestId('bulk-names').fill([NAMES[0], '  ' + NAMES[3] + ' '].join('\n'));
+await page.getByTestId('add-bulk').click();
+await page.waitForTimeout(300);
+check('a duplicate paste adds nobody',
+  (await page.locator('[data-testid^="employee-name-"]').count()) === 10);
+check('the duplicates are named in a toast',
+  (await page.getByTestId('employee-toast').innerText()).includes(NAMES[3]));
+
+await page.getByTestId('new-employee-name').fill(NAMES[1]);
+await page.getByTestId('add-employee').click();
+await page.waitForTimeout(300);
+check('a duplicate single name adds nobody',
+  (await page.locator('[data-testid^="employee-name-"]').count()) === 10);
+check('the refused name stays in the box for editing',
+  (await page.getByTestId('new-employee-name').inputValue()) === NAMES[1]);
+await page.getByTestId('new-employee-name').fill('');
+await page.waitForTimeout(150);
 
 await page.getByTestId('plan-title').fill('בדיקה');
 await page.waitForTimeout(200);

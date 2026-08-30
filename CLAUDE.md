@@ -99,6 +99,24 @@ the morning slots were even assigned.
 that nobody is ever double-booked, no mission is overstaffed, availability is respected, and the
 same input always gives the same output. Do not weaken it to make a change pass.
 
+## The employee list
+
+Two names are the same person when `nameKey` (`src/lib/employees.js`) says so — trimmed,
+internal whitespace collapsed, case-folded, NFC. Both adders in `PlanContext` go through
+`addUniqueEmployees`, so a duplicate is refused whichever box it was typed into, and a repeat
+inside a single paste is caught too. It returns what it `skipped` rather than swallowing it: a
+paste that silently lands two names short is worse than the duplicate it avoided, and the page
+says which names it dropped. An add that turns out to be all duplicates leaves the document
+untouched, so no identical plan is re-encoded into the URL.
+
+Renaming an existing row is a different matter and must never be blocked: a rename passes
+through every prefix of itself, so "דנ" on the way to "דנה" would collide with a real "דנה".
+`duplicateEmployeeIds` flags both sides instead. Blank names are never a key anywhere here —
+rows exist half-typed, and two empty rows are not duplicates of each other.
+
+None of this reaches the engine, which keys on ids: to `planner.js` two identically-named rows
+are simply two guards.
+
 ## Changing the plan document
 
 `src/lib/planSchema.js` and `src/lib/urlState.js` move together. The encoded form is positional
