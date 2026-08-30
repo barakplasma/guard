@@ -37,6 +37,14 @@ export const t = {
   limitAvailability: 'הגבל זמינות',
   availableFrom: 'זמין מ־',
   availableUntil: 'זמין עד',
+  // The count is a checksum: you read it against the list you copied from to
+  // see whether anyone was left out.
+  employeeCount: (n) => (n === 1 ? 'איש אחד' : `${n} אנשים`),
+  // Adding a name that is already on the list is refused, not silently
+  // duplicated - and said out loud, so a paste that lands short is explained.
+  duplicateSkippedOne: (name) => `${name} כבר ברשימה — לא נוסף שוב.`,
+  duplicateSkippedMany: (names) => `${names.length} שמות כבר היו ברשימה ולא נוספו שוב: ${names.join(', ')}`,
+  duplicateName: 'שם כפול',
   noEmployees: 'עדיין לא הוגדרו עובדים.',
   emptyEmployeesHint: 'התחילו בהדבקת רשימת שמות למטה, שם בכל שורה.',
   remove: 'הסר',

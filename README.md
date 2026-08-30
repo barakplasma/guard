@@ -7,8 +7,11 @@ it keeps working with no network at all.
 
 ## What it does
 
-- **Employees** — add names (one at a time or paste a list). Everyone is available for the whole
-  period by default; narrow it per person when you need to.
+- **Employees** — add names (one at a time or paste a list). The header shows how many people are
+  on the list, so you can check it against the roster you copied from. A name already on the list
+  is not added twice — case and stray spaces do not count as a difference — and the names that were
+  skipped are named. Renaming a row into an existing name is flagged rather than blocked. Everyone
+  is available for the whole period by default; narrow it per person when you need to.
 - **Missions** — each has a name, a time window, how many people it needs, and a type:
   - **מרוחקת / remote** — the *same* people staff it end to end. They are locked out of everything
     else while it runs.
