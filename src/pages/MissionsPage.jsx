@@ -67,7 +67,7 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
           </ToggleButtonGroup>
 
           <TextField
-            label={t.headcount}
+            label={mission.type === 'remote' ? t.headcount : t.headcountDay}
             type="number"
             value={mission.count}
             onChange={(e) => {
@@ -77,6 +77,31 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
             slotProps={{ htmlInput: { min: 1, 'data-testid': `mission-count-${mission.id}` } }}
             sx={{ width: 120 }}
           />
+
+          {/*
+            Remote missions are held end to end by one set of people, so there is
+            no night shift to staff differently and the field would only mislead.
+            Left blank it stays null, i.e. "same as by day", and follows the
+            field beside it.
+          */}
+          {mission.type === 'local' && (
+            <Tooltip title={t.headcountNightHelp}>
+              <TextField
+                label={t.headcountNight}
+                type="number"
+                value={mission.nightCount ?? ''}
+                placeholder={String(mission.count)}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  if (raw === '') { onChange({ nightCount: null }); return; }
+                  const n = Number(raw);
+                  if (Number.isInteger(n) && n >= 1) onChange({ nightCount: n });
+                }}
+                slotProps={{ htmlInput: { min: 1, 'data-testid': `mission-night-count-${mission.id}` } }}
+                sx={{ width: 120 }}
+              />
+            </Tooltip>
+          )}
 
           <IconButton
             aria-label={t.remove}

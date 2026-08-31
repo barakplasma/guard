@@ -20,7 +20,7 @@ const sample = () => planSchema.parse({
     { id: 'e3', name: 'Yosef "Y" O\'Brien', start: null, end: null },
   ],
   missions: [
-    { id: 'm1', name: 'שער', type: 'local', start: null, end: null, count: 2 },
+    { id: 'm1', name: 'שער', type: 'local', start: null, end: null, count: 2, nightCount: 4 },
     { id: 'm2', name: 'סיור', type: 'remote', start: START, end: START + 4 * HOUR, count: 1 },
   ],
   pins: [
@@ -182,4 +182,60 @@ test('a link encoded before strategies existed decodes as the original behaviour
   const result = decodePlan(blob);
   assert.equal(result.ok, true);
   assert.equal(result.plan.strategy, 'balanced');
+});
+
+test('the night window and per-mission night headcount survive the round trip', () => {
+  // 18:00 rather than a realistic 22:00 only because the sample plan runs
+  // 08:00-20:00; a night starting after it ends resolves to no windows at all.
+  const doc = planSchema.parse({ ...sample(), nightStart: 18 * 60, nightEnd: 5 * 60 + 30 });
+  const back = decodePlan(encodePlan(doc)).plan;
+
+  assert.equal(back.nightStart, 18 * 60);
+  assert.equal(back.nightEnd, 5 * 60 + 30);
+  assert.equal(back.missions[0].nightCount, 4);
+  // And it reaches the engine - a field missed in the adapter is silently inert.
+  const input = toPlannerInput(back);
+  assert.equal(input.missions[0].nightCount, 4);
+  assert.ok(input.nightWindows.length > 0);
+});
+
+test('a mission staffed evenly round the clock keeps a null night count', () => {
+  const doc = sample();
+  const back = decodePlan(encodePlan(doc)).plan;
+  assert.equal(back.missions[1].nightCount, null);
+  assert.equal(toPlannerInput(back).missions[1].nightCount, undefined);
+});
+
+test('a link encoded before night headcounts existed decodes as the original behaviour', () => {
+  // The exact shape an older build wrote: six-element mission tuples, no `ns`
+  // or `ne`. It must still parse, and must schedule identically to the same
+  // plan with the fields left unset.
+  const doc = sample();
+  const legacy = lzString.compressToEncodedURIComponent(JSON.stringify({
+    v: 1,
+    t: doc.title,
+    s: doc.start,
+    e: doc.end,
+    m: doc.shiftMinutes,
+    st: doc.strategy,
+    emp: doc.employees.map((x) => [x.id, x.name, x.start ?? 0, x.end ?? 0]),
+    mis: doc.missions.map((x) => [
+      x.id, x.name, x.type === 'remote' ? 1 : 0, x.start ?? 0, x.end ?? 0, x.count,
+    ]),
+    pin: doc.pins.map((x) => [x.missionId, x.employeeId, x.start ?? 0, x.end ?? 0, 0]),
+  }));
+
+  const back = decodePlan(legacy);
+  assert.equal(back.ok, true);
+  for (const m of back.plan.missions) assert.equal(m.nightCount, null);
+  assert.equal(back.plan.nightStart, 22 * 60);
+
+  const evenlyStaffed = planSchema.parse({
+    ...doc,
+    missions: doc.missions.map((m) => ({ ...m, nightCount: null })),
+  });
+  assert.equal(
+    JSON.stringify(plan(toPlannerInput(back.plan))),
+    JSON.stringify(plan(toPlannerInput(evenlyStaffed))),
+  );
 });

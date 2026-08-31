@@ -37,8 +37,16 @@ export function encodePlan(doc) {
     e: doc.end,
     m: doc.shiftMinutes,
     st: doc.strategy,
+    ns: doc.nightStart,
+    ne: doc.nightEnd,
     emp: doc.employees.map((x) => [x.id, x.name, outTs(x.start), outTs(x.end)]),
-    mis: doc.missions.map((x) => [x.id, x.name, TYPE_CODE[x.type] ?? 0, outTs(x.start), outTs(x.end), x.count]),
+    // `nightCount` is *appended* to the mission tuple. Field order is the wire
+    // format here, so appending is safe and reordering is not: an older link
+    // simply has no seventh element and reads back as `null`, i.e. "same
+    // headcount at night", which is exactly what it always meant.
+    mis: doc.missions.map((x) => [
+      x.id, x.name, TYPE_CODE[x.type] ?? 0, outTs(x.start), outTs(x.end), x.count, x.nightCount ?? 0,
+    ]),
     pin: doc.pins.map((x) => [x.missionId, x.employeeId, outTs(x.start), outTs(x.end), x.frozen ? 1 : 0]),
   };
   return compressToEncodedURIComponent(JSON.stringify(compact));
@@ -72,11 +80,23 @@ export function decodePlan(blob) {
       // A link written before strategies existed carries no `st`; the schema
       // default is the behaviour those links were made with.
       strategy: raw.st ?? undefined,
+      // Same story as `strategy`: absent means the schema default, which is the
+      // night these links were written under whether they knew it or not.
+      nightStart: raw.ns ?? undefined,
+      nightEnd: raw.ne ?? undefined,
       employees: (raw.emp ?? []).map(([id, name, s, e]) => ({
         id, name, start: inTs(s), end: inTs(e),
       })),
-      missions: (raw.mis ?? []).map(([id, name, type, s, e, count]) => ({
-        id, name, type: CODE_TYPE[type] ?? 'local', start: inTs(s), end: inTs(e), count,
+      missions: (raw.mis ?? []).map(([id, name, type, s, e, count, nightCount]) => ({
+        id,
+        name,
+        type: CODE_TYPE[type] ?? 'local',
+        start: inTs(s),
+        end: inTs(e),
+        count,
+        // `0` is the "not set" spelling here, as it is for the timestamps: a
+        // headcount of zero is not a thing a mission can ask for.
+        nightCount: nightCount || null,
       })),
       pins: (raw.pin ?? []).map(([missionId, employeeId, s, e, f]) => ({
         missionId, employeeId, start: inTs(s), end: inTs(e), frozen: Boolean(f),

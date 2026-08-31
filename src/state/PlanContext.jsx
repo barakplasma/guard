@@ -113,6 +113,9 @@ export function PlanProvider({ children }) {
         start: null,
         end: null,
         count: 1,
+        // Null, not 1: "same as the daytime count" tracks the field beside it
+        // as the planner edits it, instead of quietly pinning nights to one.
+        nightCount: null,
       }],
     })),
 

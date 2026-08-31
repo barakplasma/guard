@@ -23,6 +23,24 @@ rescheduled fairly.
 Infeasible input (not enough people) returns `warnings` plus a partial plan. Only structurally
 invalid input throws — someone mid-edit needs to see what is short, not a stack trace.
 
+`mergeRows` rejoins rows **only within one shift slot**, never across a shift boundary. Repairing a
+segment that an unrelated availability edge tore in half is what merging is for; welding
+consecutive shifts together is not, and used to be the same operation — a guard held over eleven
+slots surfaced as one 88-hour row, which read as a single monstrous shift and gave the agenda a
+second slot that also began at 22:00 but ended four days later. Bounded to one slot, `stints`
+counts shifts worked, which is the number that means something under `rotation`.
+
+A local mission can be staffed differently at night: `count` is the daytime headcount and
+`nightCount` replaces it inside the plan's night stretches (`null` means "same", which is what
+every link written before the field existed means). Remote missions ignore it — one set of people
+holds them end to end. Night edges join the segment grid so no segment can straddle the boundary
+and have to pick a side. The **windows reach the engine as absolute instants**, resolved by
+`nightWindows` in `planSchema.js`: "22:00" is not a moment until a timezone says so, and reading
+one inside `planner.js` would break the rule above. That leaves one trade, and it is the only
+place in the document that behaves this way — the boundary is read in the *viewer's* timezone, so
+a plan opened several timezones away splits its nights by the reader's clock. For a Hebrew,
+Israel-only rota that is the reading people want.
+
 A pin with a null `start`/`end` inherits the mission's window, which inherits the plan's. So a
 whole-mission assignment and a per-shift one can describe the same time while looking nothing
 alike: **match pins by coverage, never by literal range**. Both bugs found in review came from
@@ -88,12 +106,21 @@ cost exactly one turn. Under `rotation` a large `spreadMinutes` is the expected 
 bug — `stints` is the column that means something there.
 
 Rotation ranks on **rest time first**, turn count second. That order is load bearing, not a
-preference: a stint spanning several slots is one unbroken run, so its turn count does not rise
-while it is in progress, and ranking on turns first lets whoever starts a block hold the post
-indefinitely. Both keys are also measured *as of the slot being filled* rather than from a running
-counter — the engine places pins first, then remote missions, then local slots chronologically, so
-a counter would let a pin for a late-evening shift push its holder to the back of the ring before
-the morning slots were even assigned.
+preference: ranked on turns first, whoever starts a block keeps winning the slot after it. Both
+keys are also measured *as of the slot being filled* rather than from a running counter — the
+engine places pins first, then remote missions, then local slots chronologically, so a counter
+would let a pin for a late-evening shift push its holder to the back of the ring before the
+morning slots were even assigned.
+
+Rest-first is not on its own enough, and assuming it was cost three guards eighty-eight unbroken
+hours. Whenever a slot has more seats than there are rested people, somebody *must* work the slot
+they just finished, and every candidate's last turn ended on the same grid boundary — so the rest
+key ties and the turn count decides. **A turn is one shift slot, not one unbroken run**
+(`slotSpan`): counting a multi-slot block as a single turn makes the guard who never got a break
+the cheapest candidate, so they win the tie, stay on post, and stay cheap, with `ringIndex` pinning
+it to the same lowest-numbered guards forever. A remote hold is still exactly one turn — it is one
+claim taken once — which is why `mergedRuns` refuses to merge a remote interval with its
+neighbours. `tests/planner.rotation.test.js` pins both halves of this.
 
 `tests/planner.invariants.test.js` is the real safety net: it asserts across ~1600 generated plans
 that nobody is ever double-booked, no mission is overstaffed, availability is respected, and the

@@ -46,6 +46,59 @@ function Assignments({ mission, employees, busy, onSwap, onClearPin }) {
 }
 
 /**
+ * One mission's block inside a portrait slot: its name, then everyone covering
+ * it, tied together by a rule down the inline-start edge.
+ *
+ * The name used to be a chip sharing a wrapping row with the assignments, which
+ * only reads as a heading when the row wraps as intended. On a phone every
+ * assignment takes the full width, so the chip was always pushed onto a line of
+ * its own - floating between the mission above it and the guards below with
+ * nothing to say which it belonged to. Once a slot carries two missions and ten
+ * people, that is the difference between a readable rota and a list of names.
+ *
+ * The rule's colour comes through a callback: `sx` maps palette tokens for
+ * `borderColor` only, so `borderInlineStartColor: 'secondary.main'` would be
+ * emitted as an invalid colour and dropped.
+ */
+function MissionGroup({ mission, showName, first, employees, busy, onSwap, onClearPin }) {
+  const remote = mission.type === 'remote';
+  return (
+    <Box
+      sx={{
+        mt: first ? 0 : 1,
+        ...(showName && {
+          borderInlineStart: '2px solid',
+          borderInlineStartColor: (theme) => (
+            remote ? theme.palette.secondary.light : theme.palette.divider
+          ),
+          pl: 0.75,
+        }),
+      }}
+    >
+      {showName && (
+        <Typography
+          variant="caption"
+          fontWeight={700}
+          color={remote ? 'secondary.main' : 'text.secondary'}
+          sx={{ display: 'block', lineHeight: 1.4, overflowWrap: 'anywhere', mb: 0.25 }}
+        >
+          {mission.missionName || '—'}
+        </Typography>
+      )}
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 0.75 }}>
+        <Assignments
+          mission={mission}
+          employees={employees}
+          busy={busy}
+          onSwap={onSwap}
+          onClearPin={onClearPin}
+        />
+      </Box>
+    </Box>
+  );
+}
+
+/**
  * Portrait layout: a time gutter with the missions beside it, so a one-mission
  * slot costs a single row instead of a card. Four table columns cannot share a
  * 360px screen - squeezing them truncated the mission name to one letter and
@@ -88,25 +141,16 @@ function SlotRow({ info, employees, hideMissionName, onSwap, onClearPin }) {
 
       <Box sx={{ flex: 1, minWidth: 0 }}>
         {slot.missions.map((mission, index) => (
-          <Box
+          <MissionGroup
             key={mission.missionId}
-            sx={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              alignItems: 'center',
-              gap: 0.75,
-              mt: index === 0 ? 0 : 0.75,
-            }}
-          >
-            {!hideMissionName && <MissionChip mission={mission} />}
-            <Assignments
-              mission={mission}
-              employees={employees}
-              busy={busy}
-              onSwap={onSwap}
-              onClearPin={onClearPin}
-            />
-          </Box>
+            mission={mission}
+            showName={!hideMissionName}
+            first={index === 0}
+            employees={employees}
+            busy={busy}
+            onSwap={onSwap}
+            onClearPin={onClearPin}
+          />
         ))}
       </Box>
     </Box>
