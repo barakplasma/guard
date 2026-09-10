@@ -419,7 +419,7 @@ function scheduleStaggeredCoworkers() {
     shiftMinutes: 60,
     employees: [
       { id: 'e1', name: 'אבי' },
-      { id: 'e2', name: 'דנה' },
+      { id: 'e2', name: 'דנה', start: START + HOUR / 2 },
     ],
     missions: [{ id: 'm1', name: 'שער', type: 'local', count: 2 }],
     pins: [

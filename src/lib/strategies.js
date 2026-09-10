@@ -53,6 +53,7 @@ export const DEFAULT_STRATEGY = STRATEGY.BALANCED;
 const balanced = {
   id: STRATEGY.BALANCED,
   compare(a, b, ctx) {
+    if (ctx.kind === 'daily') return compareDaily(a, b, ctx, false);
     if (ctx.kind === 'remote') {
       return a.minutes - b.minutes
         || a.lastEnd - b.lastEnd
@@ -107,6 +108,29 @@ function ringKeys(st, ctx) {
   return { turns: slots.size + remotes, lastEnd };
 }
 
+/** Daily fairness counts completed occurrences, never future pins or hours. */
+function dailyKeys(st, ctx) {
+  const past = st.busy.filter((iv) => iv.end <= ctx.start);
+  const own = past.filter((iv) => iv.missionId === ctx.mission.id);
+  return {
+    turns: new Set(own.map((iv) => iv.slotStart)).size,
+    last: own.reduce((v, iv) => Math.max(v, iv.end), -Infinity),
+    minutes: past.reduce((v, iv) => v + (iv.end - iv.start), 0),
+  };
+}
+function compareDaily(a, b, ctx, rotation) {
+  const ka = dailyKeys(a, ctx), kb = dailyKeys(b, ctx);
+  if (ka.turns !== kb.turns) return ka.turns - kb.turns;
+  if (rotation) {
+    if (ka.last !== kb.last) return ka.last < kb.last ? -1 : 1;
+    return ringKeys(a, ctx).turns - ringKeys(b, ctx).turns || a.ringIndex - b.ringIndex;
+  }
+  if (ka.minutes !== kb.minutes) return ka.minutes - kb.minutes;
+  const ra = ringKeys(a, ctx), rb = ringKeys(b, ctx);
+  if (ra.lastEnd !== rb.lastEnd) return ra.lastEnd < rb.lastEnd ? -1 : 1;
+  return a.seq - b.seq;
+}
+
 /**
  * Pure rotation: guards sit in a fixed circular list and take turns round it.
  * Total time on duty is deliberately never consulted - a twelve-hour remote
@@ -155,6 +179,7 @@ const rotation = {
   id: STRATEGY.ROTATION,
   seed: (employee, index) => ({ ringIndex: index }),
   compare(a, b, ctx) {
+    if (ctx.kind === 'daily') return compareDaily(a, b, ctx, true);
     const ka = ringKeys(a, ctx);
     const kb = ringKeys(b, ctx);
     // Compared rather than subtracted: two people who have never been on duty

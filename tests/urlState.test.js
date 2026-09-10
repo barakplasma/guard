@@ -6,7 +6,8 @@ import { emptyPlan, planSchema, prunePins, toPlannerInput } from '../src/lib/pla
 import { plan } from '../src/lib/planner.js';
 
 const HOUR = 3600 * 1000;
-const START = new Date(2026, 0, 5, 8, 0, 0, 0).getTime();
+// The committed URL fixture contains UTC instants, independent of the test host.
+const START = Date.UTC(2026, 0, 5, 8);
 
 const sample = () => planSchema.parse({
   version: 1,

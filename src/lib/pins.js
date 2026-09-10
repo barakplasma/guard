@@ -13,7 +13,7 @@
  */
 
 import { plan as runPlanner, isOutOfPeriod, resolvePinWindow } from './planner.js';
-import { toPlannerInput } from './planSchema.js';
+import { toPlannerInput, dailyOccurrences } from './planSchema.js';
 
 /** Resolve a pin's effective range, following the null-inheritance chain. */
 export function pinRange(doc, pin) {
@@ -24,6 +24,11 @@ export function pinRange(doc, pin) {
 /** Does `pin` cover the whole of `[start, end)`? */
 export function pinCovers(doc, pin, start, end) {
   const range = pinRange(doc, pin);
+  const mission = doc.missions.find((m) => m.id === pin.missionId);
+  if (mission?.type === 'daily') {
+    return dailyOccurrences(doc, mission).some((w) => w.start <= start && w.end >= end
+      && range.start < w.end && range.end > w.start);
+  }
   return range.start <= start && range.end >= end;
 }
 
@@ -143,6 +148,7 @@ export function applyClearPinsForMission(doc, { missionId, employeeId }) {
  * behaves exactly like a pin a person wrote by hand.
  */
 export function freezePastShifts(doc, result, now) {
+  if (result.warnings?.some((w) => w.code === 'engine-bug')) return doc;
   const newPins = result.shifts
     .filter((s) => !s.pinned && s.end <= now)
     .map((s) => ({

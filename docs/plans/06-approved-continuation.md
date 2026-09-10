@@ -1,7 +1,7 @@
 # Approved continuation: Plans 3–5
 
 Approved by the user on 2026-09-10. This document supersedes conflicting decisions
-in Plans 03–05. Implementation has not started.
+in Plans 03–05. Implementation and acceptance checks are complete on the PR branch.
 
 ## Branch and delivery
 
@@ -138,3 +138,19 @@ Keep feature-specific tests with the subsystem they exercise.
    integration in separate batches; browser/property coverage.
 10. Run final validation, review risks and regressions, update status documents,
     commit and push to PR #28, and update its description.
+
+
+## Completion evidence
+
+- Lint, all 27 unit/property test files, and production build pass.
+- Existing end-to-end and mobile viewport suites pass; new feature acceptance
+  covers qualification editing, daily full-day holds, rest/coverage findings,
+  URL reloads, deletion, error-path sharing, and 360px/desktop rendering.
+- Existing golden fixture files are unchanged. New quality warnings are tested
+  separately; UTC-based snapshot inputs no longer depend on the host timezone.
+- Additional regressions cover off-grid pin overstaffing, day/night pin capacity,
+  unstaffed mission qualification findings, correct reported pinned headcounts,
+  calendar occurrence boundaries, scarce qualified/excluded crew ordering,
+  rapid UI edits preserving prior changes, and corrupt-link cache isolation.
+- Night rest remains best effort, with staffing fallback and measured shortfalls.
+  The scheduler does not claim global feasibility or optimality.

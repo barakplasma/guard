@@ -15,6 +15,7 @@ const ts = z.number().int().finite();
 
 export const employeeSchema = z.object({
   id,
+  tags: z.array(id).default([]).transform((tags) => [...new Set(tags)]),
   // Names may be blank while the planner is still typing - a half-filled row
   // must never fail validation and take the whole document down with it.
   name: z.string().max(80),
@@ -31,8 +32,12 @@ export const DEFAULT_NIGHT_END = 6 * 60;
 
 export const missionSchema = z.object({
   id,
+  requires: z.array(z.object({ tag: id, count: z.number().int().min(1).max(999) })).default([]),
+  excludes: z.array(id).default([]).transform((tags) => [...new Set(tags)]),
   name: z.string().max(80),
-  type: z.enum(['remote', 'local']),
+  type: z.enum(['remote', 'local', 'daily']),
+  dayStart: minuteOfDay.nullable().default(null),
+  dayEnd: minuteOfDay.nullable().default(null),
   start: ts.nullable().default(null),
   end: ts.nullable().default(null),
   count: z.number().int().min(1).max(999),
@@ -89,6 +94,9 @@ export const planSchema = z.object({
   employees: z.array(employeeSchema).default([]),
   missions: z.array(missionSchema).default([]),
   pins: z.array(pinSchema).default([]),
+  tags: z.array(z.object({ id, name: z.string().max(80),
+    minNightRestMinutes: z.number().int().min(1).max(1440).nullable().default(null),
+  })).default([]),
 });
 
 /** Short, stable ids. Not cryptographic - just unique within one plan. */
@@ -189,6 +197,25 @@ export function nightWindows(doc) {
   return out;
 }
 
+/** Calendar-local daily holds; equal bounds deliberately mean next day. */
+export function dailyOccurrences(doc, mission) {
+  if (mission.type !== 'daily' || mission.dayStart == null || mission.dayEnd == null) return [];
+  const lo = Math.max(doc.start, mission.start ?? doc.start);
+  const hi = Math.min(doc.end, mission.end ?? doc.end);
+  if (hi <= lo) return [];
+  const cursor = new Date(lo);
+  cursor.setHours(0, 0, 0, 0);
+  cursor.setDate(cursor.getDate() - 1);
+  const out = [];
+  const days = Math.ceil((hi - lo) / DAY) + 2;
+  for (let i = 0; i <= days; i++) {
+    const start = Math.max(lo, atMinute(cursor, i, mission.dayStart));
+    const end = Math.min(hi, atMinute(cursor, i + (mission.dayEnd <= mission.dayStart ? 1 : 0), mission.dayEnd));
+    if (end > start) out.push({ start, end });
+  }
+  return out;
+}
+
 /** Shape the document into the planner engine's input. */
 export function toPlannerInput(doc) {
   return {
@@ -197,15 +224,19 @@ export function toPlannerInput(doc) {
     shiftMinutes: doc.shiftMinutes,
     strategy: doc.strategy,
     nightWindows: nightWindows(doc),
+    tags: doc.tags ?? [],
     employees: doc.employees.map((e) => ({
       id: e.id,
       name: e.name,
+      tags: e.tags ?? [],
       start: e.start ?? undefined,
       end: e.end ?? undefined,
     })),
     missions: doc.missions.map((m) => ({
       id: m.id,
       name: m.name,
+      requires: m.requires ?? [],
+      excludes: m.excludes ?? [],
       type: m.type,
       start: m.start ?? undefined,
       end: m.end ?? undefined,
@@ -213,6 +244,7 @@ export function toPlannerInput(doc) {
       nightCount: m.nightCount ?? undefined,
       shiftMinutes: m.shiftMinutes ?? undefined,
       nightShiftMinutes: m.nightShiftMinutes ?? undefined,
+      ...(m.type === 'daily' ? { occurrences: dailyOccurrences(doc, m) } : {}),
     })),
     pins: doc.pins.map((p) => ({
       missionId: p.missionId,

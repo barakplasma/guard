@@ -140,7 +140,7 @@ for the night field), empty string → `null`. `data-testid`: `mission-shift-${i
    current `main`, and commit the JSON output as fixtures. After the change, output for
    documents with no overrides must be byte-identical. This is the test that enforces "a shared
    link renders identically forever" for this refactor, and it stays in the repo.
-2. חמ"ל scenario: Thu 16:00 → Thu 11:00, night 22–06, mission `count: 1`, `120/60`. Assert the
+2. חמ"ל scenario: Thu 16:00 → next Thu 11:00, night 22–06, mission `count: 1`, `120/60`. Assert the
    exact slot list for the first 24 hours and that `staffedAt` is 1 at every instant.
 3. Day length only (`120`, night `null`): every slot is two hours, including through the night.
 4. Night stretch not a multiple of the night length (night 22:00–06:30, `nightShiftMinutes: 60`)

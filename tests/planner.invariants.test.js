@@ -19,7 +19,9 @@ const planArb = fc.record({
   employeeCount: fc.integer({ min: 1, max: 8 }),
   missions: fc.array(
     fc.record({
-      type: fc.constantFrom('local', 'remote'),
+      type: fc.constantFrom('local', 'remote', 'daily'),
+      qualified: fc.boolean(),
+      exclude: fc.boolean(),
       count: fc.integer({ min: 1, max: 3 }),
       nightCount: fc.integer({ min: 1, max: 3 }),
       // A grid of its own, or the plan's - and by night, a third possibility
@@ -33,6 +35,10 @@ const planArb = fc.record({
     }),
     { minLength: 1, maxLength: 4 },
   ),
+  pins: fc.array(fc.record({ employee: fc.nat(), mission: fc.nat(),
+    whole: fc.boolean(), frozen: fc.boolean(), from: fc.integer({ min: 0, max: 300 }),
+    length: fc.integer({ min: 1, max: 180 }),
+  }), { maxLength: 6 }),
   limited: fc.array(fc.record({
     index: fc.nat(),
     fromMin: fc.integer({ min: 0, max: 300 }),
@@ -49,6 +55,7 @@ function build(spec) {
   const employees = Array.from({ length: spec.employeeCount }, (_, i) => ({
     id: `e${i + 1}`,
     name: `Emp${i + 1}`,
+    tags: i % 2 ? ['driver'] : [],
   }));
   for (const l of spec.limited) {
     const e = employees[l.index % employees.length];
@@ -62,6 +69,8 @@ function build(spec) {
     id: `m${i + 1}`,
     name: `M${i + 1}`,
     type: m.type,
+    requires: m.qualified ? [{ tag: 'driver', count: 1 }] : [],
+    excludes: m.exclude ? ['driver'] : [],
     start: start + m.offsetMin * MIN,
     end: start + (m.offsetMin + m.lengthMin) * MIN,
     count: m.count,
@@ -70,7 +79,17 @@ function build(spec) {
     nightShiftMinutes: m.nightShiftMinutes,
   })).filter((m) => m.start < end);
 
+  for (const m of missions) if (m.type === 'daily') {
+    const middle = m.start + (m.end - m.start) / 2;
+    m.occurrences = [{ start: m.start, end: middle }, { start: middle, end: m.end }];
+  }
   return {
+    tags: [{ id: 'driver', name: 'Driver' }],
+    pins: missions.length ? spec.pins.map((p) => ({
+      employeeId: employees[p.employee % employees.length].id,
+      missionId: missions[p.mission % missions.length].id, frozen: p.frozen,
+      ...(p.whole ? {} : { start: start + p.from * MIN, end: start + (p.from + p.length) * MIN }),
+    })) : [],
     start,
     end,
     shiftMinutes: spec.shiftMinutes,
@@ -89,7 +108,7 @@ function build(spec) {
  * inside a night window.
  */
 function seatsAt(input, mission, t) {
-  if (mission.type === 'remote') return mission.count;
+  if (mission.type !== 'local') return mission.count;
   const night = input.nightWindows.some((w) => t >= w.start && t < w.end);
   return night ? mission.nightCount : mission.count;
 }
@@ -215,6 +234,17 @@ test('the timeline always tiles the plan window exactly', () => {
     assert.equal(timeline.at(-1).end, input.end);
     for (let i = 1; i < timeline.length; i++) {
       assert.equal(timeline[i].start, timeline[i - 1].end);
+    }
+  }), { numRuns: 200 });
+});
+
+
+test('daily rows equal an occurrence even with contested pins and mixed grids', () => {
+  fc.assert(fc.property(planArb, (spec) => {
+    const input = build(spec);
+    for (const s of plan(input).shifts.filter((row) => row.type === 'daily')) {
+      const mission = input.missions.find((m) => m.id === s.missionId);
+      assert.ok(mission.occurrences.some((w) => s.start === Math.max(input.start, w.start) && s.end === Math.min(input.end, w.end)));
     }
   }), { numRuns: 200 });
 });

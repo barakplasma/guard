@@ -568,7 +568,8 @@ test('a swap over a whole-mission pin replaces the assignee rather than competin
  * whole-mission pin with no range of its own.
  */
 const carmelRota = () => {
-  const start = localTime(2026, 8, 10, 16, 0);
+  // The historical digest includes absolute timestamps captured in UTC.
+  const start = Date.UTC(2026, 8, 10, 16);
   return {
     start,
     end: start + 163 * HOUR,

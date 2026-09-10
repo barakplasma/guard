@@ -2,14 +2,15 @@
  * Shift planner.
  *
  * Pure ES module: no DOM, no `Date.now()`, no `Math.random()`, and no
- * dependency outside `strategies.js` (which plays by the same rules).
+ * imports only pure strategy, qualification, rest, and validation helpers.
  * All times are ms-epoch numbers. Given the same input it always produces
  * byte-identical output - that is what lets a plan live entirely in a shared
  * URL and render the same for everyone who opens it.
  *
- * Two mission types:
+ * Mission types:
  *   - `remote` - the same people staff it for its entire duration and are
  *     locked out of everything else while it runs.
+ *   - `daily`  - one whole hold per adapter-resolved calendar occurrence.
  *   - `local`  - people rotate among whoever is still available, every
  *     `shiftMinutes`: the plan's, or the mission's own where it sets one, which
  *     may differ again inside the plan's night stretches.
@@ -24,6 +25,9 @@
  */
 
 import { getStrategy, DEFAULT_STRATEGY } from './strategies.js';
+import { validateSchedule } from './invariants.js';
+import { selectCrew, missingQualifications, requirementsOf } from './crew.js';
+import { preferredRest, overlapsRest, assessRest } from './rest.js';
 
 const MINUTE = 60 * 1000;
 
@@ -32,6 +36,7 @@ const MINUTE = 60 * 1000;
 /* ------------------------------------------------------------------ */
 
 export const WARN = {
+  ENGINE_BUG: 'engine-bug',
   UNDERSTAFFED: 'understaffed',
   EMPLOYEE_UNUSED: 'employee-unused',
   MISSION_OUTSIDE_WINDOW: 'mission-outside-window',
@@ -166,7 +171,7 @@ function normalizeEmployees(employees, planStart, planEnd, warnings) {
       warnings.push({ code: WARN.EMPLOYEE_WINDOW_OUTSIDE_PLAN, employeeId: e.id });
       continue;
     }
-    out.push({ id: e.id, name: e.name, start, end });
+    out.push({ id: e.id, name: e.name, tags: e.tags ?? [], start, end });
   }
   return out;
 }
@@ -179,7 +184,7 @@ function normalizeEmployees(employees, planStart, planEnd, warnings) {
  * is, rather than quietly shaping a grid nothing rotates on.
  */
 function slotMinutesOf(mission) {
-  if (mission.type === 'remote') return { day: null, night: null };
+  if (mission.type !== 'local') return { day: null, night: null };
   const day = mission.shiftMinutes ?? null;
   const night = mission.nightShiftMinutes ?? null;
   for (const value of [day, night]) {
@@ -188,6 +193,19 @@ function slotMinutesOf(mission) {
     }
   }
   return { day, night };
+}
+
+function normalizeOccurrences(windows, lo, hi) {
+  const out = windows.map((w) => {
+    if (!Number.isFinite(w.start) || !Number.isFinite(w.end) || w.end <= w.start) {
+      throw new Error('Daily occurrences must have finite increasing bounds.');
+    }
+    return { start: Math.max(lo, w.start), end: Math.min(hi, w.end) };
+  }).filter((w) => w.end > w.start).sort((a, b) => a.start - b.start || a.end - b.end);
+  for (let i = 1; i < out.length; i++) {
+    if (out[i].start < out[i - 1].end) throw new Error('Daily occurrences must not overlap.');
+  }
+  return out;
 }
 
 /** Missions clamped to the plan window; ones that fall entirely outside are dropped. */
@@ -206,7 +224,7 @@ function normalizeMissions(missions, planStart, planEnd, warnings) {
     // clock, which is what every plan written before night counts existed
     // means. Remote missions are held whole by one set of people, so the
     // day/night split has nothing to act on and is ignored there.
-    const nightCount = m.type === 'remote' || m.nightCount == null ? m.count : m.nightCount;
+    const nightCount = m.type !== 'local' || m.nightCount == null ? m.count : m.nightCount;
     if (!(Number.isInteger(nightCount) && nightCount >= 1)) {
       throw new Error(`Mission "${m.name}" needs at least one person at night.`);
     }
@@ -223,7 +241,9 @@ function normalizeMissions(missions, planStart, planEnd, warnings) {
     out.push({
       id: m.id,
       name: m.name,
-      type: m.type === 'remote' ? 'remote' : 'local',
+      requires: requirementsOf(m.requires), excludes: m.excludes ?? [],
+      type: ['remote', 'daily'].includes(m.type) ? m.type : 'local',
+      ...(m.type === 'daily' ? { occurrences: normalizeOccurrences(m.occurrences ?? [], start, end) } : {}),
       start,
       end,
       count: m.count,
@@ -240,7 +260,7 @@ function normalizeMissions(missions, planStart, planEnd, warnings) {
  * shared link must keep working rather than erroring. Everything else that
  * cannot be honoured degrades to a warning.
  */
-function normalizePins(pins, employeeById, missionById, planStart, planEnd, warnings) {
+function normalizePins(pins, employeeById, missionById, planStart, planEnd, warnings, nightWindows) {
   // --- Step 1: resolve every pin to its effective [start, end) coverage ---
   // Everything downstream (dedup, availability, conflicts, capacity) has to
   // reason about coverage, never the literal written range - a whole-mission
@@ -277,8 +297,14 @@ function normalizePins(pins, employeeById, missionById, planStart, planEnd, warn
       }
       return;
     }
-    resolved.push({
-      mission, employee, start, end, frozen: Boolean(p.frozen), index,
+    const windows = mission.type === 'daily'
+      ? mission.occurrences.filter((w) => overlaps(start, end, w.start, w.end))
+      : [{ start, end }];
+    if (!windows.length && !isOutOfPeriod(p, mission, planStart, planEnd)) {
+      warnings.push({ code: WARN.PIN_UNAVAILABLE, missionId: mission.id, employeeId: employee.id });
+    }
+    for (const w of windows) resolved.push({
+      mission, employee, ...w, frozen: Boolean(p.frozen), index,
     });
   });
 
@@ -360,14 +386,14 @@ function normalizePins(pins, employeeById, missionById, planStart, planEnd, warn
     // More claimants than the mission has seats at some instant: whoever was
     // already placed (higher priority) keeps the seat, this one overflows.
     const sameMission = perMission.get(c.mission.id) || [];
-    // The mission's roomiest headcount, not its daytime one: a pin covering a
-    // night shift is contesting the night's seats, and measuring it against a
-    // smaller daytime figure would reject a perfectly good manual assignment as
-    // overflow. A pin can span both, so the generous bound is the only one that
-    // holds for every instant it covers.
-    const seats = Math.max(c.mission.count, c.mission.nightCount);
-    const concurrent = sameMission.filter((q) => overlaps(q.start, q.end, c.start, c.end));
-    if (concurrent.length >= seats) {
+    // Capacity is measured at every change inside the claim, not the roomiest
+    // headcount or a count of intervals that merely overlap different parts.
+    const points = new Set([c.start, ...sameMission.flatMap((q) => [q.start, q.end]),
+      ...nightWindows.flatMap((w) => [w.start, w.end])]);
+    const overflows = [...points].some((at) => at >= c.start && at < c.end
+      && sameMission.filter((q) => q.start <= at && q.end > at).length
+        >= countAt(c.mission, at, nightWindows));
+    if (overflows) {
       warnings.push({
         code: WARN.PIN_OVERFLOW, missionId: c.mission.id, employeeId: c.employee.id, start: c.start, end: c.end,
       });
@@ -407,7 +433,7 @@ function makeState(employees, strategy) {
     employees.map((e, index) => [
       e.id,
       {
-        id: e.id, name: e.name, start: e.start, end: e.end, busy: [], busyUntil: -Infinity,
+        id: e.id, name: e.name, tags: e.tags ?? [], start: e.start, end: e.end, busy: [], busyUntil: -Infinity,
         minutes: 0, missionMinutes: new Map(), lastEnd: -Infinity, seq: seq++, stints: 0,
         ...(strategy.seed ? strategy.seed(e, index) : null),
       },
@@ -429,7 +455,7 @@ function occupy(st, mission, start, end, slotStart, counter) {
   // which charges one turn per distinct slot entered and one per remote hold
   // however long it runs. Nothing else here reads either, and `isFree` only
   // ever looks at start/end.
-  st.busy.push({ start, end, slotStart, ...(mission.type === 'remote' ? { remote: true } : null) });
+  st.busy.push({ start, end, slotStart, missionId: mission.id, ...(mission.type !== 'local' ? { remote: true } : null) });
   st.busyUntil = Math.max(st.busyUntil, end);
   const minutes = (end - start) / MINUTE;
   st.minutes += minutes;
@@ -456,7 +482,7 @@ function occupy(st, mission, start, end, slotStart, counter) {
  *   default rather than throwing.
  * @param {{id:string,name:string,start?:number,end?:number}[]} params.employees
  *   `start`/`end` default to the whole plan window.
- * @param {{id:string,name:string,type:'remote'|'local',start?:number,end?:number,count:number,nightCount?:number,shiftMinutes?:number,nightShiftMinutes?:number}[]} params.missions
+ * @param {{id:string,name:string,type:'remote'|'local'|'daily',start?:number,end?:number,count:number,nightCount?:number,shiftMinutes?:number,nightShiftMinutes?:number}[]} params.missions
  *   `count` is the daytime headcount; `nightCount` replaces it inside the plan's
  *   night stretches, and defaults to `count`. `shiftMinutes` is this mission's
  *   own slot length, defaulting to the plan's, and `nightShiftMinutes` its
@@ -488,7 +514,8 @@ function occupy(st, mission, start, end, slotStart, counter) {
  */
 export function plan({
   start, end, shiftMinutes, strategy: strategyName = DEFAULT_STRATEGY,
-  employees = [], missions = [], pins = [], nightWindows = [],
+  employees = [], missions = [], pins = [], nightWindows = [], tags = [],
+  onInvariantViolation = 'throw',
 }) {
   /* --- structural validation: these are bugs in the input, not planner findings --- */
   if (!Number.isFinite(start) || !Number.isFinite(end)) throw new Error('Plan window must be numeric timestamps.');
@@ -501,6 +528,11 @@ export function plan({
   if (new Set(names).size !== names.length) throw new Error('Employee names must be unique.');
   if (new Set(employees.map((e) => e.id)).size !== employees.length) throw new Error('Employee ids must be unique.');
 
+  const tagIds = new Set(tags.map((t) => t.id));
+  if (tagIds.size !== tags.length) throw new Error('Qualification ids must be unique.');
+  for (const m of missions) for (const r of m.requires ?? []) {
+    if (!Number.isInteger(r.count) || r.count < 1) throw new Error('Qualification counts must be positive integers.');
+  }
   const warnings = [];
   const emps = normalizeEmployees(employees, start, end, warnings);
   if (emps.length === 0) throw new Error('No employee is available during the plan window.');
@@ -508,7 +540,15 @@ export function plan({
 
   const employeeById = new Map(emps.map((e) => [e.id, e]));
   const missionById = new Map(miss.map((m) => [m.id, m]));
-  const goodPins = normalizePins(pins, employeeById, missionById, start, end, warnings);
+  for (const m of miss) {
+    for (const r of m.requires) if (m.excludes.includes(r.tag)) warnings.push({ code: 'tag-required-and-excluded', missionId: m.id, tag: r.tag });
+  }
+  const goodPins = normalizePins(pins, employeeById, missionById, start, end, warnings, nightWindows);
+
+  for (const p of goodPins) {
+    const m = missionById.get(p.missionId), e = employeeById.get(p.employeeId);
+    if (m.excludes.some((t) => e.tags.includes(t))) warnings.push({ code: 'pin-excluded-tag', missionId: m.id, employeeId: e.id, start: p.start, end: p.end });
+  }
 
   // Assignments left behind by a period that has since moved on. Counted once
   // rather than reported one by one: a rota carried across a few days
@@ -530,6 +570,18 @@ export function plan({
 
   const strategy = getStrategy(strategyName);
   const state = makeState(emps, strategy);
+  const rest = preferredRest(emps, tags, nightWindows, goodPins, start, end);
+  const choose = (candidates, fixed, need, mission, lo, hi) => {
+    const ordered = [...candidates].sort((a, b) => Number(overlapsRest(a.id, lo, hi, rest)) - Number(overlapsRest(b.id, lo, hi, rest)));
+    const picked = selectCrew(ordered, fixed, need, mission.requires);
+    const rested = ordered.filter((e) => !overlapsRest(e.id, lo, hi, rest));
+    if (rested.length >= picked.length && rested.length < ordered.length) {
+      const safe = selectCrew(rested, fixed, need, mission.requires);
+      const deficit = (crew) => missingQualifications([...fixed, ...crew], mission.requires).reduce((n, r) => n + r.needed - r.got, 0);
+      if (deficit(safe) <= deficit(picked)) return safe;
+    }
+    return picked;
+  };
   let seqCounter = emps.length;
   const nextSeq = () => seqCounter++;
 
@@ -554,6 +606,7 @@ export function plan({
       slotEnd: slot.end,
       pinned,
       frozen,
+      ...(st.tags.length ? { qualifications: [...st.tags] } : {}),
     });
   };
 
@@ -572,6 +625,8 @@ export function plan({
   // mission ending off-grid must not fragment some other local mission's
   // otherwise-clean hourly slots).
   const sharedEdges = [start, end];
+  for (const b of rest) sharedEdges.push(b.start, b.end);
+  for (const m of miss) if (m.type === 'daily') for (const w of m.occurrences) sharedEdges.push(w.start, w.end);
   for (const e of emps) { sharedEdges.push(e.start, e.end); }
   for (const w of nightWindows) {
     if (w.start > start && w.start < end) sharedEdges.push(w.start);
@@ -598,9 +653,7 @@ export function plan({
 
   const { nights, days } = stretches(nightWindows, start, end);
 
-  // Keyed on the mission object rather than its id: ids are not validated to
-  // be unique, and a shared cache that confused two missions would hand one of
-  // them the other's grid.
+  // Keyed on the normalized mission object so each mission owns its grid cache.
   const boundsCache = new Map();
   /**
    * The rotation grid this mission turns on, as ascending slot bounds spanning
@@ -653,7 +706,8 @@ export function plan({
     const hit = segmentCache.get(mission);
     if (hit) return hit;
     const bounds = slotBoundsFor(mission);
-    const edges = [...new Set([...bounds, ...sharedEdges, mission.start, mission.end])]
+    const pinEdges = goodPins.filter((p) => p.missionId === mission.id).flatMap((p) => [p.start, p.end]);
+    const edges = [...new Set([...bounds, ...sharedEdges, ...pinEdges, mission.start, mission.end])]
       .filter((t) => t >= mission.start && t <= mission.end)
       .sort((a, b) => a - b);
     const segments = [];
@@ -684,15 +738,13 @@ export function plan({
   // and end), and left every hourly slot of that mission reading one person
   // short.
   //
-  // Pin bounds are deliberately not added to the edge set. An off-grid pin
-  // gets a partial first or last row from the intersection, which is enough;
-  // segmenting the grid on it would re-cut the mission's unrelated demand and
-  // shift the rotation for every plan that happens to carry such a pin.
+  // Accepted pin edges split their mission's segments so automatic demand
+  // cannot overlap a partial pin. Slot identity stays on the original grid.
   for (const pin of goodPins) {
     const mission = missionById.get(pin.missionId);
     const st = state.get(pin.employeeId);
-    if (mission.type === 'remote') {
-      addRow(mission, st, pin.start, pin.end, wholeMissionSlot(mission), true, pin.frozen);
+    if (mission.type !== 'local') {
+      addRow(mission, st, pin.start, pin.end, mission.type === 'daily' ? pin : wholeMissionSlot(mission), true, pin.frozen);
       continue;
     }
     for (const seg of segmentsOf(mission)) {
@@ -704,32 +756,45 @@ export function plan({
 
   /* --- 2. remote missions: hard constraints, so they claim people first --- */
   const eligibleForRemote = (m) => [...state.values()].filter(
-    (st) => isAvailable(st, m.start, m.end) && isFree(st, m.start, m.end),
+    (st) => isAvailable(st, m.start, m.end) && isFree(st, m.start, m.end)
+      && !m.excludes.some((tag) => st.tags.includes(tag)),
   );
 
-  const remotes = miss.filter((m) => m.type === 'remote');
+  const remotes = miss.flatMap((m) => m.type === 'remote' ? [m]
+    : m.type === 'daily' ? m.occurrences.map((w) => ({ ...m, ...w })) : []);
   // Scarcest first within a start time, so an easy mission cannot greedily take
   // the only person a constrained one could have used. Pool sizes are measured
   // once, up front, so the ordering can't depend on assignments made mid-sort.
-  const remotePool = new Map(remotes.map((m) => [m.id, eligibleForRemote(m).length]));
+  const scarcity = (m, candidates, lo, hi) => {
+    const fixed = rows.filter((r) => r.missionId === m.id && r.start <= lo && r.end >= hi)
+      .map((r) => state.get(r.employeeId));
+    let pool = candidates.length;
+    for (const requirement of m.requires) {
+      if (fixed.filter((st) => st.tags.includes(requirement.tag)).length >= requirement.count) continue;
+      pool = Math.min(pool, candidates.filter((st) => st.tags.includes(requirement.tag)).length);
+    }
+    return pool;
+  };
+  const remotePool = new Map(remotes.map((m) => [m, scarcity(m, eligibleForRemote(m), m.start, m.end)]));
   remotes.sort((a, b) => (
     a.start - b.start
-    || remotePool.get(a.id) - remotePool.get(b.id)
+    || remotePool.get(a) - remotePool.get(b)
     || (b.end - b.start) - (a.end - a.start)
     || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
   ));
 
   for (const m of remotes) {
-    const alreadyPinned = rows.filter((r) => r.missionId === m.id && r.pinned).length;
+    const alreadyPinned = rows.filter((r) => r.missionId === m.id && r.pinned && r.start === m.start && r.end === m.end).length;
     const need = m.count - alreadyPinned;
     if (need <= 0) continue;
 
     const candidates = eligibleForRemote(m);
     candidates.sort((a, b) => strategy.compare(a, b, {
-      mission: m, start: m.start, end: m.end, kind: 'remote', planStart: start, shiftMinutes,
+      mission: m, start: m.start, end: m.end, kind: m.type, planStart: start, shiftMinutes,
     }));
 
-    const picked = candidates.slice(0, need);
+    const fixed = rows.filter((r) => r.missionId === m.id && r.start <= m.start && r.end >= m.end).map((r) => state.get(r.employeeId));
+    const picked = choose(candidates, fixed, need, m, m.start, m.end);
     for (const st of picked) addRow(m, st, m.start, m.end, wholeMissionSlot(m), false);
 
     if (picked.length < need) {
@@ -763,10 +828,12 @@ export function plan({
 
   // Chronological, then most-constrained-first so two concurrent local missions
   // cannot starve each other. Pool size counts who could ever work the segment
-  // (availability only, ignoring current bookings) so it is a fixed property of
+  // (availability and qualification restrictions, ignoring current bookings) so it is a fixed property of
   // the demand rather than something that shifts as assignments are made.
   for (const d of demands) {
-    d.pool = [...state.values()].filter((st) => isAvailable(st, d.start, d.end)).length;
+    const eligible = [...state.values()].filter((st) => isAvailable(st, d.start, d.end)
+      && !d.mission.excludes.some((tag) => st.tags.includes(tag)));
+    d.pool = scarcity(d.mission, eligible, d.start, d.end);
   }
   demands.sort((a, b) => (
     a.start - b.start
@@ -776,7 +843,8 @@ export function plan({
 
   for (const d of demands) {
     const candidates = [...state.values()].filter(
-      (st) => isAvailable(st, d.start, d.end) && isFree(st, d.start, d.end),
+      (st) => isAvailable(st, d.start, d.end) && isFree(st, d.start, d.end)
+        && !d.mission.excludes.some((tag) => st.tags.includes(tag)),
     );
     // Who among them actually gets it is the strategy's call - see
     // `strategies.js` for what each one optimizes for.
@@ -784,7 +852,8 @@ export function plan({
       mission: d.mission, start: d.start, end: d.end, kind: 'local', planStart: start, shiftMinutes,
     }));
 
-    const picked = candidates.slice(0, d.need);
+    const fixed = rows.filter((r) => r.missionId === d.mission.id && r.start <= d.start && r.end >= d.end).map((r) => state.get(r.employeeId));
+    const picked = choose(candidates, fixed, d.need, d.mission, d.start, d.end);
     for (const st of picked) addRow(d.mission, st, d.start, d.end, d.slot, false);
 
     if (picked.length < d.need) {
@@ -794,7 +863,7 @@ export function plan({
         start: d.start,
         end: d.end,
         needed: countAt(d.mission, d.start, nightWindows),
-        got: picked.length,
+        got: fixed.length + picked.length,
       });
     }
   }
@@ -807,12 +876,32 @@ export function plan({
     }
   }
 
-  return {
+  const result = {
     shifts,
-    timeline: buildTimeline(shifts, emps, start, end),
+    timeline: buildTimeline(shifts, emps, start, end, miss.filter((m) => m.requires.length)
+      .flatMap((m) => m.type === 'daily' ? m.occurrences.flatMap((w) => [w.start, w.end]) : [m.start, m.end])),
     stats: buildStats(shifts, emps),
     warnings,
   };
+  const missing = new Map();
+  for (const seg of result.timeline) {
+    for (const m of miss) {
+      const running = m.type === 'daily' ? m.occurrences.some((w) => seg.start >= w.start && seg.start < w.end)
+        : seg.start >= m.start && seg.start < m.end;
+      if (!running || !m.requires.length) continue;
+      const crew = seg.onDuty.filter((r) => r.missionId === m.id).map((r) => state.get(r.employeeId));
+      for (const r of missingQualifications(crew, m.requires)) {
+        const key = `${m.id}|${r.tag}`;
+        if (!missing.has(key)) missing.set(key, { code: 'missing-required-tag', missionId: m.id, tag: r.tag, needed: r.needed, windows: [] });
+        const windows = missing.get(key).windows, last = windows.at(-1);
+        if (last && last.end === seg.start && last.got === r.got) last.end = seg.end;
+        else windows.push({ start: seg.start, end: seg.end, got: r.got });
+      }
+    }
+  }
+  warnings.push(...missing.values());
+  warnings.push(...assessRest(shifts, emps, tags, nightWindows, start, end));
+  return validateSchedule(result, { start, end, shiftMinutes, employees: emps, missions: miss, nightWindows }, onInvariantViolation);
 }
 
 /* ------------------------------------------------------------------ */
@@ -877,8 +966,8 @@ function mergeRows(rows) {
  * the UI renders directly. Segments break at every shift edge and every
  * availability edge, so within a segment nothing changes.
  */
-function buildTimeline(shifts, employees, planStart, planEnd) {
-  const points = new Set([planStart, planEnd]);
+function buildTimeline(shifts, employees, planStart, planEnd, demandEdges = []) {
+  const points = new Set([planStart, planEnd, ...demandEdges]);
   for (const s of shifts) { points.add(s.start); points.add(s.end); }
   for (const e of employees) { points.add(e.start); points.add(e.end); }
   const edges = [...points].filter((t) => t >= planStart && t <= planEnd).sort((a, b) => a - b);

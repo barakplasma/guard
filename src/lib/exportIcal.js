@@ -59,7 +59,9 @@ function missionSlices(rows) {
   const merged = [];
   for (const slice of slices) {
     const prev = merged[merged.length - 1];
-    if (prev && prev.end === slice.start && sameRoster(prev.rows, slice.rows)) {
+    const sameOccurrence = !slice.rows.some((r) => r.type === 'daily')
+      || prev?.rows.every((r) => slice.rows.some((s) => s.employeeId === r.employeeId && s.slotStart === r.slotStart));
+    if (prev && prev.end === slice.start && sameOccurrence && sameRoster(prev.rows, slice.rows)) {
       prev.end = slice.end;
     } else {
       merged.push({ ...slice });

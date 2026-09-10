@@ -7,11 +7,13 @@ import {
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
 import AddIcon from '@mui/icons-material/Add';
 import DateTimeField from '../components/DateTimeField.jsx';
+import DailyClockField from '../components/DailyClockField.jsx';
 import ConfirmDialog from '../components/ConfirmDialog.jsx';
 import { usePlan } from '../state/PlanContext.jsx';
 import { sortByHebrewName } from '../lib/sort.js';
 import { nextTopOfHour } from '../lib/planSchema.js';
 import { t } from '../strings.js';
+import { MissionQualifications } from '../components/Qualifications.jsx';
 
 /**
  * What a shift-length box's new text means: `null` where it was cleared, so
@@ -80,13 +82,14 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
             <ToggleButton value="local" data-testid={`type-local-${mission.id}`}>
               {t.typeLocal}
             </ToggleButton>
+            <ToggleButton value="daily" data-testid={`type-daily-${mission.id}`}>{t.typeDaily}</ToggleButton>
             <ToggleButton value="remote" data-testid={`type-remote-${mission.id}`}>
               {t.typeRemote}
             </ToggleButton>
           </ToggleButtonGroup>
 
           <TextField
-            label={mission.type === 'remote' ? t.headcount : t.headcountDay}
+            label={mission.type === 'daily' ? t.headcountPerOccurrence : mission.type === 'remote' ? t.headcount : t.headcountDay}
             type="number"
             value={mission.count}
             onChange={(e) => {
@@ -178,8 +181,22 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
           </Stack>
         )}
 
+        {mission.type === 'daily' && (
+          <Stack direction="row" useFlexGap spacing={2} sx={{ flexWrap: 'wrap' }}>
+            {['dayStart', 'dayEnd'].map((field) => (
+              <DailyClockField key={field} label={field === 'dayStart' ? t.dailyFrom : t.dailyTo}
+                value={mission[field]} onChange={(value) => onChange({ [field]: value })}
+                testId={`mission-day-${field === 'dayStart' ? 'start' : 'end'}-${mission.id}`} />
+            ))}
+            <Typography variant="caption" sx={{ width: '100%' }}>
+              {mission.dayStart == null || mission.dayEnd == null ? t.dailyIncomplete
+                : mission.dayEnd <= mission.dayStart ? t.dailyNextDay : ''}
+            </Typography>
+          </Stack>
+        )}
+
         <Typography variant="caption" color="text.secondary">
-          {mission.type === 'remote' ? t.typeRemoteHelp : t.typeLocalHelp}
+          {mission.type === 'daily' ? t.typeDailyHelp : mission.type === 'remote' ? t.typeRemoteHelp : t.typeLocalHelp}
         </Typography>
 
         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} useFlexGap sx={{ flexWrap: 'wrap', alignItems: { xs: 'stretch', sm: 'center' } }}>
@@ -235,6 +252,7 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
           )}
         </Stack>
 
+        <MissionQualifications mission={mission} onChange={onChange} />
         {openEnded && (
           <Typography variant="caption" color="text.secondary">
             {t.missionNoEndHelp}

@@ -1,5 +1,33 @@
 /** All user-facing copy. Hebrew only - the app is RTL throughout. */
 export const t = {
+  missingQualification: (mission, tag, n) => `${mission}: נדרשים ${n} בעלי הסמכת ${tag}; הכיסוי אינו מלא.`,
+  restShortfall: (person, needed, got) => `${person}: מנוחת לילה רצופה ${got} דקות במקום ${needed}. המשימות אוישו למרות החריגה.`,
+  restIncomplete: (person) => `${person}: הלילה מכוסה חלקית בתקופה או בזמינות; אי אפשר לאשר מנוחה מלאה.`,
+  pinExcluded: (person, mission) => `${person} שובץ ידנית ל${mission} למרות פטור לפי הסמכה.`,
+  contradictoryTag: (mission, tag) => `${mission}: הסמכת ${tag} גם נדרשת וגם פטורה מהמשימה.`,
+  findingWindows: (n) => `הצגת ${n} טווחי זמן`,
+  qualifications: 'הסמכות',
+  qualificationName: 'שם ההסמכה',
+  addQualification: 'הוספת הסמכה',
+  removeQualification: 'מחיקת הסמכה',
+  removeQualificationBody: (name, people, missions) => `למחוק את ${name}? ההסמכה תוסר מ־${people} אנשים ומ־${missions} משימות.`,
+  nightRestMinutes: 'רצף מנוחת לילה (דקות)',
+  requiredQualifications: 'הסמכות נדרשות בכל משמרת',
+  excludedQualifications: 'פטורים מהמשימה לפי הסמכה',
+  combinedQualificationsHelp: 'עדיפות לאנשים שונים לכל תפקיד. כשצריך, אדם אחד יכול למלא כמה תפקידים.',
+  restHelp: 'עדיפות למנוחה רצופה בלילה. אם אין מספיק אנשים, המשימות יאוישו ותוצג חריגת המנוחה.',
+  engineProblem: 'זוהתה שגיאה בחישוב הסידור. יש לבדוק את הפרטים לפני שימוש; אפשר לשמור ולשתף את הקישור.',
+  qualityNoRest: (name, n) => `${name}: ${n} מעברים בין משמרות ללא הפסקה`,
+  qualitySameMission: (name, n) => `${name}: ${n} משמרות רצופות באותה משימה`,
+  qualityLongRun: (name, n) => `${name}: רצף של ${n} תורנויות ללא הפסקה`,
+  typeDaily: 'יומית',
+  typeDailyHelp: 'אותם אנשים לכל התורנות. שעות זהות מציינות יום ולילה מלאים, עד למחרת.',
+  dailyFrom: 'תחילת תורנות (24 שעות)',
+  dailyTo: 'סיום תורנות (24 שעות)',
+  dailyNextDay: 'הסיום למחרת',
+  dailyIncomplete: 'יש למלא שעת התחלה ושעת סיום',
+  headcountPerOccurrence: 'אנשים לתורנות',
+
   appTitle: 'מתכנן משמרות',
 
   // navigation

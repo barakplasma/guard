@@ -2,6 +2,8 @@ import { formatDate, formatRange, formatTime } from './format.js';
 import { pinRange } from './pins.js';
 import { t } from '../strings.js';
 
+const clock = (v) => `${String(Math.floor(v / 60)).padStart(2, '0')}:${String(v % 60).padStart(2, '0')}`;
+
 /** "120/60" where the night length differs from the day one, else just "120". */
 function lengthPair(day, night) {
   return night == null || night === day ? `${day}` : `${day}/${night}`;
@@ -20,11 +22,17 @@ export function planToReadableText(doc) {
   const employeeById = new Map(doc.employees.map((e) => [e.id, e]));
   const missionById = new Map(doc.missions.map((m) => [m.id, m]));
 
+  const tagName = (id) => doc.tags?.find((tag) => tag.id === id)?.name ?? id;
   const lines = [doc.title.trim() || t.appTitle];
   lines.push(`${t.planStart}: ${formatDate(doc.start)} ${formatTime(doc.start)}`);
   lines.push(`${t.planEnd}: ${formatDate(doc.end)} ${formatTime(doc.end)}`);
   lines.push(`${t.shiftLength}: ${doc.shiftMinutes}`);
   lines.push(`${t.strategy}: ${t.strategyName(doc.strategy)}`);
+
+  if (doc.tags?.length) {
+    lines.push('', `${t.qualifications}:`);
+    for (const tag of doc.tags) lines.push(`- ${tag.name}${tag.minNightRestMinutes ? ` (${t.nightRestMinutes}: ${tag.minNightRestMinutes})` : ''}`);
+  }
 
   lines.push('', `${t.employees} (${doc.employees.length}):`);
   if (doc.employees.length === 0) lines.push(`- ${t.noEmployees}`);
@@ -32,13 +40,13 @@ export function planToReadableText(doc) {
     const window = e.start == null && e.end == null
       ? t.wholePeriod
       : formatRange(e.start ?? doc.start, e.end ?? doc.end);
-    lines.push(`- ${e.name || t.employeeName}: ${window}`);
+    lines.push(`- ${e.name || t.employeeName}: ${window}${e.tags?.length ? ` (${e.tags.map(tagName).join(", ")})` : ""}`);
   }
 
   lines.push('', `${t.missions} (${doc.missions.length}):`);
   if (doc.missions.length === 0) lines.push(`- ${t.noMissions}`);
   for (const m of doc.missions) {
-    const kind = m.type === 'remote' ? t.typeRemote : t.typeLocal;
+    const kind = m.type === 'daily' ? t.typeDaily : m.type === 'remote' ? t.typeRemote : t.typeLocal;
     // An open-ended mission (start set, end null) runs to the plan's end and
     // follows that boundary if the period is later extended - printing a
     // concrete end time here would read exactly like a mission someone hand-
@@ -51,7 +59,7 @@ export function planToReadableText(doc) {
         : formatRange(m.start ?? doc.start, m.end);
     // "4/6" only when the two differ - a mission staffed the same round the
     // clock should not gain a second number that says nothing.
-    const heads = m.type !== 'remote' && m.nightCount != null && m.nightCount !== m.count
+    const heads = m.type === 'local' && m.nightCount != null && m.nightCount !== m.count
       ? `${m.count}/${m.nightCount}`
       : `${m.count}`;
     // Shift lengths, in the same spirit and only when this mission actually
@@ -60,10 +68,15 @@ export function planToReadableText(doc) {
     // "120/60" when night differs from day, "120" when it does not.
     const dayLength = m.shiftMinutes;
     const nightLength = m.nightShiftMinutes;
-    const shift = m.type === 'remote' || (dayLength == null && nightLength == null)
+    const shift = m.type !== 'local' || (dayLength == null && nightLength == null)
       ? ''
       : `, ${lengthPair(dayLength ?? doc.shiftMinutes, nightLength)} ${t.minutesShort}`;
-    lines.push(`- ${m.name || t.missionName} (${kind}, ${heads}${shift}): ${window}`);
+    const daily = m.type !== 'daily' ? '' : m.dayStart == null || m.dayEnd == null
+      ? `, ${t.dailyIncomplete}`
+      : `, ${clock(m.dayStart)}–${clock(m.dayEnd)}${m.dayEnd <= m.dayStart ? ` ${t.dailyNextDay}` : ''}`;
+    lines.push(`- ${m.name || t.missionName} (${kind}${daily}, ${heads}${shift}): ${window}`);
+    if (m.requires?.length) lines.push(`  ${t.requiredQualifications}: ${m.requires.map((r) => `${tagName(r.tag)} × ${r.count}`).join(', ')}`);
+    if (m.excludes?.length) lines.push(`  ${t.excludedQualifications}: ${m.excludes.map(tagName).join(', ')}`);
   }
 
   lines.push('', `${t.pinsSection} (${doc.pins.length}):`);

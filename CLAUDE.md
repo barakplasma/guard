@@ -8,8 +8,7 @@ A static, backend-free shift planner. See `README.md` for what it does and how t
   belongs in the URL or it does not belong here.
 - **No network at runtime.** No webfonts, no CDNs, no analytics. The app must work offline after
   first load; anything fetched at runtime breaks that.
-- **The engine stays pure.** `src/lib/planner.js` and `src/lib/strategies.js` import nothing
-  outside each other, touch no DOM, and call neither `Date.now()` nor `Math.random()`. Every sort
+- **The engine stays pure.** `src/lib/planner.js`, strategies, and the pure crew/rest/invariant helpers import no UI, network, or clock dependencies, touch no DOM, and call neither `Date.now()` nor `Math.random()`. Every sort
   ends in a stable id tiebreak. A shared link must render identically for everyone who opens it,
   forever.
 
@@ -79,10 +78,9 @@ than inside phase 3, so the pinned rows and the demand walk can never disagree a
 segment starts. The engine's *decision* was never wrong here; the shape was. A whole-mission pin
 resolves to the mission's entire window, and one row that long is the 88-hour-row symptom above
 arriving through a different door: the agenda keys slots on `(start, end)`, so it became a slot of
-its own and left every hourly slot of that mission reading one person short. Pin bounds are
-deliberately *not* added to the edge set — an off-grid pin gets a partial first or last row out of
-the intersection, whereas segmenting on it would re-cut the mission's unrelated demand and move the
-rotation for every plan carrying such a pin. Remote pins stay whole, one set of people end to end.
+its own and left every hourly slot of that mission reading one person short. Accepted pin bounds join their own mission's segment edges, while preserving the original
+slot stamp. Otherwise an off-grid pin could overlap an automatic whole-segment row.
+Remote pins stay whole, one set of people end to end.
 
 Because that person now has the swap dropdown and the clear button on every hour they hold,
 `applySwap` and `applyClearPin` **cut** the matched pin around that hour (`cutPin`) instead of
@@ -257,3 +255,24 @@ column — the shape of every mobile layout bug reported so far.
 
 `lz-string` is CommonJS: import it as a default and destructure, or the Node test run breaks while
 the Vite build keeps working.
+
+
+## Daily missions, qualifications, and output checks
+
+See `docs/plans/03-daily-missions-and-per-job-rotation.md` through plan 05 for the
+implemented contracts. The approved decisions are in `06-approved-continuation.md`.
+Daily equal times mean a full calendar day; inputs always display 24-hour time.
+The adapter resolves viewer-local calendar occurrences, and the engine holds each
+whole before local duties. Occurrence-aware pin edits preserve neighboring days.
+
+Qualification requirements are coverage within headcount. Prefer separate people,
+but allow combined qualifications. Exclusions filter automatic candidates; pins
+remain visible overrides. Rest is preferred: staff duties when necessary and
+report actual shortfalls. Never count rest as work or claim a greedy shortage is
+proof of infeasibility.
+
+Output invariant violations throw by default. The schedule uses report mode to
+show evidence, and copy-link remains available even on a computation error.
+History freezing stays strict and does not freeze invalid output. Quality warnings
+are additive; golden assignment fixtures must not be regenerated to hide changes.
+The committed UTC URL/digest fixtures use UTC input dates regardless of host zone.

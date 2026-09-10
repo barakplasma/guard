@@ -23,8 +23,8 @@ export const PARAM = 'p';
 /** Beyond this, some clients and chat apps start mangling links. */
 export const URL_WARN_LENGTH = 8000;
 
-const TYPE_CODE = { local: 0, remote: 1 };
-const CODE_TYPE = ['local', 'remote'];
+const TYPE_CODE = { local: 0, remote: 1, daily: 2 };
+const CODE_TYPE = ['local', 'remote', 'daily'];
 
 const outTs = (v) => (v == null ? 0 : v);
 const inTs = (v) => (v === 0 || v == null ? null : v);
@@ -45,7 +45,9 @@ const MISSION_TUPLE_WAS = 7;
  */
 function trimTail(tuple, keep) {
   let length = tuple.length;
-  while (length > keep && !tuple[length - 1]) length--;
+  while (length > keep && (tuple[length - 1] == null
+    || (Array.isArray(tuple[length - 1]) && tuple[length - 1].length === 0)
+    || (length <= 9 && tuple[length - 1] === 0))) length--;
   return length === tuple.length ? tuple : tuple.slice(0, length);
 }
 
@@ -59,7 +61,7 @@ export function encodePlan(doc) {
     st: doc.strategy,
     ns: doc.nightStart,
     ne: doc.nightEnd,
-    emp: doc.employees.map((x) => [x.id, x.name, outTs(x.start), outTs(x.end)]),
+    emp: doc.employees.map((x) => trimTail([x.id, x.name, outTs(x.start), outTs(x.end), x.tags ?? []], 4)),
     // Everything past `count` is *appended* to the mission tuple. Field order
     // is the wire format here, so appending is safe and reordering is not: an
     // older link simply has no seventh element and reads back as `null`, i.e.
@@ -69,8 +71,11 @@ export function encodePlan(doc) {
     mis: doc.missions.map((x) => trimTail([
       x.id, x.name, TYPE_CODE[x.type] ?? 0, outTs(x.start), outTs(x.end), x.count, x.nightCount ?? 0,
       x.shiftMinutes ?? 0, x.nightShiftMinutes ?? 0,
+      x.dayStart ?? null, x.dayEnd ?? null,
+      (x.requires ?? []).flatMap((r) => [r.tag, r.count]), x.excludes ?? [],
     ], MISSION_TUPLE_WAS)),
     pin: doc.pins.map((x) => [x.missionId, x.employeeId, outTs(x.start), outTs(x.end), x.frozen ? 1 : 0]),
+    ...(doc.tags?.length ? { tg: doc.tags.map((t) => [t.id, t.name, t.minNightRestMinutes]) } : {}),
   };
   return compressToEncodedURIComponent(JSON.stringify(compact));
 }
@@ -107,11 +112,12 @@ export function decodePlan(blob) {
       // night these links were written under whether they knew it or not.
       nightStart: raw.ns ?? undefined,
       nightEnd: raw.ne ?? undefined,
-      employees: (raw.emp ?? []).map(([id, name, s, e]) => ({
-        id, name, start: inTs(s), end: inTs(e),
+      tags: (raw.tg ?? []).map(([id, name, minNightRestMinutes]) => ({ id, name, minNightRestMinutes })),
+      employees: (raw.emp ?? []).map(([id, name, s, e, tags]) => ({
+        id, name, start: inTs(s), end: inTs(e), tags,
       })),
       missions: (raw.mis ?? []).map((
-        [id, name, type, s, e, count, nightCount, shiftMinutes, nightShiftMinutes],
+        [id, name, type, s, e, count, nightCount, shiftMinutes, nightShiftMinutes, dayStart, dayEnd, requires, excludes],
       ) => ({
         id,
         name,
@@ -126,6 +132,10 @@ export function decodePlan(blob) {
         nightCount: nightCount || null,
         shiftMinutes: shiftMinutes || null,
         nightShiftMinutes: nightShiftMinutes || null,
+        dayStart: dayStart ?? null,
+        dayEnd: dayEnd ?? null,
+        requires: requires == null ? [] : Array.from({ length: Math.ceil(requires.length / 2) }, (_, i) => ({ tag: requires[i * 2], count: requires[i * 2 + 1] })),
+        excludes: excludes ?? [],
       })),
       pins: (raw.pin ?? []).map(([missionId, employeeId, s, e, f]) => ({
         missionId, employeeId, start: inTs(s), end: inTs(e), frozen: Boolean(f),

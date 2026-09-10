@@ -39,7 +39,11 @@ for (const { name, build } of GOLDEN_DOCS) {
     );
     assert.deepEqual(actual.timeline, expected.timeline);
     assert.deepEqual(actual.stats, expected.stats);
-    assert.deepEqual(actual.warnings, expected.warnings);
+    // Plan 04 intentionally adds diagnostic warnings; the legacy warning
+    // payload and every assignment/statistic remain frozen byte-for-byte.
+    const qualityCodes = new Set(['no-rest-between-shifts', 'same-mission-consecutive', 'long-unbroken-run']);
+    assert.deepEqual(actual.warnings.filter((w) => !qualityCodes.has(w.code)), expected.warnings);
+    assert.ok(actual.warnings.filter((w) => qualityCodes.has(w.code)).every((w) => Number.isInteger(w.count) && w.count > 0));
   });
 }
 

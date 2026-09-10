@@ -2,6 +2,10 @@
 
 **Kind:** bug · **Status:** implemented · **Depends on:** nothing
 
+> Follow-up: Plan 04 found that accepted off-grid pin boundaries must split
+> their mission’s segments to prevent automatic overstaffing. Its implemented
+> behavior supersedes any earlier instruction here to exclude those boundaries.
+
 ## Symptom
 
 On the schedule screen (phone layout, day of Thursday 10/09), כרמל מוצב shows four people in the
