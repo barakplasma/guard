@@ -24,6 +24,7 @@ without the extensions retain their previous encoding.
 | mission | 9–10 | daily start/end minutes | null; zero is midnight |
 | mission | 11 | flat qualification requirement pairs | [] |
 | mission | 12 | excluded tag ids | [] |
+| mission | 13 | on-call flag | absent; `1` when on-call |
 | employee | 4 | qualification ids | [] |
 | plan | key `tg` | qualification definitions | omitted |
 

@@ -102,7 +102,7 @@ jobs:
         run: npx --yes wait-on@8 -t 30000 http://localhost:4173
 
       - name: Run browser e2e tests
-        run: node tests/e2e.mjs
+        run: node tests/e2e.mjs && node tests/number-inputs.e2e.mjs
         env:
           BASE: http://localhost:4173
 

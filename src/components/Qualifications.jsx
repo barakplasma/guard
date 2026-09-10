@@ -4,6 +4,7 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
 import { usePlan } from '../state/PlanContext.jsx';
 import { makeId } from '../lib/planSchema.js';
 import { removeTag } from '../lib/tags.js';
+import NumberField from './NumberField.jsx';
 import ConfirmDialog from './ConfirmDialog.jsx';
 import { t } from '../strings.js';
 
@@ -32,9 +33,9 @@ export function MissionQualifications({ mission, onChange }) {
       value={requires.map((r) => r.tag)} label={t.requiredQualifications}
       testId={`mission-requires-${mission.id}`} onChange={(ids) => onChange({ requires: ids.map((tag) => requires.find((r) => r.tag === tag) ?? { tag, count: 1 }) })} />
     <Stack direction="row" useFlexGap spacing={1} sx={{ flexWrap: 'wrap' }}>
-      {requires.map((r) => <TextField key={r.tag} type="number" label={doc.tags.find((tag) => tag.id === r.tag)?.name || t.qualificationName}
-        value={r.count} sx={{ width: 140 }} slotProps={{ htmlInput: { min: 1, max: 999, 'data-testid': `require-count-${mission.id}-${r.tag}` } }}
-        onChange={(e) => { const count = Number(e.target.value); if (Number.isInteger(count) && count >= 1 && count <= 999) onChange({ requires: requires.map((x) => x.tag === r.tag ? { ...x, count } : x) }); }} />)}
+      {requires.map((r) => <NumberField key={r.tag} label={doc.tags.find((tag) => tag.id === r.tag)?.name || t.qualificationName}
+        value={r.count} testId={`require-count-${mission.id}-${r.tag}`}
+        onChange={(count) => onChange({ requires: requires.map((x) => x.tag === r.tag ? { ...x, count } : x) })} />)}
     </Stack>
     <TagPicker tags={doc.tags} disabledIds={requires.map((r) => r.tag)}
       value={mission.excludes ?? []} label={t.excludedQualifications}
@@ -53,9 +54,9 @@ export default function QualificationManager() {
       {doc.tags.map((tag) => <Stack key={tag.id} direction="row" useFlexGap spacing={1} sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
         <TextField label={t.qualificationName} value={tag.name} sx={{ flex: '1 1 140px', minWidth: 0 }}
           slotProps={{ htmlInput: { maxLength: 80, 'data-testid': `tag-name-${tag.id}` } }} onChange={(e) => change(tag.id, { name: e.target.value })} />
-        <TextField label={t.nightRestMinutes} type="number" value={tag.minNightRestMinutes ?? ''} sx={{ flex: '1 1 160px', minWidth: 0 }}
-          slotProps={{ htmlInput: { min: 1, max: 1440, 'data-testid': `tag-rest-${tag.id}` } }}
-          onChange={(e) => { const raw = e.target.value, n = Number(raw); if (!raw || (Number.isInteger(n) && n >= 1 && n <= 1440)) change(tag.id, { minNightRestMinutes: raw ? n : null }); }} />
+        <NumberField label={t.nightRestMinutes} value={tag.minNightRestMinutes} sx={{ flex: '1 1 220px', minWidth: 0 }}
+          nullable max={1440} testId={`tag-rest-${tag.id}`}
+          onChange={(minNightRestMinutes) => change(tag.id, { minNightRestMinutes })} />
         <IconButton aria-label={t.remove} data-testid={`remove-tag-${tag.id}`} onClick={() => setPending(tag)}><DeleteOutlineIcon /></IconButton>
       </Stack>)}
     </Stack>

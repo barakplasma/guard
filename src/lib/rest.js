@@ -34,13 +34,18 @@ export function overlapsRest(employeeId, start, end, blocks) {
   return blocks.some((b) => b.employeeId === employeeId && overlap(b, { start, end }));
 }
 
-/** Measure continuous off-duty time in the final output, never a promised block. */
-export function assessRest(shifts, employees, tags, nights, start, end) {
+/**
+ * Measure continuous off-duty time in the final output, never a promised
+ * block. `sleepable` holds the ids of on-call missions: duty on one can be
+ * slept through, so it does not interrupt the rest being measured here.
+ */
+export function assessRest(shifts, employees, tags, nights, start, end, sleepable = new Set()) {
   const out = [];
   for (const e of employees) {
     const needed = target(e, tags);
     if (!needed) continue;
-    const own = shifts.filter((s) => s.employeeId === e.id).sort((a, b) => a.start - b.start);
+    const own = shifts.filter((s) => s.employeeId === e.id && !sleepable.has(s.missionId))
+      .sort((a, b) => a.start - b.start);
     for (const night of nights) {
       const lo = Math.max(start, night.start), hi = Math.min(end, night.end);
       if (hi <= lo) continue;
