@@ -11,8 +11,8 @@ and the app works offline after its assets have loaded and been cached.
 - **Local missions:** rotate crews using the plan's default shift length or a
   mission's own daytime and nighttime lengths and headcounts.
 - **Remote missions:** keep the same crew for the entire mission window.
-- **Daily missions:** keep one crew for each daily occurrence. Times use 24-hour
-  notation; 08:00–08:00 means through the following morning. Short duties block
+- **Daily missions:** keep one crew for each daily occurrence. Native time pickers
+  use the device locale; 08:00–08:00 means through the following morning. Short duties block
   only their actual hours. Completed duties rotate per mission.
 - **Required qualifications:** require a number of qualified people within the
   existing headcount. Prefer separate people for different roles, while allowing
@@ -22,6 +22,10 @@ and the app works offline after its assets have loaded and been cached.
   such as commanders from kitchen duty. Explicit pins override exclusions visibly.
 - **Night rest:** configure preferred continuous rest per qualification. Staffing
   continues if rest cannot be preserved, with measured shortfalls shown.
+- **On-call missions:** sleep-compatible duty preserves night rest while still
+  counting toward workload and blocking overlapping assignments.
+- **Numeric inputs:** MUI Number Spinners provide explicit touch buttons, numeric
+  keyboard entry, and validated bounds on Android Chrome.
 - **Manual assignments:** assign a mission roster, swap or clear individual
   assignments, and preserve unaffected pin ranges. Edits freeze elapsed automatic
   assignments as editable pins.
@@ -82,6 +86,7 @@ With that preview running, use another terminal:
 BASE=http://127.0.0.1:4173 SHOT_DIR=/tmp/guard-e2e node tests/e2e.mjs
 BASE=http://127.0.0.1:4173 SHOT_DIR=/tmp/guard-mobile node tests/mobile-viewports.mjs
 BASE=http://127.0.0.1:4173 SHOT_DIR=/tmp/guard-features node tests/features.e2e.mjs
+BASE=http://127.0.0.1:4173 node tests/number-inputs.e2e.mjs
 ```
 
 Set `CHROME=/usr/bin/chromium` to use an installed browser instead. The suites

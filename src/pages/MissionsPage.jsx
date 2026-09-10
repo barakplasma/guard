@@ -7,6 +7,7 @@ import {
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
 import AddIcon from '@mui/icons-material/Add';
 import DateTimeField from '../components/DateTimeField.jsx';
+import NumberField from '../components/NumberField.jsx';
 import DailyClockField from '../components/DailyClockField.jsx';
 import ConfirmDialog from '../components/ConfirmDialog.jsx';
 import { usePlan } from '../state/PlanContext.jsx';
@@ -14,20 +15,6 @@ import { sortByHebrewName } from '../lib/sort.js';
 import { nextTopOfHour } from '../lib/planSchema.js';
 import { t } from '../strings.js';
 import { MissionQualifications } from '../components/Qualifications.jsx';
-
-/**
- * What a shift-length box's new text means: `null` where it was cleared, so
- * the mission goes back to inheriting; the number where it is a usable one;
- * and `undefined` for anything else, which the caller drops rather than
- * writes. A number input emits on every keystroke and the document it lands in
- * is the user's only copy, so a value that is not yet a shift length must not
- * become one.
- */
-function readMinutes(raw) {
-  if (raw === '') return null;
-  const n = Number(raw);
-  return Number.isInteger(n) && n >= 5 && n <= 1440 ? n : undefined;
-}
 
 function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
   // Anyone holding a pin on this mission is on its roster. A whole-mission
@@ -88,17 +75,9 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
             </ToggleButton>
           </ToggleButtonGroup>
 
-          <TextField
-            label={mission.type === 'daily' ? t.headcountPerOccurrence : mission.type === 'remote' ? t.headcount : t.headcountDay}
-            type="number"
-            value={mission.count}
-            onChange={(e) => {
-              const n = Number(e.target.value);
-              if (Number.isInteger(n) && n >= 1) onChange({ count: n });
-            }}
-            slotProps={{ htmlInput: { min: 1, 'data-testid': `mission-count-${mission.id}` } }}
-            sx={{ width: 120 }}
-          />
+          <NumberField label={mission.type === 'daily' ? t.headcountPerOccurrence : mission.type === 'remote' ? t.headcount : t.headcountDay} value={mission.count}
+            testId={`mission-count-${mission.id}`}
+            onChange={(value) => onChange({ count: value })} />
 
           {/*
             Remote missions are held end to end by one set of people, so there is
@@ -108,20 +87,9 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
           */}
           {mission.type === 'local' && (
             <Tooltip title={t.headcountNightHelp}>
-              <TextField
-                label={t.headcountNight}
-                type="number"
-                value={mission.nightCount ?? ''}
-                placeholder={String(mission.count)}
-                onChange={(e) => {
-                  const raw = e.target.value;
-                  if (raw === '') { onChange({ nightCount: null }); return; }
-                  const n = Number(raw);
-                  if (Number.isInteger(n) && n >= 1) onChange({ nightCount: n });
-                }}
-                slotProps={{ htmlInput: { min: 1, 'data-testid': `mission-night-count-${mission.id}` } }}
-                sx={{ width: 120 }}
-              />
+              <NumberField label={t.headcountNight} value={mission.nightCount}
+                nullable fallbackValue={mission.count} testId={`mission-night-count-${mission.id}`}
+                onChange={(value) => onChange({ nightCount: value })} />
             </Tooltip>
           )}
 
@@ -160,38 +128,14 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
         {mission.type === 'local' && (
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} useFlexGap sx={{ flexWrap: 'wrap', alignItems: { xs: 'stretch', sm: 'center' } }}>
             <Tooltip title={t.shiftLengthDayHelp}>
-              <TextField
-                label={t.shiftLengthDay}
-                type="number"
-                value={mission.shiftMinutes ?? ''}
-                placeholder={String(doc.shiftMinutes)}
-                onChange={(e) => {
-                  const v = readMinutes(e.target.value);
-                  if (v !== undefined) onChange({ shiftMinutes: v });
-                }}
-                slotProps={{
-                  inputLabel: { shrink: true },
-                  htmlInput: { min: 5, max: 1440, step: 5, 'data-testid': `mission-shift-${mission.id}` },
-                }}
-                sx={{ width: 200 }}
-              />
+              <NumberField label={t.shiftLengthDay} value={mission.shiftMinutes}
+                nullable min={5} max={1440} step={5} fallbackValue={doc.shiftMinutes} testId={`mission-shift-${mission.id}`}
+                onChange={(value) => onChange({ shiftMinutes: value })} />
             </Tooltip>
             <Tooltip title={t.shiftLengthNightHelp}>
-              <TextField
-                label={t.shiftLengthNight}
-                type="number"
-                value={mission.nightShiftMinutes ?? ''}
-                placeholder={String(mission.shiftMinutes ?? doc.shiftMinutes)}
-                onChange={(e) => {
-                  const v = readMinutes(e.target.value);
-                  if (v !== undefined) onChange({ nightShiftMinutes: v });
-                }}
-                slotProps={{
-                  inputLabel: { shrink: true },
-                  htmlInput: { min: 5, max: 1440, step: 5, 'data-testid': `mission-night-shift-${mission.id}` },
-                }}
-                sx={{ width: 200 }}
-              />
+              <NumberField label={t.shiftLengthNight} value={mission.nightShiftMinutes}
+                nullable min={5} max={1440} step={5} fallbackValue={mission.shiftMinutes ?? doc.shiftMinutes} testId={`mission-night-shift-${mission.id}`}
+                onChange={(value) => onChange({ nightShiftMinutes: value })} />
             </Tooltip>
           </Stack>
         )}

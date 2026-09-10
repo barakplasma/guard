@@ -1,5 +1,7 @@
 /** All user-facing copy. Hebrew only - the app is RTL throughout. */
 export const t = {
+  decreaseNumber: (label) => `הקטנת ${label}`,
+  increaseNumber: (label) => `הגדלת ${label}`,
   missingQualification: (mission, tag, n) => `${mission}: נדרשים ${n} בעלי הסמכת ${tag}; הכיסוי אינו מלא.`,
   restShortfall: (person, needed, got) => `${person}: מנוחת לילה רצופה ${got} דקות במקום ${needed}. המשימות אוישו למרות החריגה.`,
   restIncomplete: (person) => `${person}: הלילה מכוסה חלקית בתקופה או בזמינות; אי אפשר לאשר מנוחה מלאה.`,

@@ -4,6 +4,7 @@ import {
 } from '@mui/material';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import DateTimeField from './DateTimeField.jsx';
+import NumberField from './NumberField.jsx';
 import { toTimeInput, fromTimeInput } from './DailyClockField.jsx';
 import { usePlan } from '../state/PlanContext.jsx';
 import { topOfHour, nextTopOfHour } from '../lib/planSchema.js';
@@ -72,16 +73,11 @@ export default function SettingsBar() {
           onChange={(v) => v != null && setField('end', v)}
           testId="plan-end"
         />
-        <TextField
+        <NumberField
           label={t.shiftLength}
-          type="number"
           value={doc.shiftMinutes}
-          onChange={(e) => {
-            const n = Number(e.target.value);
-            if (Number.isInteger(n) && n >= 5 && n <= 1440) setField('shiftMinutes', n);
-          }}
-          slotProps={{ htmlInput: { min: 5, max: 1440, step: 5, 'data-testid': 'shift-minutes' } }}
-          sx={{ width: 160 }}
+          onChange={(n) => setField('shiftMinutes', n)}
+          min={5} max={1440} step={5} testId="shift-minutes"
         />
         {/*
           Night is a wall clock range, not a pair of instants: it repeats every
