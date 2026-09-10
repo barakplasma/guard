@@ -22,6 +22,12 @@ const planArb = fc.record({
       type: fc.constantFrom('local', 'remote'),
       count: fc.integer({ min: 1, max: 3 }),
       nightCount: fc.integer({ min: 1, max: 3 }),
+      // A grid of its own, or the plan's - and by night, a third possibility
+      // again. Mixed grids beside each other are the case the properties
+      // below have to keep holding for; `null` keeps plenty of missions on the
+      // shared grid so the two paths are exercised together.
+      shiftMinutes: fc.constantFrom(null, 60, 120, 180),
+      nightShiftMinutes: fc.constantFrom(null, 60, 120, 180),
       offsetMin: fc.integer({ min: 0, max: 300 }),
       lengthMin: fc.integer({ min: 30, max: 600 }),
     }),
@@ -60,6 +66,8 @@ function build(spec) {
     end: start + (m.offsetMin + m.lengthMin) * MIN,
     count: m.count,
     nightCount: m.nightCount,
+    shiftMinutes: m.shiftMinutes,
+    nightShiftMinutes: m.nightShiftMinutes,
   })).filter((m) => m.start < end);
 
   return {
@@ -165,6 +173,25 @@ test('remote missions are held end to end by the same people', () => {
         assert.equal(s.start, from, 'a remote shift must span the whole mission');
         assert.equal(s.end, to);
       }
+    }
+  }), { numRuns: 300 });
+});
+
+test('every local shift lies inside one slot of its own mission grid', () => {
+  // The bound the whole per-mission grid rests on. A row that outran its slot
+  // would mean two shifts wearing one row - the shape that surfaced eleven
+  // slots as a single 88-hour block - and one that named a slot it is not
+  // inside would break both `mergeRows` and the ring's turn count. Remote
+  // holds are the documented exception: the slot is the mission itself.
+  fc.assert(fc.property(planArb, (spec) => {
+    const input = build(spec);
+    if (input.missions.length === 0) return;
+    const { shifts } = plan(input);
+
+    for (const s of shifts) {
+      assert.ok(Number.isFinite(s.slotStart) && Number.isFinite(s.slotEnd), 'every row names a slot');
+      assert.ok(s.slotStart <= s.start, 'a row starts before the slot it claims');
+      assert.ok(s.slotEnd >= s.end, 'a row outruns the slot it claims');
     }
   }), { numRuns: 300 });
 });

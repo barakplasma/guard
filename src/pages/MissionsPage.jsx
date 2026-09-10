@@ -13,6 +13,20 @@ import { sortByHebrewName } from '../lib/sort.js';
 import { nextTopOfHour } from '../lib/planSchema.js';
 import { t } from '../strings.js';
 
+/**
+ * What a shift-length box's new text means: `null` where it was cleared, so
+ * the mission goes back to inheriting; the number where it is a usable one;
+ * and `undefined` for anything else, which the caller drops rather than
+ * writes. A number input emits on every keystroke and the document it lands in
+ * is the user's only copy, so a value that is not yet a shift length must not
+ * become one.
+ */
+function readMinutes(raw) {
+  if (raw === '') return null;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 5 && n <= 1440 ? n : undefined;
+}
+
 function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
   // Anyone holding a pin on this mission is on its roster. A whole-mission
   // assignment does not stay whole: clearing or swapping a single shift cuts
@@ -117,6 +131,52 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
             <DeleteOutlineIcon />
           </IconButton>
         </Stack>
+
+        {/*
+          How long one of this mission's own shifts is, by day and by night.
+          Remote missions have no shifts to size - one set of people holds the
+          whole window - so the pair is hidden there exactly like the night
+          headcount. Left blank each field inherits: the day length from the
+          plan's default, the night length from the day one.
+        */}
+        {mission.type === 'local' && (
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} useFlexGap sx={{ flexWrap: 'wrap', alignItems: { xs: 'stretch', sm: 'center' } }}>
+            <Tooltip title={t.shiftLengthDayHelp}>
+              <TextField
+                label={t.shiftLengthDay}
+                type="number"
+                value={mission.shiftMinutes ?? ''}
+                placeholder={String(doc.shiftMinutes)}
+                onChange={(e) => {
+                  const v = readMinutes(e.target.value);
+                  if (v !== undefined) onChange({ shiftMinutes: v });
+                }}
+                slotProps={{
+                  inputLabel: { shrink: true },
+                  htmlInput: { min: 5, max: 1440, step: 5, 'data-testid': `mission-shift-${mission.id}` },
+                }}
+                sx={{ width: 200 }}
+              />
+            </Tooltip>
+            <Tooltip title={t.shiftLengthNightHelp}>
+              <TextField
+                label={t.shiftLengthNight}
+                type="number"
+                value={mission.nightShiftMinutes ?? ''}
+                placeholder={String(mission.shiftMinutes ?? doc.shiftMinutes)}
+                onChange={(e) => {
+                  const v = readMinutes(e.target.value);
+                  if (v !== undefined) onChange({ nightShiftMinutes: v });
+                }}
+                slotProps={{
+                  inputLabel: { shrink: true },
+                  htmlInput: { min: 5, max: 1440, step: 5, 'data-testid': `mission-night-shift-${mission.id}` },
+                }}
+                sx={{ width: 200 }}
+              />
+            </Tooltip>
+          </Stack>
+        )}
 
         <Typography variant="caption" color="text.secondary">
           {mission.type === 'remote' ? t.typeRemoteHelp : t.typeLocalHelp}

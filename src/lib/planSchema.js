@@ -42,6 +42,22 @@ export const missionSchema = z.object({
   nightCount: z.number().int().min(1).max(999)
     .nullable()
     .default(null),
+  // How long one of this mission's rotation slots is. `null` means the plan's
+  // own `shiftMinutes`, which is what every link written before this field
+  // existed means - and what a mission rotating on the house grid keeps
+  // meaning. Like `nightCount`, it says nothing on a remote mission, which one
+  // set of people holds end to end with no slots to divide.
+  shiftMinutes: z.number().int().min(5).max(24 * 60)
+    .nullable()
+    .default(null),
+  // The same, inside the plan's night stretches; `null` means "same as by day".
+  // Deliberately not capped against the night's own length: a 600-minute night
+  // slot inside an eight-hour night is simply one partial slot ending at
+  // daybreak, which is harmless, and the alternative is a validation error
+  // that fires while someone is still typing the number.
+  nightShiftMinutes: z.number().int().min(5).max(24 * 60)
+    .nullable()
+    .default(null),
 });
 
 export const pinSchema = z.object({
@@ -195,6 +211,8 @@ export function toPlannerInput(doc) {
       end: m.end ?? undefined,
       count: m.count,
       nightCount: m.nightCount ?? undefined,
+      shiftMinutes: m.shiftMinutes ?? undefined,
+      nightShiftMinutes: m.nightShiftMinutes ?? undefined,
     })),
     pins: doc.pins.map((p) => ({
       missionId: p.missionId,

@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { plan } from '../src/lib/planner.js';
-import { mergedRuns } from '../src/lib/strategies.js';
 
 const HOUR = 3600 * 1000;
 
@@ -204,12 +203,69 @@ test('an unknown strategy name falls back to the default instead of throwing', (
   );
 });
 
-test('mergedRuns joins touching and overlapping intervals, and sorts', () => {
-  assert.deepEqual(
-    mergedRuns([{ start: 30, end: 40 }, { start: 0, end: 10 }, { start: 10, end: 20 }]),
-    [{ start: 0, end: 20 }, { start: 30, end: 40 }],
+test('half a slot on one mission and half on another is one turn, not two', () => {
+  // The ring counts distinct slots entered, keyed on the bare slot start and
+  // deliberately not on (mission, slot). A guard who covered 10:00-11:00 on one
+  // mission and 11:00-12:00 on another spent the 10:00 slot on duty once, the
+  // same as the guard who spent it on a single mission - which is what the old
+  // "merge the intervals into runs, then measure the run" arithmetic said too.
+  //
+  // e1 is pinned across two whole slots, e2 across the two halves of one. They
+  // come off at the same instant, so rest ties and the turn count decides the
+  // 12:00 slot: e2 has taken one turn to e1's two.
+  const END = START + 6 * HOUR;
+  const result = plan({
+    start: START,
+    end: END,
+    shiftMinutes: 120,
+    strategy: 'rotation',
+    employees: ring(2),
+    missions: [
+      { id: 'c', name: 'Charlie', type: 'local', start: START, end: END, count: 1 },
+      { id: 'a', name: 'Alpha', type: 'local', start: START + 2 * HOUR, end: START + 3 * HOUR, count: 1 },
+      { id: 'b', name: 'Bravo', type: 'local', start: START + 3 * HOUR, end: START + 4 * HOUR, count: 1 },
+    ],
+    pins: [
+      { missionId: 'c', employeeId: 'e1', start: START, end: START + 4 * HOUR },
+      { missionId: 'a', employeeId: 'e2' },
+      { missionId: 'b', employeeId: 'e2' },
+    ],
+  });
+
+  const last = result.shifts.find((s) => s.missionId === 'c' && s.start === START + 4 * HOUR);
+  assert.equal(last.employeeId, 'e2', 'e2 has had one turn to e1&apos;s two');
+});
+
+test('a longer slot on one mission still costs exactly one turn', () => {
+  // Two-hour slots on one mission beside hourly ones on another. e2 holds a
+  // single two-hour slot while e1 works two hourly ones; both come off at
+  // 10:00, so the 10:00 hourly slot turns on the count, and a turn is a slot
+  // rather than a length.
+  const END = START + 4 * HOUR;
+  const result = plan({
+    start: START,
+    end: END,
+    shiftMinutes: 60,
+    strategy: 'rotation',
+    employees: ring(2),
+    missions: [
+      { id: 'g', name: 'Gate', type: 'local', start: START, end: END, count: 1 },
+      {
+        id: 'h', name: 'Ops', type: 'local', start: START, end: END, count: 1, shiftMinutes: 120,
+      },
+    ],
+  });
+
+  const at = (missionId, h) => result.shifts.find(
+    (s) => s.missionId === missionId && s.start === START + h * HOUR,
   );
-  assert.deepEqual(mergedRuns([]), []);
+  assert.equal(at('h', 0).employeeId, 'e2');
+  assert.equal(at('h', 0).end, START + 2 * HOUR, 'the two-hour slot is one row');
+  assert.equal(
+    at('g', 2).employeeId,
+    'e2',
+    'e2 goes again at 10:00: one two-hour turn is cheaper than two hourly ones',
+  );
 });
 
 test('a lopsided frozen past does not let a fresh guard double up', () => {

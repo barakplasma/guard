@@ -29,6 +29,26 @@ const CODE_TYPE = ['local', 'remote'];
 const outTs = (v) => (v == null ? 0 : v);
 const inTs = (v) => (v === 0 || v == null ? null : v);
 
+/** The mission tuple as it stood before per-mission shift lengths were added. */
+const MISSION_TUPLE_WAS = 7;
+
+/**
+ * Drop trailing "not set" slots from a positional tuple, never shortening it
+ * past `keep`.
+ *
+ * Field order is the wire format, so a new field can only be appended - and a
+ * document that uses none of the new fields has to encode to exactly the bytes
+ * it encoded to before they existed, or every link already shared changes
+ * shape for no reason. `keep` is the tuple's length at the last build people
+ * hold links from; anything beyond it is written only when it carries a value,
+ * and a position the decoder does not find reads back as unset.
+ */
+function trimTail(tuple, keep) {
+  let length = tuple.length;
+  while (length > keep && !tuple[length - 1]) length--;
+  return length === tuple.length ? tuple : tuple.slice(0, length);
+}
+
 export function encodePlan(doc) {
   const compact = {
     v: doc.version ?? SCHEMA_VERSION,
@@ -40,13 +60,16 @@ export function encodePlan(doc) {
     ns: doc.nightStart,
     ne: doc.nightEnd,
     emp: doc.employees.map((x) => [x.id, x.name, outTs(x.start), outTs(x.end)]),
-    // `nightCount` is *appended* to the mission tuple. Field order is the wire
-    // format here, so appending is safe and reordering is not: an older link
-    // simply has no seventh element and reads back as `null`, i.e. "same
-    // headcount at night", which is exactly what it always meant.
-    mis: doc.missions.map((x) => [
+    // Everything past `count` is *appended* to the mission tuple. Field order
+    // is the wire format here, so appending is safe and reordering is not: an
+    // older link simply has no seventh element and reads back as `null`, i.e.
+    // "same headcount at night", which is exactly what it always meant. The
+    // positions are reserved once, in docs/plans/README.md, so two features
+    // built in either order cannot claim the same one.
+    mis: doc.missions.map((x) => trimTail([
       x.id, x.name, TYPE_CODE[x.type] ?? 0, outTs(x.start), outTs(x.end), x.count, x.nightCount ?? 0,
-    ]),
+      x.shiftMinutes ?? 0, x.nightShiftMinutes ?? 0,
+    ], MISSION_TUPLE_WAS)),
     pin: doc.pins.map((x) => [x.missionId, x.employeeId, outTs(x.start), outTs(x.end), x.frozen ? 1 : 0]),
   };
   return compressToEncodedURIComponent(JSON.stringify(compact));
@@ -87,7 +110,9 @@ export function decodePlan(blob) {
       employees: (raw.emp ?? []).map(([id, name, s, e]) => ({
         id, name, start: inTs(s), end: inTs(e),
       })),
-      missions: (raw.mis ?? []).map(([id, name, type, s, e, count, nightCount]) => ({
+      missions: (raw.mis ?? []).map((
+        [id, name, type, s, e, count, nightCount, shiftMinutes, nightShiftMinutes],
+      ) => ({
         id,
         name,
         type: CODE_TYPE[type] ?? 'local',
@@ -95,8 +120,12 @@ export function decodePlan(blob) {
         end: inTs(e),
         count,
         // `0` is the "not set" spelling here, as it is for the timestamps: a
-        // headcount of zero is not a thing a mission can ask for.
+        // headcount of zero is not a thing a mission can ask for, and neither
+        // is a zero-length shift. A position the encoder trimmed away arrives
+        // as `undefined` and reads the same way.
         nightCount: nightCount || null,
+        shiftMinutes: shiftMinutes || null,
+        nightShiftMinutes: nightShiftMinutes || null,
       })),
       pins: (raw.pin ?? []).map(([missionId, employeeId, s, e, f]) => ({
         missionId, employeeId, start: inTs(s), end: inTs(e), frozen: Boolean(f),

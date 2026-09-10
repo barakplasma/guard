@@ -113,6 +113,11 @@ function SlotRow({ info, employees, hideMissionName, onSwap, onClearPin }) {
     <Box
       id={isNowAnchor ? 'now-slot' : undefined}
       data-testid={`slot-${slot.start}`}
+      // A slot is keyed on (start, end), so two of them can begin at the same
+      // instant and end at different ones - a two-hour mission beside hourly
+      // ones, or a remote block beside either. The end is published alongside
+      // so a test can tell those apart; the id keeps its old shape.
+      data-slot-end={slot.end}
       sx={{
         display: 'flex',
         gap: 1,
@@ -176,6 +181,7 @@ function SlotTable({ slots, employees, onSwap, onClearPin }) {
               key={`${slot.start}-${slot.end}`}
               id={isNowAnchor ? 'now-slot' : undefined}
               data-testid={`slot-${slot.start}`}
+              data-slot-end={slot.end}
               sx={isNow ? {
                 '& > tr': { bgcolor: 'action.hover' },
                 '& > tr > td:first-of-type': {

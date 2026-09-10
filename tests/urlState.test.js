@@ -199,6 +199,50 @@ test('the night window and per-mission night headcount survive the round trip', 
   assert.ok(input.nightWindows.length > 0);
 });
 
+test('per-mission shift lengths survive the round trip and reach the engine', () => {
+  const doc = planSchema.parse({
+    ...sample(),
+    missions: [
+      { ...sample().missions[0], shiftMinutes: 120, nightShiftMinutes: 60 },
+      sample().missions[1],
+    ],
+  });
+  const back = decodePlan(encodePlan(doc)).plan;
+
+  assert.equal(back.missions[0].shiftMinutes, 120);
+  assert.equal(back.missions[0].nightShiftMinutes, 60);
+  assert.equal(back.missions[1].shiftMinutes, null);
+  // And they reach the engine - a field missed in the adapter is silently inert.
+  const input = toPlannerInput(back);
+  assert.equal(input.missions[0].shiftMinutes, 120);
+  assert.equal(input.missions[0].nightShiftMinutes, 60);
+  assert.equal(input.missions[1].shiftMinutes, undefined);
+});
+
+test('a night length on its own round-trips without a day length', () => {
+  // Position 7 is written as `0` so position 8 keeps its place: the tuple is
+  // positional, so a hole cannot be closed up.
+  const doc = planSchema.parse({
+    ...sample(),
+    missions: [{ ...sample().missions[0], nightShiftMinutes: 45 }, sample().missions[1]],
+  });
+  const back = decodePlan(encodePlan(doc)).plan;
+  assert.equal(back.missions[0].shiftMinutes, null);
+  assert.equal(back.missions[0].nightShiftMinutes, 45);
+});
+
+test('a document using neither new field encodes to the exact bytes it always did', () => {
+  // Captured from the build before per-mission shift lengths existed. Trailing
+  // unset positions are trimmed, so every link already shared stays the string
+  // it was - which is the whole reason the positions are appended rather than
+  // inserted, and the reason `trimTail` exists at all. If this fails, links in
+  // the wild have quietly changed shape.
+  assert.equal(
+    encodePlan(sample()),
+    'N4IgbiBcCMA0IBcokIeghV0EMegACQl6CEXQNQI9AR4BnKaAdgDYaAGBxh+AUwppoBYBmAJibrwAtlACcgkKSSQQAIwCGAG3kA7AMYsAJiRAryMPhJVtI3ahJZCADlADatkC2g7AC6B5Am6AlBdALqwHLLw6gMuggAeggCugJFS05mYCsNE0vAAcyQJ+Adw6AJoA9qQsAGZYADog2WVYAPIA5ABCAE4AliwqXrC+fiBCTfr23c7wOISAF6Dt3rC8sJwZ3UHwKO5oYwkJHOYCzInU0Jyc8XCd8FZNbZD9QvOOgxO+-gM6LFlrMXRxTC-0lPwfnQC+QA',
+  );
+});
+
 test('a mission staffed evenly round the clock keeps a null night count', () => {
   const doc = sample();
   const back = decodePlan(encodePlan(doc)).plan;
@@ -227,7 +271,12 @@ test('a link encoded before night headcounts existed decodes as the original beh
 
   const back = decodePlan(legacy);
   assert.equal(back.ok, true);
-  for (const m of back.plan.missions) assert.equal(m.nightCount, null);
+  for (const m of back.plan.missions) {
+    assert.equal(m.nightCount, null);
+    // Positions 7 and 8 are simply not there, and read back as "inherit".
+    assert.equal(m.shiftMinutes, null);
+    assert.equal(m.nightShiftMinutes, null);
+  }
   assert.equal(back.plan.nightStart, 22 * 60);
 
   const evenlyStaffed = planSchema.parse({
