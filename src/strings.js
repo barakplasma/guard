@@ -22,11 +22,13 @@ export const t = {
   qualityLongRun: (name, n) => `${name}: רצף של ${n} תורנויות ללא הפסקה`,
   typeDaily: 'יומית',
   typeDailyHelp: 'אותם אנשים לכל התורנות. שעות זהות מציינות יום ולילה מלאים, עד למחרת.',
-  dailyFrom: 'תחילת תורנות (24 שעות)',
-  dailyTo: 'סיום תורנות (24 שעות)',
+  dailyFrom: 'תחילת תורנות',
+  dailyTo: 'סיום תורנות',
   dailyNextDay: 'הסיום למחרת',
   dailyIncomplete: 'יש למלא שעת התחלה ושעת סיום',
   headcountPerOccurrence: 'אנשים לתורנות',
+  onCall: 'כוננות',
+  onCallHelp: 'אפשר לישון בזמן המשימה: הזמן בה נחשב מנוחה, ולא עבודה שמפסיקה אותה.',
 
   appTitle: 'מתכנן משמרות',
 

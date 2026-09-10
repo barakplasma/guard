@@ -12,6 +12,7 @@ these documents are decision records, not pending implementation plans.
 | [004](04-schedule-constraints.md) | Independently validate generated schedules. |
 | [005](05-qualifications-and-tags.md) | Select qualified crews with preferred night rest. |
 | [006](06-approved-continuation.md) | Extend shared plan URLs without reordering existing fields. |
+| [007](07-on-call-missions.md) | Count on-call missions toward night rest. |
 
 Each record states the context, decision, consequences, rejected alternatives,
 and implementation or test evidence. Acceptance dates record this design, not a

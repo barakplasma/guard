@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
   Box, Button, Checkbox, Chip, FormControl, FormControlLabel, IconButton, InputLabel, MenuItem,
-  OutlinedInput, Paper, Select, Stack, TextField, ToggleButton,
+  OutlinedInput, Paper, Select, Stack, Switch, TextField, ToggleButton,
   ToggleButtonGroup, Tooltip, Typography,
 } from '@mui/material';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
@@ -124,6 +124,21 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
               />
             </Tooltip>
           )}
+
+          <Tooltip title={t.onCallHelp}>
+            <FormControlLabel
+              sx={{ flexShrink: 0 }}
+              control={(
+                <Switch
+                  size="small"
+                  checked={mission.onCall ?? false}
+                  onChange={(e) => onChange({ onCall: e.target.checked })}
+                  data-testid={`mission-oncall-${mission.id}`}
+                />
+              )}
+              label={t.onCall}
+            />
+          </Tooltip>
 
           <IconButton
             aria-label={t.remove}

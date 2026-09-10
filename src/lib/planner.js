@@ -250,6 +250,7 @@ function normalizeMissions(missions, planStart, planEnd, warnings) {
       nightCount,
       shiftMinutes: slot.day,
       nightShiftMinutes: slot.night,
+      onCall: Boolean(m.onCall),
     });
   }
   return out;
@@ -570,8 +571,16 @@ export function plan({
 
   const strategy = getStrategy(strategyName);
   const state = makeState(emps, strategy);
-  const rest = preferredRest(emps, tags, nightWindows, goodPins, start, end);
+  // On-call duty can be slept through, so pins on such missions must not push
+  // anyone's sleep block out of the night, and staffing one must not cost the
+  // crew their rest window - see `choose` and `assessRest` below.
+  const sleepable = new Set([...missionById.values()].filter((m) => m.onCall).map((m) => m.id));
+  const rest = preferredRest(emps, tags, nightWindows,
+    goodPins.filter((p) => !sleepable.has(p.missionId)), start, end);
   const choose = (candidates, fixed, need, mission, lo, hi) => {
+    // Sleep-compatible duty: rest blocks neither deprioritize nor exclude
+    // anyone from an on-call mission.
+    if (mission.onCall) return selectCrew(candidates, fixed, need, mission.requires);
     const ordered = [...candidates].sort((a, b) => Number(overlapsRest(a.id, lo, hi, rest)) - Number(overlapsRest(b.id, lo, hi, rest)));
     const picked = selectCrew(ordered, fixed, need, mission.requires);
     const rested = ordered.filter((e) => !overlapsRest(e.id, lo, hi, rest));
@@ -900,7 +909,7 @@ export function plan({
     }
   }
   warnings.push(...missing.values());
-  warnings.push(...assessRest(shifts, emps, tags, nightWindows, start, end));
+  warnings.push(...assessRest(shifts, emps, tags, nightWindows, start, end, sleepable));
   return validateSchedule(result, { start, end, shiftMinutes, employees: emps, missions: miss, nightWindows }, onInvariantViolation);
 }
 

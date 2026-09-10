@@ -45,3 +45,12 @@ test('rest-preserving combined roles beat separate roles that break rest unneces
   d.missions[0].requires = [{ tag: 'd', count: 1 }, { tag: 'c', count: 1 }];
   assert.ok(!plan(d).warnings.some((w) => w.code === 'rest-unsatisfied'));
 });
+test('an on-call mission is slept through: night rest survives duty on it', () => {
+  // Same shape as the single-crew test above that reports rest-unsatisfied -
+  // the on-call flag is the only difference.
+  const d = input(1);
+  d.missions[0].onCall = true;
+  const r = plan(d);
+  assert.equal(r.shifts.length, 8);
+  assert.ok(!r.warnings.some((w) => w.code === 'rest-unsatisfied'));
+});

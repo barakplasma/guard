@@ -63,6 +63,10 @@ export const missionSchema = z.object({
   nightShiftMinutes: z.number().int().min(5).max(24 * 60)
     .nullable()
     .default(null),
+  // An on-call mission may be slept through: time on it counts toward the
+  // night-rest requirement instead of breaking it. Absent from every link
+  // written before this field existed, which reads as plain duty.
+  onCall: z.boolean().default(false),
 });
 
 export const pinSchema = z.object({
@@ -244,6 +248,7 @@ export function toPlannerInput(doc) {
       nightCount: m.nightCount ?? undefined,
       shiftMinutes: m.shiftMinutes ?? undefined,
       nightShiftMinutes: m.nightShiftMinutes ?? undefined,
+      onCall: m.onCall,
       ...(m.type === 'daily' ? { occurrences: dailyOccurrences(doc, m) } : {}),
     })),
     pins: doc.pins.map((p) => ({

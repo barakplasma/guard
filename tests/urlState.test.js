@@ -220,6 +220,27 @@ test('per-mission shift lengths survive the round trip and reach the engine', ()
   assert.equal(input.missions[1].shiftMinutes, undefined);
 });
 
+test('on-call survives the round trip; off encodes to the legacy bytes', () => {
+  const doc = planSchema.parse({
+    ...sample(),
+    missions: [{ ...sample().missions[0], onCall: true }, sample().missions[1]],
+  });
+  const back = decodePlan(encodePlan(doc)).plan;
+
+  assert.equal(back.missions[0].onCall, true);
+  assert.equal(back.missions[1].onCall, false);
+  // And it reaches the engine - a field missed in the adapter is silently inert.
+  const input = toPlannerInput(back);
+  assert.equal(input.missions[0].onCall, true);
+
+  // Schema defaults inject `onCall: false` everywhere; the encoder must trim
+  // that trailing slot away, or every link written before the field existed
+  // changes shape the moment it is re-shared.
+  const plain = planSchema.parse(sample());
+  const legacy = plain.missions.map(({ onCall: _dropped, ...rest }) => rest);
+  assert.equal(encodePlan(plain), encodePlan({ ...plain, missions: legacy }));
+});
+
 test('a night length on its own round-trips without a day length', () => {
   // Position 7 is written as `0` so position 8 keeps its place: the tuple is
   // positional, so a hole cannot be closed up.
