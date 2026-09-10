@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   applyClearPin, applyClearPinsForMission, applyMissionAssignees, applySwap,
-  clearStalePins, countStalePins, freezeElapsedBeforeEdit, freezePastShifts, pinCovers,
+  clearStalePins, countStalePins, cutPin, freezeElapsedBeforeEdit, freezePastShifts, pinCovers,
   pruneStalePins,
 } from '../src/lib/pins.js';
 import { WARN } from '../src/lib/planner.js';
@@ -45,8 +45,10 @@ test('a null-range pin inherits the mission window, which inherits the plan', ()
 
 /* --- swapping -------------------------------------------------------- */
 
-test('swapping removes the whole-mission pin of the person being replaced', () => {
-  // e1 assigned from the Missions page, then swapped out for e2 on the row.
+test('swapping the whole of a whole-mission pin cuts all of it away', () => {
+  // e1 assigned from the Missions page, then swapped out for e2 on the row -
+  // and on a remote mission that row *is* the whole mission, so the cut takes
+  // the entire pin and nothing is left over.
   const d = applyMissionAssignees(doc(), 'm1', ['e1']);
   assert.equal(d.pins.length, 1);
 
@@ -153,6 +155,102 @@ test('swapping without a named predecessor still replaces the row pin', () => {
   assert.equal(d.pins[0].employeeId, 'e3');
 });
 
+/* --- cutting a pin around one shift ----------------------------------- */
+
+// A local mission, where a whole-mission pin is now visible - and editable -
+// in every shift slot it covers, not just as one long row.
+const localDoc = (over = {}) => doc({
+  missions: [{ id: 'm1', name: 'Gate', type: 'local', start: null, end: null, count: 1 }],
+  ...over,
+});
+
+test('clearing one hour of a whole-mission pin cuts it in two rather than dropping it', () => {
+  const d = applyMissionAssignees(localDoc(), 'm1', ['e1']);
+  const after = applyClearPin(d, {
+    missionId: 'm1', employeeId: 'e1', start: START + HOUR, end: START + 2 * HOUR,
+  });
+
+  assert.equal(after.pins.length, 2);
+  // The bound that was not cut stays null, so each remainder still follows the
+  // mission's window if it is later moved.
+  assert.deepEqual(
+    after.pins.map((p) => [p.start, p.end]),
+    [[null, START + HOUR], [START + 2 * HOUR, null]],
+  );
+  assert.ok(after.pins.every((p) => !pinCovers(after, p, START + HOUR, START + 2 * HOUR)));
+  assert.ok(pinCovers(after, after.pins[0], START, START + HOUR));
+  assert.ok(pinCovers(after, after.pins[1], START + 2 * HOUR, START + 4 * HOUR));
+
+  // And the cleared hour really does go back to the rotation.
+  const result = plan(toPlannerInput(after));
+  const hour = result.shifts.filter((s) => s.start === START + HOUR && s.missionId === 'm1');
+  assert.equal(hour.length, 1);
+  assert.notEqual(hour[0].employeeId, 'e1');
+});
+
+test('clearing an hour at either end of a whole-mission pin leaves a single remainder', () => {
+  const d = applyMissionAssignees(localDoc(), 'm1', ['e1']);
+
+  const first = applyClearPin(d, {
+    missionId: 'm1', employeeId: 'e1', start: START, end: START + HOUR,
+  });
+  assert.deepEqual(first.pins.map((p) => [p.start, p.end]), [[START + HOUR, null]]);
+
+  const last = applyClearPin(d, {
+    missionId: 'm1', employeeId: 'e1', start: START + 3 * HOUR, end: START + 4 * HOUR,
+  });
+  assert.deepEqual(last.pins.map((p) => [p.start, p.end]), [[null, START + 3 * HOUR]]);
+});
+
+test('swapping one hour of a whole-mission pin cuts the holder and pins the newcomer', () => {
+  const d = applyMissionAssignees(localDoc(), 'm1', ['e1']);
+  const after = applySwap(d, {
+    missionId: 'm1',
+    employeeId: 'e2',
+    start: START + HOUR,
+    end: START + 2 * HOUR,
+    replacingEmployeeId: 'e1',
+  });
+
+  assert.deepEqual(
+    after.pins.map((p) => [p.employeeId, p.start, p.end]),
+    [
+      ['e1', null, START + HOUR],
+      ['e1', START + 2 * HOUR, null],
+      ['e2', START + HOUR, START + 2 * HOUR],
+    ],
+    'e1 keeps everything but the swapped hour, which is now e2\'s',
+  );
+
+  const result = plan(toPlannerInput(after));
+  const held = (t) => result.shifts.find((s) => s.missionId === 'm1' && s.start === t).employeeId;
+  assert.equal(held(START), 'e1');
+  assert.equal(held(START + HOUR), 'e2');
+  assert.equal(held(START + 2 * HOUR), 'e1');
+});
+
+test('cutting a frozen pin leaves frozen remainders', () => {
+  // History stays history: the part of an elapsed assignment that was not
+  // corrected must keep the flag that stops a later availability edit from
+  // reshuffling it.
+  const d = localDoc({
+    pins: [{
+      missionId: 'm1', employeeId: 'e1', start: null, end: null, frozen: true,
+    }],
+  });
+  const after = applyClearPin(d, {
+    missionId: 'm1', employeeId: 'e1', start: START + HOUR, end: START + 2 * HOUR,
+  });
+  assert.equal(after.pins.length, 2);
+  assert.ok(after.pins.every((p) => p.frozen === true));
+});
+
+test('cutPin returns nothing when the pin covers exactly the range taken out of it', () => {
+  const d = localDoc();
+  const wholeMission = { missionId: 'm1', employeeId: 'e1', start: null, end: null };
+  assert.deepEqual(cutPin(d, wholeMission, START, START + 4 * HOUR), []);
+});
+
 /* --- clearing -------------------------------------------------------- */
 
 test('clearing a pin works on a whole-mission assignment, not just an exact range', () => {
@@ -230,6 +328,21 @@ test('freezePastShifts does not re-pin a shift that is already pinned', () => {
   const result = plan(toPlannerInput(d));
   const frozen = freezePastShifts(d, result, START + HOUR);
   assert.equal(frozen.pins.length, 1, 'the already-pinned shift is not duplicated');
+});
+
+test('freezing the past adds nothing for a whole-mission pin whose hours have elapsed', () => {
+  // A pin on a local mission now produces one row per hour, and every one of
+  // them is `pinned`. They must not be mistaken for the engine's own choices
+  // and frozen a second time: that would turn one assignment into a pile of
+  // literal-range pins, and the whole-mission pin would stop following the
+  // mission's window.
+  const prev = doc({
+    missions: [{ id: 'm1', name: 'Gate', type: 'local', start: null, end: null, count: 1 }],
+    pins: [{ missionId: 'm1', employeeId: 'e1', start: null, end: null }],
+  });
+  const next = { ...prev, title: 'edited' };
+  const merged = freezeElapsedBeforeEdit(prev, next, START + 3 * HOUR);
+  assert.deepEqual(merged.pins, prev.pins, 'the pinned hours were already decided by hand');
 });
 
 test('a frozen shift survives an unrelated later edit to the document', () => {
@@ -338,7 +451,10 @@ test('freezeElapsedBeforeEdit skips freezing when the previous document has no e
 
 /* --- mission roster -------------------------------------------------- */
 
-test('setting a mission roster replaces whole-window pins but keeps per-shift ones', () => {
+test('setting a mission roster releases everyone left off it, whole pin or partial', () => {
+  // The picker lists anyone holding a pin on the mission, e2's single shift
+  // included, so a name missing from the list was deliberately unticked - and
+  // unticking has to be able to undo a tick whose range was since trimmed.
   const d = doc({
     pins: [
       { missionId: 'm1', employeeId: 'e1', start: null, end: null },
@@ -347,8 +463,25 @@ test('setting a mission roster replaces whole-window pins but keeps per-shift on
   });
   const after = applyMissionAssignees(d, 'm1', ['e3']);
   assert.deepEqual(
-    after.pins.map((p) => `${p.employeeId}:${p.start == null ? 'whole' : 'range'}`).sort(),
-    ['e2:range', 'e3:whole'],
+    after.pins.map((p) => `${p.employeeId}:${p.start == null ? 'whole' : 'range'}`),
+    ['e3:whole'],
+  );
+});
+
+test('a roster edit leaves a partially assigned person exactly as they are', () => {
+  // e1 kept on the list while e3 is added: the picker cannot express a range,
+  // so rewriting e1's trimmed assignment from here would silently undo the cut.
+  const d = doc({
+    pins: [
+      { missionId: 'm1', employeeId: 'e1', start: null, end: START + HOUR },
+      { missionId: 'm1', employeeId: 'e1', start: START + 2 * HOUR, end: null },
+    ],
+  });
+  const after = applyMissionAssignees(d, 'm1', ['e1', 'e3']);
+  assert.deepEqual(after.pins.filter((p) => p.employeeId === 'e1'), d.pins);
+  assert.deepEqual(
+    after.pins.filter((p) => p.employeeId === 'e3'),
+    [{ missionId: 'm1', employeeId: 'e3', start: null, end: null }],
   );
 });
 
