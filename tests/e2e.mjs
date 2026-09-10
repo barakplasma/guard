@@ -433,6 +433,73 @@ check('and inside every other hour of the plan, not just the first',
 await page6.screenshot({ path: `${SHOT}/07-whole-mission-pin.png` });
 await ctx6.close();
 
+/* ---------- a mission with its own shift length ------------------------
+ * חמ"ל runs two-hour shifts by day and one-hour shifts at night while the
+ * gate beside it stays hourly. The grid is a property of the mission, so the
+ * agenda has to show three different slot lengths on one screen.
+ */
+const ctx7 = await browser.newContext();
+const page7 = await ctx7.newPage();
+page7.on('pageerror', (e) => { console.log('PAGEERROR(shift length)', e.message); failures++; });
+
+await page7.goto(`${BASE}/`, { waitUntil: 'networkidle' });
+await page7.getByTestId('bulk-names').fill(['אבי', 'דנה', 'יוסי', 'מיכל'].join('\n'));
+await page7.getByTestId('add-bulk').click();
+await page7.waitForTimeout(300);
+
+await page7.getByTestId('tab-missions').click();
+await page7.waitForTimeout(200);
+await page7.getByTestId('add-mission').click();
+await page7.waitForTimeout(250);
+await page7.getByTestId('mission-name-m1').fill('ש"ג');
+await page7.waitForTimeout(200);
+await page7.getByTestId('add-mission').click();
+await page7.waitForTimeout(250);
+await page7.getByTestId('mission-name-m2').fill('חמ"ל');
+await page7.waitForTimeout(200);
+await page7.getByTestId('mission-shift-m2').fill('120');
+await page7.waitForTimeout(250);
+await page7.getByTestId('mission-night-shift-m2').fill('60');
+await page7.waitForTimeout(400);
+check('the shift-length inputs keep what was typed',
+  (await page7.getByTestId('mission-shift-m2').inputValue()) === '120'
+  && (await page7.getByTestId('mission-night-shift-m2').inputValue()) === '60');
+await page7.screenshot({ path: `${SHOT}/08-mission-shift-length.png` });
+
+await page7.getByTestId('tab-schedule').click();
+await page7.waitForTimeout(700);
+
+// Every rendered slot, with the missions inside it. Slots are keyed on
+// (start, end), so the same start can appear twice with different ends.
+const rendered = await page7.evaluate(() => [...document.querySelectorAll('[data-testid^="slot-"]')]
+  .map((n) => ({
+    start: Number(n.dataset.testid.slice('slot-'.length)),
+    end: Number(n.dataset.slotEnd),
+    missions: [...new Set(
+      [...n.querySelectorAll('[data-testid^="shift-select-"]')]
+        .map((s) => s.dataset.testid.split('-')[2]),
+    )],
+  })));
+
+const minutes = (s) => (s.end - s.start) / 60000;
+const forMission = (id) => rendered.filter((s) => s.missions.includes(id));
+
+check('the hourly mission is still hourly throughout',
+  forMission('m1').length === 24 && forMission('m1').every((s) => minutes(s) === 60),
+  JSON.stringify(forMission('m1').map(minutes)));
+
+const opsMinutes = forMission('m2').map(minutes);
+check('חמ"ל gets two-hour slots by day',
+  opsMinutes.includes(120), JSON.stringify(opsMinutes));
+check('and one-hour slots at night',
+  opsMinutes.includes(60), JSON.stringify(opsMinutes));
+check('and never a slot longer than the two hours it asked for',
+  opsMinutes.every((m) => m <= 120), JSON.stringify(opsMinutes));
+check('the two grids together still cover the whole day',
+  opsMinutes.reduce((sum, m) => sum + m, 0) === 24 * 60, JSON.stringify(opsMinutes));
+await page7.screenshot({ path: `${SHOT}/09-mixed-shift-lengths.png`, fullPage: true });
+await ctx7.close();
+
 await browser.close();
 console.log(failures === 0 ? '\nALL E2E CHECKS PASSED' : `\n${failures} E2E CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

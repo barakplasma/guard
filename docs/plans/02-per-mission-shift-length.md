@@ -1,6 +1,6 @@
 # 02 · Per-mission shift length, with a night variant
 
-**Kind:** feature · **Status:** planned, not implemented · **Depends on:** plan 01 (recommended)
+**Kind:** feature · **Status:** implemented · **Depends on:** plan 01 (recommended)
 
 ## What is asked
 
@@ -165,3 +165,15 @@ for the night field), empty string → `null`. `data-testid`: `mission-shift-${i
 - Should the night length on a mission be capped at the night's own duration? The schema max is
   a day; a 600-minute night slot in an eight-hour night simply becomes one partial slot, which is
   harmless. Leave uncapped, document it in the field's help text.
+
+### How they were answered
+
+`(start, end)` keying shipped as recommended, and it was looked at on a 360px phone with חמ"ל at
+120/60 beside an hourly ש"ג: the day reads 13:00–14:00 ש"ג, 13:00–15:00 חמ"ל, 14:00–15:00 ש"ג,
+15:00–16:00 ש"ג, 15:00–17:00 חמ"ל … Each row carries its own times and its own mission name, the
+order is chronological and unambiguous, and nothing overflows. The only wrinkle is that two rows
+can both wear the "כעת" chip, which is true and already happens beside a remote block. No change
+made. Because a slot id is `slot-<start>` and two slots can now share a start, the elements also
+publish `data-slot-end`, which is what `tests/e2e.mjs` uses to tell them apart.
+
+The night length is left uncapped, and `t.shiftLengthNightHelp` says so.

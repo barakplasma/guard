@@ -43,6 +43,37 @@ test('a mission shows its type and headcount', () => {
   assert.ok(text.includes('שער (מקומית, 2): כל התקופה'));
 });
 
+const mission = (over) => ({
+  missions: [{
+    id: 'm1', name: 'שער', type: 'local', start: null, end: null, count: 2, ...over,
+  }],
+});
+
+test('shift lengths print only when the mission asks for its own', () => {
+  // Rotating on the plan's default grid: nothing to say, the plan already
+  // said it.
+  assert.ok(planToReadableText(doc(mission({}))).includes('שער (מקומית, 2): '));
+
+  // Day and night differ, so both are printed - the same "only when it
+  // differs" reading as the 4/6 headcount beside it.
+  assert.ok(planToReadableText(doc(mission({ shiftMinutes: 120, nightShiftMinutes: 60 })))
+    .includes(`שער (מקומית, 2, 120/60 ${t.minutesShort}): `));
+
+  // One length, all day and all night.
+  assert.ok(planToReadableText(doc(mission({ shiftMinutes: 120 })))
+    .includes(`שער (מקומית, 2, 120 ${t.minutesShort}): `));
+
+  // A night length alone still needs the day one spelled out to be readable,
+  // and the day one is the plan's default.
+  assert.ok(planToReadableText(doc(mission({ nightShiftMinutes: 30 })))
+    .includes(`שער (מקומית, 2, 60/30 ${t.minutesShort}): `));
+
+  // A remote mission has no shifts, so it never prints one however the fields
+  // were left behind by a local -> remote toggle.
+  assert.ok(planToReadableText(doc(mission({ type: 'remote', shiftMinutes: 120 })))
+    .includes('שער (מרוחקת, 2): '));
+});
+
 test('a whole-mission pin reads distinctly from a per-shift one', () => {
   const text = planToReadableText(doc({
     pins: [

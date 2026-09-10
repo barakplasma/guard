@@ -12,7 +12,8 @@ export const t = {
   planTitlePlaceholder: 'לדוגמה: סוף שבוע',
   planStart: 'תחילת התקופה',
   planEnd: 'סוף התקופה',
-  shiftLength: 'אורך משמרת (דקות)',
+  // "ברירת מחדל" because a mission may now set its own length and ignore this.
+  shiftLength: 'אורך משמרת כברירת מחדל (דקות)',
   nightStart: 'תחילת הלילה',
   nightEnd: 'סוף הלילה',
   nightWindowHelp: 'טווח שעות הלילה. משימה שהוגדר לה מספר אנשים שונה בלילה תשתמש בו בשעות האלה.',
@@ -70,6 +71,15 @@ export const t = {
   headcountDay: 'כמה ביום',
   headcountNight: 'כמה בלילה',
   headcountNightHelp: 'מספר האנשים בשעות הלילה. משפיע רק על משימות מקומיות.',
+  shiftLengthDay: 'אורך משמרת ביום (דקות)',
+  shiftLengthNight: 'אורך משמרת בלילה (דקות)',
+  shiftLengthDayHelp: 'אורך משמרת במשימה הזו. השאר ריק כדי להשתמש באורך ברירת המחדל של הסידור.',
+  // Says out loud that the night length is not capped by the night itself, so a
+  // number longer than the night reads as a deliberate choice rather than a bug.
+  shiftLengthNightHelp: 'אורך משמרת במשימה הזו בשעות הלילה. השאר ריק כדי להשתמש באורך שביום. אורך גדול מהלילה עצמו פשוט ייתן משמרת אחת שנגמרת עם עלות השחר.',
+  // Unit suffix for the shift lengths printed beside a mission in the text
+  // export, e.g. "(מקומית, 1, 120/60 דק׳)".
+  minutesShort: 'דק׳',
   missionStart: 'התחלה',
   missionEnd: 'סיום',
   assignedPeople: 'משובצים קבועים',

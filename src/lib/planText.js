@@ -2,6 +2,11 @@ import { formatDate, formatRange, formatTime } from './format.js';
 import { pinRange } from './pins.js';
 import { t } from '../strings.js';
 
+/** "120/60" where the night length differs from the day one, else just "120". */
+function lengthPair(day, night) {
+  return night == null || night === day ? `${day}` : `${day}/${night}`;
+}
+
 /**
  * Render the plan *document* (not the computed schedule) as plain Hebrew
  * text: exactly what is encoded in the shareable link, in a form a human can
@@ -49,7 +54,16 @@ export function planToReadableText(doc) {
     const heads = m.type !== 'remote' && m.nightCount != null && m.nightCount !== m.count
       ? `${m.count}/${m.nightCount}`
       : `${m.count}`;
-    lines.push(`- ${m.name || t.missionName} (${kind}, ${heads}): ${window}`);
+    // Shift lengths, in the same spirit and only when this mission actually
+    // asks for its own: a mission rotating on the plan's default grid prints
+    // nothing, because the plan's own line above already said what that is.
+    // "120/60" when night differs from day, "120" when it does not.
+    const dayLength = m.shiftMinutes;
+    const nightLength = m.nightShiftMinutes;
+    const shift = m.type === 'remote' || (dayLength == null && nightLength == null)
+      ? ''
+      : `, ${lengthPair(dayLength ?? doc.shiftMinutes, nightLength)} ${t.minutesShort}`;
+    lines.push(`- ${m.name || t.missionName} (${kind}, ${heads}${shift}): ${window}`);
   }
 
   lines.push('', `${t.pinsSection} (${doc.pins.length}):`);

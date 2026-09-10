@@ -10,8 +10,9 @@
  * Two mission types:
  *   - `remote` - the same people staff it for its entire duration and are
  *     locked out of everything else while it runs.
- *   - `local`  - people rotate every `shiftMinutes` among whoever is still
- *     available.
+ *   - `local`  - people rotate among whoever is still available, every
+ *     `shiftMinutes`: the plan's, or the mission's own where it sets one, which
+ *     may differ again inside the plan's night stretches.
  *
  * *Who* gets a given slot is the one decision this file delegates: the engine
  * works out who is eligible, and the chosen strategy (`strategies.js`) ranks
@@ -80,6 +81,40 @@ function isNight(t, nightWindows) {
   return nightWindows.some((w) => t >= w.start && t < w.end);
 }
 
+/**
+ * The plan's nights as a tidy, non-overlapping, ascending list clipped to the
+ * plan window - and the day stretches between them, which are simply its
+ * complement.
+ *
+ * A mission whose night slots are a different length from its day ones anchors
+ * each stretch at the stretch's own start, so the stretches have to be real
+ * intervals rather than the "does this instant fall in a night" question
+ * `isNight` asks. The caller's list is taken as given but not trusted to be
+ * sorted or disjoint: it is built outside the engine (planSchema.js), and two
+ * overlapping nights would otherwise produce two competing anchors.
+ */
+function stretches(nightWindows, planStart, planEnd) {
+  const nights = [];
+  const clipped = nightWindows
+    .map((w) => ({ start: Math.max(w.start, planStart), end: Math.min(w.end, planEnd) }))
+    .filter((w) => w.end > w.start)
+    .sort((a, b) => a.start - b.start || a.end - b.end);
+  for (const w of clipped) {
+    const last = nights[nights.length - 1];
+    if (last && w.start <= last.end) last.end = Math.max(last.end, w.end);
+    else nights.push({ ...w });
+  }
+
+  const days = [];
+  let cursor = planStart;
+  for (const n of nights) {
+    if (n.start > cursor) days.push({ start: cursor, end: n.start });
+    cursor = n.end;
+  }
+  if (planEnd > cursor) days.push({ start: cursor, end: planEnd });
+  return { nights, days };
+}
+
 /** How many people a mission needs at `t`, which on a local mission can differ by night. */
 function countAt(mission, t, nightWindows) {
   return isNight(t, nightWindows) ? mission.nightCount : mission.count;
@@ -87,6 +122,12 @@ function countAt(mission, t, nightWindows) {
 
 /** A remote pin's own range is not honoured, so it resolves as if unwritten. */
 const WHOLE_MISSION = { start: null, end: null };
+
+/**
+ * A remote mission is one slot: it is claimed once and held end to end, so its
+ * own window is the only unit there is to merge within or charge a turn for.
+ */
+const wholeMissionSlot = (mission) => ({ start: mission.start, end: mission.end });
 
 /**
  * Is this pin residue - does the window it refers to fall entirely outside the
@@ -130,6 +171,25 @@ function normalizeEmployees(employees, planStart, planEnd, warnings) {
   return out;
 }
 
+/**
+ * A mission's own rotation lengths, or `null` where it defers.
+ *
+ * Remote missions have no slots to size - one set of people holds the whole
+ * window - so both fields are ignored there for the same reason `nightCount`
+ * is, rather than quietly shaping a grid nothing rotates on.
+ */
+function slotMinutesOf(mission) {
+  if (mission.type === 'remote') return { day: null, night: null };
+  const day = mission.shiftMinutes ?? null;
+  const night = mission.nightShiftMinutes ?? null;
+  for (const value of [day, night]) {
+    if (value != null && !(value > 0)) {
+      throw new Error(`Mission "${mission.name}" needs a positive shift length.`);
+    }
+  }
+  return { day, night };
+}
+
 /** Missions clamped to the plan window; ones that fall entirely outside are dropped. */
 function normalizeMissions(missions, planStart, planEnd, warnings) {
   const out = [];
@@ -159,6 +219,7 @@ function normalizeMissions(missions, planStart, planEnd, warnings) {
     if (start !== rawStart || end !== rawEnd) {
       warnings.push({ code: WARN.MISSION_OUTSIDE_WINDOW, missionId: m.id, start, end });
     }
+    const slot = slotMinutesOf(m);
     out.push({
       id: m.id,
       name: m.name,
@@ -167,6 +228,8 @@ function normalizeMissions(missions, planStart, planEnd, warnings) {
       end,
       count: m.count,
       nightCount,
+      shiftMinutes: slot.day,
+      nightShiftMinutes: slot.night,
     });
   }
   return out;
@@ -361,11 +424,12 @@ function isAvailable(st, start, end) {
   return st.start <= start && st.end >= end;
 }
 
-function occupy(st, mission, start, end, counter) {
-  // The `remote` flag is for the ring in strategies.js: a remote hold is one
-  // atomic claim and must not merge into the runs around it. Nothing else here
-  // reads it, and `isFree` only ever looks at start/end.
-  st.busy.push({ start, end, ...(mission.type === 'remote' ? { remote: true } : null) });
+function occupy(st, mission, start, end, slotStart, counter) {
+  // `slotStart` and the `remote` flag are both for the ring in strategies.js,
+  // which charges one turn per distinct slot entered and one per remote hold
+  // however long it runs. Nothing else here reads either, and `isFree` only
+  // ever looks at start/end.
+  st.busy.push({ start, end, slotStart, ...(mission.type === 'remote' ? { remote: true } : null) });
   st.busyUntil = Math.max(st.busyUntil, end);
   const minutes = (end - start) / MINUTE;
   st.minutes += minutes;
@@ -384,17 +448,22 @@ function occupy(st, mission, start, end, counter) {
  * @param {object} params
  * @param {number} params.start - plan window start, ms epoch
  * @param {number} params.end - plan window end, ms epoch
- * @param {number} params.shiftMinutes - rotation length for local missions
+ * @param {number} params.shiftMinutes - default rotation length for local
+ *   missions; a mission may override it and its night variant per mission
  * @param {'balanced'|'rotation'} [params.strategy] - which policy picks who
  *   works a given slot; see `strategies.js`. Defaults to `balanced`, the
  *   original hours-evening behaviour. An unrecognised name falls back to that
  *   default rather than throwing.
  * @param {{id:string,name:string,start?:number,end?:number}[]} params.employees
  *   `start`/`end` default to the whole plan window.
- * @param {{id:string,name:string,type:'remote'|'local',start?:number,end?:number,count:number,nightCount?:number}[]} params.missions
+ * @param {{id:string,name:string,type:'remote'|'local',start?:number,end?:number,count:number,nightCount?:number,shiftMinutes?:number,nightShiftMinutes?:number}[]} params.missions
  *   `count` is the daytime headcount; `nightCount` replaces it inside the plan's
- *   night stretches, and defaults to `count`. Ignored on a remote mission, which
- *   one set of people holds end to end.
+ *   night stretches, and defaults to `count`. `shiftMinutes` is this mission's
+ *   own slot length, defaulting to the plan's, and `nightShiftMinutes` its
+ *   night variant, defaulting to the mission's day length - so one mission can
+ *   run two-hour shifts by day and one-hour shifts at night while the rest of
+ *   the plan stays hourly. All three are ignored on a remote mission, which one
+ *   set of people holds end to end.
  * @param {{start:number,end:number}[]} [params.nightWindows] - the plan's night
  *   stretches as absolute instants. Resolved by the caller, never here: a
  *   wall-clock hour needs a timezone, and reading one in the engine would make
@@ -411,7 +480,7 @@ function occupy(st, mission, start, end, counter) {
  *   availability: a manual assignment is an input fact, not a suggestion the
  *   engine may veto (see normalizePins).
  * @returns {{
- *   shifts: {missionId:string,missionName:string,type:string,employeeId:string,employeeName:string,start:number,end:number,pinned:boolean,frozen:boolean}[],
+ *   shifts: {missionId:string,missionName:string,type:string,employeeId:string,employeeName:string,start:number,end:number,slotStart:number,slotEnd:number,pinned:boolean,frozen:boolean}[],
  *   timeline: {start:number,end:number,onDuty:{employeeId:string,missionId:string}[],offDuty:string[],unavailable:string[]}[],
  *   stats: {perEmployee:{employeeId:string,name:string,minutes:number,stints:number,minGapMinutes:number|null}[], spreadMinutes:number},
  *   warnings: object[],
@@ -466,8 +535,13 @@ export function plan({
 
   /** Raw assignments before adjacent-row merging. */
   const rows = [];
-  const addRow = (mission, st, blockStart, blockEnd, pinned, frozen = false) => {
-    occupy(st, mission, blockStart, blockEnd, nextSeq);
+  // `slot` is the grid slot the row belongs to - the mission's own window for a
+  // remote hold, which is claimed once and held whole. Every row carries it
+  // because there is no longer one global step anyone downstream could
+  // rediscover by arithmetic: `mergeRows` rejoins rows within a slot, and the
+  // ring counts distinct slots entered.
+  const addRow = (mission, st, blockStart, blockEnd, slot, pinned, frozen = false) => {
+    occupy(st, mission, blockStart, blockEnd, slot.start, nextSeq);
     rows.push({
       missionId: mission.id,
       missionName: mission.name,
@@ -476,50 +550,123 @@ export function plan({
       employeeName: st.name,
       start: blockStart,
       end: blockEnd,
+      slotStart: slot.start,
+      slotEnd: slot.end,
       pinned,
       frozen,
     });
   };
 
   /* --- the segment grid local missions rotate on --- */
-  // Boundaries: the global shift grid plus every availability edge, shared
-  // across all local missions since an employee's window genuinely affects
-  // whether *any* mission can be staffed across it. Each mission's own
-  // start/end is added only to its own segmentation - so it gets a properly
-  // clamped partial segment at its own edges, without leaking into an
-  // unrelated mission's grid (a remote or local mission ending off-grid must
-  // not fragment some other local mission's otherwise-clean hourly slots).
+  // Two things make a segment, and only one of them is the rotation grid.
   //
-  // Built here, before anything is placed, because phase 1 needs it too: a pin
-  // on a local mission is emitted one row per segment. The grid depends only
-  // on the plan window, the employees' availability edges and the night edges,
-  // none of which the phases below touch, so computing it early cannot change
-  // what it produces - and one shared `segmentsOf` means the pinned rows and
-  // the demand walk can never disagree about where a segment starts.
-  const baseBoundaries = new Set([start, end]);
-  for (let t = start; t < end; t += shiftMinutes * MINUTE) baseBoundaries.add(t);
-  for (const e of emps) { baseBoundaries.add(e.start); baseBoundaries.add(e.end); }
-  // Every night edge too, so no segment can straddle a day/night transition -
-  // a segment is staffed by one headcount, and one that spanned the boundary
-  // would have to pick a side and leave the other short.
+  // These are the other one: edges every mission is cut on whatever it rotates
+  // on. The plan's own bounds; every employee's availability edge, shared
+  // across all missions since an employee's window genuinely affects whether
+  // *any* mission can be staffed across it; and every night edge, so no
+  // segment can straddle a day/night transition - a segment is staffed by one
+  // headcount, and one that spanned the boundary would have to pick a side and
+  // leave the other short. Each mission's own start/end is added only to its
+  // own segmentation, so it gets a properly clamped partial segment at its own
+  // edges without leaking into an unrelated mission's grid (a remote or local
+  // mission ending off-grid must not fragment some other local mission's
+  // otherwise-clean hourly slots).
+  const sharedEdges = [start, end];
+  for (const e of emps) { sharedEdges.push(e.start, e.end); }
   for (const w of nightWindows) {
-    if (w.start > start && w.start < end) baseBoundaries.add(w.start);
-    if (w.end > start && w.end < end) baseBoundaries.add(w.end);
+    if (w.start > start && w.start < end) sharedEdges.push(w.start);
+    if (w.end > start && w.end < end) sharedEdges.push(w.end);
   }
+
+  /** Grid points from `from`, stepping `minutes`, up to but not including `to`. */
+  const stepInto = (into, from, to, minutes) => {
+    for (let t = from; t < to; t += minutes * MINUTE) into.add(t);
+  };
+
+  /** A set of grid points as the ascending slot bounds of the whole plan window. */
+  const boundsOf = (points) => [...new Set([...points, end])].sort((a, b) => a - b);
+
+  // The house grid: the plan's `shiftMinutes`, stepped from its start. A
+  // mission that overrides neither length rotates on exactly this - the same
+  // points, produced by the same loop that always produced them - which is
+  // what makes an already-shared link segment the way it always did, whatever
+  // its neighbours on the page now ask for. tests/planner.golden.test.js is
+  // the standing proof.
+  const housePoints = new Set();
+  stepInto(housePoints, start, end, shiftMinutes);
+  const houseBounds = boundsOf(housePoints);
+
+  const { nights, days } = stretches(nightWindows, start, end);
 
   // Keyed on the mission object rather than its id: ids are not validated to
   // be unique, and a shared cache that confused two missions would hand one of
   // them the other's grid.
+  const boundsCache = new Map();
+  /**
+   * The rotation grid this mission turns on, as ascending slot bounds spanning
+   * the plan window.
+   *
+   * With equal day and night lengths the grid is anchored once, at the plan's
+   * start. With different ones each stretch is anchored at its own beginning
+   * (or at the plan's start, where the plan opens mid-stretch), which is what
+   * "two hours by day, one by night" actually means: night starts a fresh
+   * hourly grid at 22:00 rather than inheriting whatever phase the two-hour
+   * grid happened to be in. A stretch whose length is not a whole number of
+   * slots leaves one partial slot at its end, the same way the plan's own end
+   * has always left one.
+   */
+  const slotBoundsFor = (mission) => {
+    const dayMinutes = mission.shiftMinutes ?? shiftMinutes;
+    const nightMinutes = mission.nightShiftMinutes ?? dayMinutes;
+    if (dayMinutes === shiftMinutes && nightMinutes === shiftMinutes) return houseBounds;
+
+    const hit = boundsCache.get(mission);
+    if (hit) return hit;
+    const points = new Set([start]);
+    if (dayMinutes === nightMinutes) {
+      stepInto(points, start, end, dayMinutes);
+    } else {
+      for (const w of nights) stepInto(points, w.start, w.end, nightMinutes);
+      for (const w of days) stepInto(points, w.start, w.end, dayMinutes);
+    }
+    const bounds = boundsOf(points);
+    boundsCache.set(mission, bounds);
+    return bounds;
+  };
+
+  // Built lazily but before anything is placed, because phase 1 needs it too: a
+  // pin on a local mission is emitted one row per segment. A grid depends only
+  // on the plan window, the employees' availability edges, the night edges and
+  // the mission's own fields, none of which the phases below touch, so when it
+  // is computed cannot change what it produces - and one shared `segmentsOf`
+  // means the pinned rows and the demand walk can never disagree about where a
+  // segment starts.
+  //
+  // The slot a segment belongs to is the *grid's* slot, not the segment's own
+  // extent: an availability edge tearing a slot in two leaves both halves
+  // reporting the one slot they are both inside, which is what lets `mergeRows`
+  // put them back together and the ring charge them as one turn. It is also
+  // deliberately not clamped to the mission's window, so two missions cutting
+  // the same grid slot at different points still name the same slot.
   const segmentCache = new Map();
   const segmentsOf = (mission) => {
     const hit = segmentCache.get(mission);
     if (hit) return hit;
-    const edges = [...baseBoundaries, mission.start, mission.end]
+    const bounds = slotBoundsFor(mission);
+    const edges = [...new Set([...bounds, ...sharedEdges, mission.start, mission.end])]
       .filter((t) => t >= mission.start && t <= mission.end)
       .sort((a, b) => a - b);
     const segments = [];
+    let slot = 0;
     for (let i = 1; i < edges.length; i++) {
-      if (edges[i] > edges[i - 1]) segments.push({ start: edges[i - 1], end: edges[i] });
+      if (!(edges[i] > edges[i - 1])) continue;
+      const segStart = edges[i - 1];
+      while (slot + 2 < bounds.length && bounds[slot + 1] <= segStart) slot++;
+      segments.push({
+        start: segStart,
+        end: edges[i],
+        slot: { start: bounds[slot], end: bounds[slot + 1] },
+      });
     }
     segmentCache.set(mission, segments);
     return segments;
@@ -545,13 +692,13 @@ export function plan({
     const mission = missionById.get(pin.missionId);
     const st = state.get(pin.employeeId);
     if (mission.type === 'remote') {
-      addRow(mission, st, pin.start, pin.end, true, pin.frozen);
+      addRow(mission, st, pin.start, pin.end, wholeMissionSlot(mission), true, pin.frozen);
       continue;
     }
     for (const seg of segmentsOf(mission)) {
       const rowStart = Math.max(seg.start, pin.start);
       const rowEnd = Math.min(seg.end, pin.end);
-      if (rowEnd > rowStart) addRow(mission, st, rowStart, rowEnd, true, pin.frozen);
+      if (rowEnd > rowStart) addRow(mission, st, rowStart, rowEnd, seg.slot, true, pin.frozen);
     }
   }
 
@@ -583,7 +730,7 @@ export function plan({
     }));
 
     const picked = candidates.slice(0, need);
-    for (const st of picked) addRow(m, st, m.start, m.end, false);
+    for (const st of picked) addRow(m, st, m.start, m.end, wholeMissionSlot(m), false);
 
     if (picked.length < need) {
       warnings.push({
@@ -606,7 +753,11 @@ export function plan({
         (r) => r.missionId === m.id && r.start <= seg.start && r.end >= seg.end,
       ).length;
       const need = countAt(m, seg.start, nightWindows) - covered;
-      if (need > 0) demands.push({ mission: m, start: seg.start, end: seg.end, need });
+      if (need > 0) {
+        demands.push({
+          mission: m, start: seg.start, end: seg.end, slot: seg.slot, need,
+        });
+      }
     }
   }
 
@@ -634,7 +785,7 @@ export function plan({
     }));
 
     const picked = candidates.slice(0, d.need);
-    for (const st of picked) addRow(d.mission, st, d.start, d.end, false);
+    for (const st of picked) addRow(d.mission, st, d.start, d.end, d.slot, false);
 
     if (picked.length < d.need) {
       warnings.push({
@@ -648,7 +799,7 @@ export function plan({
     }
   }
 
-  const shifts = mergeRows(rows, start, shiftMinutes);
+  const shifts = mergeRows(rows);
 
   for (const e of emps) {
     if (!shifts.some((s) => s.employeeId === e.id)) {
@@ -684,10 +835,15 @@ export function plan({
  * that also began at 22:00 but ended four days later, and let `stints` report
  * that whole ordeal as a single turn. Bounded to one slot, `stints` counts
  * shifts worked, which is the number that means something under `rotation`.
+ *
+ * "Within one shift" is read off the row's own `slotStart` rather than worked
+ * out by modulo arithmetic on a plan-wide step, because since shift length
+ * became a per-mission field there is no plan-wide step to do arithmetic on.
+ * On the house grid the two agree exactly: a row starting on a shift boundary
+ * opens a new slot, so its `slotStart` differs from that of the row ending
+ * where it begins, and no other row can start mid-slot without sharing one.
  */
-function mergeRows(rows, planStart, shiftMinutes) {
-  const step = shiftMinutes * MINUTE;
-  const onShiftBoundary = (t) => (t - planStart) % step === 0;
+function mergeRows(rows) {
   const sorted = [...rows].sort((a, b) => (
     a.start - b.start
     || (a.missionId < b.missionId ? -1 : a.missionId > b.missionId ? 1 : 0)
@@ -697,11 +853,12 @@ function mergeRows(rows, planStart, shiftMinutes) {
 
   const out = [];
   for (const row of sorted) {
-    const prev = onShiftBoundary(row.start) ? undefined : out.find(
+    const prev = out.find(
       (r) => r.missionId === row.missionId
         && r.employeeId === row.employeeId
         && r.pinned === row.pinned
         && r.frozen === row.frozen
+        && r.slotStart === row.slotStart
         && r.end === row.start,
     );
     if (prev) prev.end = row.end;
