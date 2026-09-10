@@ -4,23 +4,11 @@ import {
 } from '@mui/material';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import DateTimeField from './DateTimeField.jsx';
+import { toTimeInput, fromTimeInput } from './DailyClockField.jsx';
 import { usePlan } from '../state/PlanContext.jsx';
 import { topOfHour, nextTopOfHour } from '../lib/planSchema.js';
 import { STRATEGY } from '../lib/strategies.js';
 import { t } from '../strings.js';
-
-const pad2 = (n) => String(n).padStart(2, '0');
-
-/** Minutes past midnight -> "HH:mm", what `<input type="time">` expects. */
-const toTimeInput = (minutes) => `${pad2(Math.floor(minutes / 60))}:${pad2(minutes % 60)}`;
-
-/** "HH:mm" -> minutes past midnight, or null while the field is half-typed or cleared. */
-function fromTimeInput(value) {
-  const match = /^(\d{1,2}):(\d{2})/.exec(value ?? '');
-  if (!match) return null;
-  const minutes = Number(match[1]) * 60 + Number(match[2]);
-  return minutes >= 0 && minutes < 24 * 60 ? minutes : null;
-}
 
 /**
  * Plan-wide settings: the window everything else defaults to, the rotation
