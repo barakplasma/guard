@@ -889,7 +889,7 @@ export function plan({
     shifts,
     timeline: buildTimeline(shifts, emps, start, end, miss.filter((m) => m.requires.length)
       .flatMap((m) => m.type === 'daily' ? m.occurrences.flatMap((w) => [w.start, w.end]) : [m.start, m.end])),
-    stats: buildStats(shifts, emps),
+    stats: buildStats(shifts, emps, sleepable),
     warnings,
   };
   const missing = new Map();
@@ -1004,14 +1004,19 @@ function buildTimeline(shifts, employees, planStart, planEnd, demandEdges = []) 
   return timeline;
 }
 
-function buildStats(shifts, employees) {
+function buildStats(shifts, employees, sleepable) {
   const perEmployee = employees.map((e) => {
     const own = shifts.filter((s) => s.employeeId === e.id).sort((a, b) => a.start - b.start);
     const minutes = own.reduce((sum, s) => sum + (s.end - s.start) / MINUTE, 0);
 
+    // On-call duty is slept through, so it does not interrupt rest the way an
+    // ordinary shift does - skip it here just as `preferredRest` does when
+    // deciding who to schedule, so the gap on either side of an on-call shift
+    // reads as the rest it actually was rather than as two zero-length gaps.
+    const awake = own.filter((s) => !sleepable.has(s.missionId));
     let minGapMinutes = null;
-    for (let i = 1; i < own.length; i++) {
-      const gap = (own[i].start - own[i - 1].end) / MINUTE;
+    for (let i = 1; i < awake.length; i++) {
+      const gap = (awake[i].start - awake[i - 1].end) / MINUTE;
       if (minGapMinutes == null || gap < minGapMinutes) minGapMinutes = gap;
     }
 
