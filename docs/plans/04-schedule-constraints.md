@@ -118,6 +118,27 @@ the engine imports nothing outside `strategies.js`). So the two audiences are se
 | `NO_REST_BETWEEN_SHIFTS` | any two shifts with a zero gap | **yes — 162 pairs, every person** |
 | `LONG_UNBROKEN_RUN` | ≥ 3 slots on duty without a break | no — worst is 2 slots |
 
+### Tier 2 must skip pinned rows
+
+**This is not optional, and it was invisible until plan 01 landed.** Before 01 a whole-mission pin
+was one long row, so it produced no adjacent pairs at all and no run to measure. After 01 the same
+assignment is one row per slot — correctly — and the person the user deliberately pinned to a
+mission for the whole week now reads as 162 same-mission back-to-back pairs and a 163-hour unbroken
+run. Every figure in the table above flips on that one person:
+
+| Measured after plan 01 | All rows | Excluding pinned rows |
+|------------------------|----------|-----------------------|
+| same-mission back-to-back pairs | 162 | **0** |
+| longest unbroken run | 163 h | **2 h** |
+
+The right-hand column is the signal; the left is one deliberate decision counted 162 times. So
+**every Tier 2 rule ignores pinned rows**, and a run is broken by a pinned row rather than extended
+through it. A person the user assigned by hand is not the engine stranding anybody, and a warning
+that fires on the user's own explicit choice teaches them to ignore the warnings.
+
+Tier 1 is the opposite and keeps counting pinned rows: a pinned person double-booked or seated
+outside the mission window is still impossible output, whoever asked for it.
+
 **One honest note about the constraint as specified.** "Back to back on the same mission should be
 rare" is already satisfied: on the motivating rota it happens **zero** times out of 162 adjacent
 pairs. That is not luck — under `rotation` the person who just came off is the least rested and
@@ -131,7 +152,7 @@ Report them **aggregated** (a count plus the worst offenders), never one alert p
 alerts is the same wall-of-noise failure that `PIN_OUT_OF_PERIOD` is deliberately counted to avoid.
 
 Thresholds are grounded in measurement on the real rota rather than picked: at `≥ 3 slots`,
-`LONG_UNBROKEN_RUN` is silent on a plan whose worst genuine run is 2 slots, and would have shouted
+`LONG_UNBROKEN_RUN` is silent on a plan whose worst genuine (unpinned) run is 2 slots, and would have shouted
 at the 88-hour block. Make it a plan-level field only if a second rota disagrees; a constant with a
 comment citing these numbers is enough for now.
 
@@ -224,6 +245,10 @@ checker catches each:
 9. Quality tier: a rota engineered so one person takes three consecutive slots →
    `LONG_UNBROKEN_RUN` once, aggregated, not three times. A rota with same-mission adjacency →
    `SAME_MISSION_CONSECUTIVE` with a count.
+9a. **Pinned exemption**: the motivating rota, whose whole-mission pin now spans 163 hourly rows,
+    produces **no** Tier 2 warning for that person — and the same rota with the pin removed and the
+    engine forced into the same shape does. This is the regression guard for the section above, and
+    it must fail if the exemption is dropped.
 10. Performance: the 1305-shift fixture runs the checker in well under a frame, asserted as a
     bound on work done (entries visited), not wall-clock — the engine must stay deterministic and a
     timing assertion would be flaky in CI.
@@ -241,13 +266,16 @@ Property suite (`planner.invariants.test.js`), the change that closes the actual
 All figures from the motivating rota (16 people, four local missions, hourly, `rotation`,
 1305 shifts) run through the engine on `main`:
 
-| Check | Result on the real plan |
-|-------|-------------------------|
-| `ROW_EXCEEDS_SLOT` | **1 violation** — the reported 163 h row, and nothing else |
-| `DOUBLE_BOOKED` | 0 |
-| `SAME_MISSION_CONSECUTIVE` | 0 of 162 adjacent pairs |
-| `NO_REST_BETWEEN_SHIFTS` | 162 pairs — every person has a zero minimum gap |
-| `LONG_UNBROKEN_RUN` (≥3 slots) | 0 — worst genuine run is 2 slots |
+| Check | Before plan 01 | After plan 01 (what this plan will see) |
+|-------|----------------|------------------------------------------|
+| `ROW_EXCEEDS_SLOT` | **1 violation** — the reported 163 h row, nothing else | **0** |
+| `DOUBLE_BOOKED` | 0 | 0 |
+| `SAME_MISSION_CONSECUTIVE` | 0 of 162 adjacent pairs | 0 — **once pinned rows are skipped**; 162 if they are not |
+| `NO_REST_BETWEEN_SHIFTS` | 162 pairs — every person has a zero minimum gap | 162, unchanged |
+| `LONG_UNBROKEN_RUN` (≥3 slots) | 0 — worst genuine run is 2 slots | 0 — **once pinned rows are skipped**; 163 h if they are not |
+
+Both columns were produced by running the engine on the decoded rota, the second after plan 01 was
+merged. The right-hand column is the one to design against, since 04 lands after 01.
 
 One true positive, zero false positives, on a real 1305-shift plan. That is the case for making
 Tier 1 fatal.
