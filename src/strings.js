@@ -199,6 +199,7 @@ export const t = {
   // default, and the only path to `removeBadPin` is inside it, so the label has
   // to advertise that there is something in there to fix.
   debugToggle: (n) => (n === 0 ? 'מידע לניפוי שגיאות' : `מידע לניפוי שגיאות — ${n} אזהרות`),
+  debugVersion: 'גרסה',
   warningsTitle: 'אזהרות',
   noWarnings: 'אין אזהרות.',
   copyPlanData: 'העתק טקסט',
