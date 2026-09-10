@@ -29,7 +29,7 @@ export const t = {
   dailyNextDay: 'הסיום למחרת',
   dailyIncomplete: 'יש למלא שעת התחלה ושעת סיום',
   headcountPerOccurrence: 'אנשים לתורנות',
-  onCall: 'כוננות',
+  onCall: 'יכול לישון',
   onCallHelp: 'אפשר לישון בזמן המשימה: הזמן בה נחשב מנוחה, ולא עבודה שמפסיקה אותה.',
 
   appTitle: 'מתכנן משמרות',

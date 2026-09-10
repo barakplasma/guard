@@ -132,3 +132,32 @@ test('on-call hours remain part of balanced workload selection', () => {
   assert.ok(r.shifts.filter((s) => s.missionId === 'g').every((s) => s.employeeId === 'e1'));
   assert.deepEqual(r.stats.perEmployee.map((e) => e.minutes), [240, 240]);
 });
+
+test('the summary minimum-gap stat treats a between-shifts on-call block as the rest it was, not two zero gaps', () => {
+  // Each ordinary mission is exactly one grid slot, so it is a single row -
+  // the point here is the on-call exclusion, not slot coalescing (a guard
+  // held across several touching slots of the *same* mission is a real
+  // back-to-back turn with no rest, per the rotation rules, and must keep
+  // reading as a zero gap).
+  const d = input(1);
+  d.tags = [];
+  d.missions = [
+    { id: 'work1', name: 'Work1', type: 'local', count: 1, start: 0, end: H },
+    { id: 'call', name: 'Call', type: 'remote', count: 1, onCall: true, start: H, end: 4 * H },
+    { id: 'work2', name: 'Work2', type: 'local', count: 1, start: 4 * H, end: 5 * H },
+  ];
+  d.pins = d.missions.map((m) => ({ missionId: m.id, employeeId: 'e0' }));
+  const r = plan(d);
+  assert.equal(r.stats.perEmployee[0].minGapMinutes, 180,
+    'the on-call block reads as the 3h rest it was, not as adjacent zero-length gaps');
+});
+
+test('the summary minimum-gap stat still reads a genuine back-to-back turn as zero', () => {
+  // Two consecutive slots of the same ordinary (non-on-call) mission are two
+  // turns with no rest between them, not one continuous shift artificially
+  // split by the grid - this must not be coalesced away.
+  const d = input(1);
+  d.missions = [{ id: 'g', name: 'G', type: 'local', count: 1, start: 0, end: 2 * H }];
+  const r = plan(d);
+  assert.equal(r.stats.perEmployee[0].minGapMinutes, 0);
+});
