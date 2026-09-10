@@ -12,6 +12,7 @@ format.
 | 2 | [02-per-mission-shift-length.md](02-per-mission-shift-length.md) | feature | חמ"ל needs two-hour shifts by day and one-hour shifts at night. Shift length becomes a per-mission field with a night variant. |
 | 3 | [03-daily-missions-and-per-job-rotation.md](03-daily-missions-and-per-job-rotation.md) | feature | תורנות מטבח happens once a day, is held whole by the same people, and rotates per job so nobody cooks twice in a week. |
 | 4 | [04-schedule-constraints.md](04-schedule-constraints.md) | hardening | The engine checks its own output: an impossible schedule (double-booking, a row longer than a shift) throws with a descriptive message, and poor-but-legal ones warn. Catches both bugs that have shipped. |
+| 5 | [05-qualifications-and-tags.md](05-qualifications-and-tags.md) | feature | Tag people with qualifications (driver, commander), require a qualified person on every shift of a mission, bar a qualification from a mission, and reserve nightly rest for tags that need it. |
 
 ## The rota that motivated this
 
@@ -42,9 +43,11 @@ flowchart LR
   P1 -->|"the 163 h row is a<br/>violation, so 04 cannot<br/>land before the fix"| P4
   P4 -->|"ROW_EXCEEDS_SLOT guards<br/>the grid rewrite"| P2
   P2 -->|"missionTurns / slotStart<br/>reused for the per-job key"| P3
+  P3 -->|"excludes on the daily kitchen<br/>mission is the stated case"| P5
+  P5["05 · qualifications,<br/>tagged seats, rest"]
 ```
 
-Recommended order: **01 → 04 → 02 → 03**, one PR each.
+Recommended order: **01 → 04 → 02 → 03 → 05**, one PR each.
 
 - 01 first, because it is a user-visible bug and because 02's turn-counting change assumes a
   local pin already arrives as per-slot rows (see 02, "Turn counting").
@@ -55,6 +58,10 @@ Recommended order: **01 → 04 → 02 → 03**, one PR each.
   02 by keeping its own counter in `occupy`; the note in 03 says how.
 - 02 and 03 each extend 04's Tier 1 by one line: 02 makes the slot bound per-mission, 03 adds
   `daily` to the exemption list beside remote.
+- 05 last: it is the largest change and touches the most. It needs 03, because "commanders never do
+  kitchen duty" is an exclusion on the daily kitchen mission. It also adds two Tier-1 invariants to
+  04 and one deliberate non-invariant — a missing commander is a roster shortage, not an engine bug,
+  and must not throw.
 
 ## Wire-format reservation (read before touching `urlState.js`)
 
