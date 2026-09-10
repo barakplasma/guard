@@ -1,10 +1,13 @@
 # Scheduling plans: pinned person, per-mission shift length, daily missions
 
-Three pieces of work came out of one real rota (a week of 16 guards across four local missions,
-`rotation` strategy, hourly shifts). This folder holds a plan for each. **Nothing here is
-implemented yet** — these documents exist so a later session (agent or human) can build each
-piece without re-deriving the context, and so the three do not step on each other in the URL
-format.
+Five pieces of work came out of one real rota (a week of 16 guards across four local missions,
+`rotation` strategy, hourly shifts). This folder holds a plan for each. Each document carries its
+own **Status** line — they exist so a later session (agent or human) can build each piece without
+re-deriving the context, and so they do not step on each other in the URL format.
+
+**Progress: 01 and 02 are implemented and merged. 03, 04 and 05 are still plans.** A plan is
+updated in place when it lands, so a document's Status line and its "decisions left open" section
+are the record of what was actually built.
 
 | # | Document | Kind | Summary |
 |---|----------|------|---------|

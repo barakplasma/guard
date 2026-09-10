@@ -1,6 +1,6 @@
 # 01 · A whole-mission pin on a local mission surfaces as one multi-day row
 
-**Kind:** bug · **Status:** planned, not implemented · **Depends on:** nothing
+**Kind:** bug · **Status:** implemented · **Depends on:** nothing
 
 ## Symptom
 
