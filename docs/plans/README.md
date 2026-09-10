@@ -11,6 +11,7 @@ format.
 | 1 | [01-whole-mission-pin-on-local-mission.md](01-whole-mission-pin-on-local-mission.md) | bug | A person pinned to a whole *local* mission comes out of the engine as one 163-hour row, so the agenda shows a slot with one person on a mission that needs five. |
 | 2 | [02-per-mission-shift-length.md](02-per-mission-shift-length.md) | feature | חמ"ל needs two-hour shifts by day and one-hour shifts at night. Shift length becomes a per-mission field with a night variant. |
 | 3 | [03-daily-missions-and-per-job-rotation.md](03-daily-missions-and-per-job-rotation.md) | feature | תורנות מטבח happens once a day, is held whole by the same people, and rotates per job so nobody cooks twice in a week. |
+| 4 | [04-schedule-constraints.md](04-schedule-constraints.md) | hardening | The engine checks its own output: an impossible schedule (double-booking, a row longer than a shift) throws with a descriptive message, and poor-but-legal ones warn. Catches both bugs that have shipped. |
 
 ## The rota that motivated this
 
@@ -27,25 +28,33 @@ Decoded from the shared link (names omitted): 16 employees, period Thu 16:00 →
 Running today's engine on it: 8 seats every hour for 163 hours, 15 rotating people, so everyone
 works 87 hours with a minimum gap of zero, and each person gets 21–22 kitchen shifts. After all
 three plans the same rota is 6 rotating seats an hour plus one kitchen occurrence a day, which is
-roughly 71 hours a person, one kitchen turn each, and a schedule that reads the way the unit runs.
+roughly 71 hours a person, one kitchen turn each, and a schedule that reads the way the unit runs —
+with the engine refusing, from 04 onward, to emit a shift nobody could work.
 
 ## How the three fit together
 
 ```mermaid
 flowchart LR
   P1["01 · split whole-mission pins<br/>on local missions per slot"]
+  P4["04 · engine checks<br/>its own output"]
   P2["02 · per-mission shift length<br/>(day / night)"]
   P3["03 · daily missions +<br/>per-job rotation"]
-  P1 -->|"rows carry slotStart;<br/>turn counting no longer<br/>assumes one global grid"| P2
+  P1 -->|"the 163 h row is a<br/>violation, so 04 cannot<br/>land before the fix"| P4
+  P4 -->|"ROW_EXCEEDS_SLOT guards<br/>the grid rewrite"| P2
   P2 -->|"missionTurns / slotStart<br/>reused for the per-job key"| P3
 ```
 
-Recommended order: **01 → 02 → 03**, one PR each.
+Recommended order: **01 → 04 → 02 → 03**, one PR each.
 
 - 01 first, because it is a user-visible bug and because 02's turn-counting change assumes a
   local pin already arrives as per-slot rows (see 02, "Turn counting").
+- 04 next, and this ordering is hard rather than preferred: its `ROW_EXCEEDS_SLOT` check fails on
+  the motivating rota as it stands today, so landing 04 before 01 would throw on a real shared
+  link. Once 01 is in, 04 locks the fix in and watches 02 and 03 while they are built.
 - 02 before 03 so the per-mission turn bookkeeping is introduced once. 03 *can* be built without
   02 by keeping its own counter in `occupy`; the note in 03 says how.
+- 02 and 03 each extend 04's Tier 1 by one line: 02 makes the slot bound per-mission, 03 adds
+  `daily` to the exemption list beside remote.
 
 ## Wire-format reservation (read before touching `urlState.js`)
 
