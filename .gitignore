@@ -13,3 +13,6 @@ screenshots/
 
 .DS_Store
 *.log
+
+# Agent worktrees (transient, never committed)
+.claude/worktrees/
