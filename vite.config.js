@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
@@ -7,8 +8,21 @@ import { VitePWA } from 'vite-plugin-pwa';
 // (e.g. "/guard/") for the GitHub Pages project URL.
 const base = process.env.BASE_PATH || './';
 
+// The debug panel shows this so a deployed build can be tied to the exact
+// commit that produced it. Tarball builds have no .git, hence the fallback.
+const appVersion = (() => {
+  try {
+    return execFileSync('git', ['rev-parse', '--short', 'HEAD']).toString().trim();
+  } catch {
+    return 'dev';
+  }
+})();
+
 export default defineConfig({
   base,
+  define: {
+    __APP_VERSION__: JSON.stringify(appVersion),
+  },
   plugins: [
     react(),
     VitePWA({

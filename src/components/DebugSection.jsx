@@ -10,6 +10,8 @@ import useCopyToast from '../hooks/useCopyToast.jsx';
 import { t } from '../strings.js';
 import { ERROR_FINDINGS, findingText } from '../lib/findings.js';
 
+/* global __APP_VERSION__ */
+
 // Codes where a manual assignment was actually dropped, so "remove this pin" is
 // a real repair. PIN_AVAILABILITY_OVERRIDDEN is deliberately absent: that pin
 // was honoured, and the only thing the button could do is delete the
@@ -108,6 +110,9 @@ export default function DebugSection({ doc, result, onClearPinByWarning, onClear
       </Button>
       <Collapse in={open}>
         <Box sx={{ mt: 1 }}>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+            {t.debugVersion}: {__APP_VERSION__}
+          </Typography>
           <Typography variant="caption" color="text.secondary" fontWeight={700} sx={{ display: 'block', mb: 0.5 }}>
             {t.warningsTitle}
           </Typography>
