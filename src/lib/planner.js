@@ -481,9 +481,78 @@ export function plan({
     });
   };
 
+  /* --- the segment grid local missions rotate on --- */
+  // Boundaries: the global shift grid plus every availability edge, shared
+  // across all local missions since an employee's window genuinely affects
+  // whether *any* mission can be staffed across it. Each mission's own
+  // start/end is added only to its own segmentation - so it gets a properly
+  // clamped partial segment at its own edges, without leaking into an
+  // unrelated mission's grid (a remote or local mission ending off-grid must
+  // not fragment some other local mission's otherwise-clean hourly slots).
+  //
+  // Built here, before anything is placed, because phase 1 needs it too: a pin
+  // on a local mission is emitted one row per segment. The grid depends only
+  // on the plan window, the employees' availability edges and the night edges,
+  // none of which the phases below touch, so computing it early cannot change
+  // what it produces - and one shared `segmentsOf` means the pinned rows and
+  // the demand walk can never disagree about where a segment starts.
+  const baseBoundaries = new Set([start, end]);
+  for (let t = start; t < end; t += shiftMinutes * MINUTE) baseBoundaries.add(t);
+  for (const e of emps) { baseBoundaries.add(e.start); baseBoundaries.add(e.end); }
+  // Every night edge too, so no segment can straddle a day/night transition -
+  // a segment is staffed by one headcount, and one that spanned the boundary
+  // would have to pick a side and leave the other short.
+  for (const w of nightWindows) {
+    if (w.start > start && w.start < end) baseBoundaries.add(w.start);
+    if (w.end > start && w.end < end) baseBoundaries.add(w.end);
+  }
+
+  // Keyed on the mission object rather than its id: ids are not validated to
+  // be unique, and a shared cache that confused two missions would hand one of
+  // them the other's grid.
+  const segmentCache = new Map();
+  const segmentsOf = (mission) => {
+    const hit = segmentCache.get(mission);
+    if (hit) return hit;
+    const edges = [...baseBoundaries, mission.start, mission.end]
+      .filter((t) => t >= mission.start && t <= mission.end)
+      .sort((a, b) => a - b);
+    const segments = [];
+    for (let i = 1; i < edges.length; i++) {
+      if (edges[i] > edges[i - 1]) segments.push({ start: edges[i - 1], end: edges[i] });
+    }
+    segmentCache.set(mission, segments);
+    return segments;
+  };
+
   /* --- 1. pins are immovable: place them before anything else competes --- */
+  // A pin on a remote mission stays one row over the whole mission: that is
+  // what remote means, one set of people holding it end to end. A pin on a
+  // *local* mission is emitted as one row per segment of that mission's grid
+  // instead. The engine's decision is identical either way - phase 3 sees the
+  // segment covered and asks for one person fewer - but a single row spanning
+  // the pin's entire coverage is the wrong *shape*: a whole-mission pin
+  // resolves to the mission's whole window, so it surfaced as one 163-hour
+  // "shift", took a slot of its own in the agenda (which keys slots by start
+  // and end), and left every hourly slot of that mission reading one person
+  // short.
+  //
+  // Pin bounds are deliberately not added to the edge set. An off-grid pin
+  // gets a partial first or last row from the intersection, which is enough;
+  // segmenting the grid on it would re-cut the mission's unrelated demand and
+  // shift the rotation for every plan that happens to carry such a pin.
   for (const pin of goodPins) {
-    addRow(missionById.get(pin.missionId), state.get(pin.employeeId), pin.start, pin.end, true, pin.frozen);
+    const mission = missionById.get(pin.missionId);
+    const st = state.get(pin.employeeId);
+    if (mission.type === 'remote') {
+      addRow(mission, st, pin.start, pin.end, true, pin.frozen);
+      continue;
+    }
+    for (const seg of segmentsOf(mission)) {
+      const rowStart = Math.max(seg.start, pin.start);
+      const rowEnd = Math.min(seg.end, pin.end);
+      if (rowEnd > rowStart) addRow(mission, st, rowStart, rowEnd, true, pin.frozen);
+    }
   }
 
   /* --- 2. remote missions: hard constraints, so they claim people first --- */
@@ -528,40 +597,16 @@ export function plan({
     }
   }
 
-  /* --- 3. local missions on a segment grid --- */
-  // Boundaries: the global shift grid plus every availability edge, shared
-  // across all local missions since an employee's window genuinely affects
-  // whether *any* mission can be staffed across it. Each mission's own start/end
-  // is added only to its own segmentation below - so it gets a properly clamped
-  // partial segment at its own edges, without leaking into an unrelated
-  // mission's grid (a remote or local mission ending off-grid must not fragment
-  // some other local mission's otherwise-clean hourly slots).
+  /* --- 3. local missions on the segment grid built above --- */
   const locals = miss.filter((m) => m.type === 'local');
-  const baseBoundaries = new Set([start, end]);
-  for (let t = start; t < end; t += shiftMinutes * MINUTE) baseBoundaries.add(t);
-  for (const e of emps) { baseBoundaries.add(e.start); baseBoundaries.add(e.end); }
-  // Every night edge too, so no segment can straddle a day/night transition -
-  // a segment is staffed by one headcount, and one that spanned the boundary
-  // would have to pick a side and leave the other short.
-  for (const w of nightWindows) {
-    if (w.start > start && w.start < end) baseBoundaries.add(w.start);
-    if (w.end > start && w.end < end) baseBoundaries.add(w.end);
-  }
-
   const demands = [];
   for (const m of locals) {
-    const edges = [...baseBoundaries, m.start, m.end]
-      .filter((t) => t >= m.start && t <= m.end)
-      .sort((a, b) => a - b);
-    for (let i = 1; i < edges.length; i++) {
-      const segStart = edges[i - 1];
-      const segEnd = edges[i];
-      if (segEnd <= segStart) continue;
+    for (const seg of segmentsOf(m)) {
       const covered = rows.filter(
-        (r) => r.missionId === m.id && r.start <= segStart && r.end >= segEnd,
+        (r) => r.missionId === m.id && r.start <= seg.start && r.end >= seg.end,
       ).length;
-      const need = countAt(m, segStart, nightWindows) - covered;
-      if (need > 0) demands.push({ mission: m, start: segStart, end: segEnd, need });
+      const need = countAt(m, seg.start, nightWindows) - covered;
+      if (need > 0) demands.push({ mission: m, start: seg.start, end: seg.end, need });
     }
   }
 

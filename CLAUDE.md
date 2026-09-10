@@ -48,6 +48,27 @@ that. Pin edits live in `src/lib/pins.js`, deliberately pure and outside the Rea
 rule stays testable. On a remote mission a pin always means the whole mission — a partial range can
 survive a local→remote toggle, and honouring it literally leaves the rest of the window short.
 
+A pin on a **local** mission is emitted as one pinned row per segment of that mission's grid, not
+one row over the pin's whole coverage — which is why `segmentsOf` is built before phase 1 rather
+than inside phase 3, so the pinned rows and the demand walk can never disagree about where a
+segment starts. The engine's *decision* was never wrong here; the shape was. A whole-mission pin
+resolves to the mission's entire window, and one row that long is the 88-hour-row symptom above
+arriving through a different door: the agenda keys slots on `(start, end)`, so it became a slot of
+its own and left every hourly slot of that mission reading one person short. Pin bounds are
+deliberately *not* added to the edge set — an off-grid pin gets a partial first or last row out of
+the intersection, whereas segmenting on it would re-cut the mission's unrelated demand and move the
+rotation for every plan carrying such a pin. Remote pins stay whole, one set of people end to end.
+
+Because that person now has the swap dropdown and the clear button on every hour they hold,
+`applySwap` and `applyClearPin` **cut** the matched pin around that hour (`cutPin`) instead of
+removing it: clearing Tuesday 14:00 must not silently unassign the week. The bound that was not cut
+is kept *as written*, so a `null` still follows the mission's window if that later moves, and
+`frozen` rides along onto both remainders. `applyClearPinsForMission` stays whole-pin — it is only
+ever offered for a pin the engine already reported as unusable. The Missions picker lists anyone
+holding *any* pin on the mission, marking a trimmed one `assignedPartially`; unticking a name
+releases every pin they hold there, and ticking one who has none writes them a whole-mission pin,
+so the two are exact inverses over that list.
+
 A shift whose window has already closed must never change hands because of an unrelated later
 edit — the engine has no notion of "past" (see the `Date.now()` rule above), so nothing stops a
 new employee or a widened availability window from silently reshuffling history unless something

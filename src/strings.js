@@ -74,6 +74,7 @@ export const t = {
   missionEnd: 'סיום',
   assignedPeople: 'משובצים קבועים',
   assignedHelp: 'אנשים שישובצו למשימה הזו לכל אורכה. השאר ריק לשיבוץ אוטומטי.',
+  assignedPartially: 'חלקי',
   missionReturnedNow: 'חזרו עכשיו',
   missionReturnedNowHelp: 'מעדכן את שעת הסיום לשעה העגולה הקרובה, ומשחרר את האנשים לשיבוץ במשימות אחרות מאותה שעה.',
   // A mission with no chosen end. Deliberately not "ללא זמן סיום": the mission

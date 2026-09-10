@@ -14,12 +14,17 @@ import { nextTopOfHour } from '../lib/planSchema.js';
 import { t } from '../strings.js';
 
 function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
-  // Whole-window pins are the mission's "fixed" roster. Per-shift pins (which
-  // carry a start/end) are manual swaps made on the schedule and are edited
-  // there, so they are deliberately not shown in this picker.
-  const assigned = doc.pins
-    .filter((p) => p.missionId === mission.id && p.start == null && p.end == null)
-    .map((p) => p.employeeId);
+  // Anyone holding a pin on this mission is on its roster. A whole-mission
+  // assignment does not stay whole: clearing or swapping a single shift cuts
+  // it into ranges (see cutPin in pins.js), and listing only the untouched
+  // null/null pins would drop someone who still works six days of seven the
+  // moment one hour of theirs changed hands. They are listed with a "partial"
+  // marker instead; unticking them still releases every pin they hold here.
+  const missionPins = doc.pins.filter((p) => p.missionId === mission.id);
+  const assigned = [...new Set(missionPins.map((p) => p.employeeId))];
+  const partiallyAssigned = (employeeId) => !missionPins.some(
+    (p) => p.employeeId === employeeId && p.start == null && p.end == null,
+  );
 
   // A whole-mission assignment needs the person available for the mission's
   // entire window - the planner clamps it to that regardless (see
@@ -190,14 +195,17 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
             input={<OutlinedInput label={`${t.assignedPeople} (${assigned.length}/${mission.count})`} />}
             renderValue={(ids) => (
               <Stack direction="row" spacing={0.5} useFlexGap sx={{ flexWrap: 'wrap' }}>
-                {ids.map((id) => (
-                  <Chip
-                    key={id}
-                    size="small"
-                    color={unavailableFor(id) ? 'warning' : 'default'}
-                    label={doc.employees.find((e) => e.id === id)?.name ?? id}
-                  />
-                ))}
+                {ids.map((id) => {
+                  const name = doc.employees.find((e) => e.id === id)?.name ?? id;
+                  return (
+                    <Chip
+                      key={id}
+                      size="small"
+                      color={unavailableFor(id) ? 'warning' : 'default'}
+                      label={partiallyAssigned(id) ? `${name} · ${t.assignedPartially}` : name}
+                    />
+                  );
+                })}
               </Stack>
             )}
             data-testid={`assign-${mission.id}`}
@@ -206,6 +214,7 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
               <MenuItem key={e.id} value={e.id} sx={unavailableFor(e.id) ? { color: 'warning.main' } : undefined}>
                 {e.name}
                 {unavailableFor(e.id) ? ` — ${t.unavailable}` : ''}
+                {partiallyAssigned(e.id) && assigned.includes(e.id) ? ` — ${t.assignedPartially}` : ''}
               </MenuItem>
             ))}
           </Select>
