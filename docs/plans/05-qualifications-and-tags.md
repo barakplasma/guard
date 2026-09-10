@@ -1,9 +1,18 @@
-# 05 · Qualifications and preferred nightly rest
+# ADR 005: Select qualified crews with preferred night rest
 
-**Status:** implemented and verified on PR #28’s branch.
-**Approved decisions:** [continuation](06-approved-continuation.md).
+- Status: Accepted (implemented)
+- Date: 2026-09-10
 
-## Document and editing
+## Context
+
+Mission headcount alone cannot ensure a driver or commander is present. Some
+qualifications also justify exemptions from other duties or a preferred amount
+of continuous nighttime rest. These requirements must coexist with manual pins
+and the instruction to continue filling duties when rest is unavailable.
+
+## Decision
+
+### Document and editing
 
 Plan tags are `{id, name, minNightRestMinutes}`. Employees reference tag ids in
 `tags`; missions carry `requires: [{tag, count}]` and `excludes: string[]`.
@@ -16,7 +25,7 @@ requirements and exclusions; plan key `tg` holds qualification definitions. Dail
 bounds keep positions 9–10. Empty new fields are omitted without changing old URL
 bytes. Unknown new features are not guaranteed to work correctly in old clients.
 
-## Crew selection
+### Crew selection
 
 Requirements describe coverage within the existing headcount, not extra seats.
 One person can cover different qualifications; a count of two drivers still needs
@@ -29,6 +38,11 @@ people, then strategy preference. Members with identical qualifications retain
 strategy order. Pins already occupying the window count toward coverage. Duplicate
 requirements for one tag describe the greatest minimum rather than adding seats.
 
+Concurrent demands are ordered using eligible candidate scarcity, including
+exclusions and unmet required tags, before strategy-based crew selection. This
+avoids a generic mission consuming the only specialist for a concurrent duty;
+it is not a global assignment search.
+
 Automatic candidates with excluded tags are filtered out for every mission type.
 An explicit excluded pin stands and gets an informational finding. A tag required
 and excluded on the same mission yields a configuration warning; the UI disables
@@ -39,7 +53,7 @@ ranges and shown on existing agenda slots. An unqualified pinned crew may fill
 headcount yet still fail coverage. Remaining useful duties continue to be staffed.
 This is a partial schedule, not an exception or proof of global infeasibility.
 
-## Nightly rest
+### Nightly rest
 
 Rest is a preferred continuous off-duty interval, **not a staffing veto**. Before
 filling automatic duties, choose deterministic preferred blocks around pins and
@@ -57,7 +71,7 @@ not false certification. Preferred blocks are heuristic: diagnostics describe th
 schedule and never claim that another globally feasible schedule cannot exist.
 Two drivers sleeping six hours each cannot cover an eight-hour night by themselves.
 
-## UI, exports, and verification
+## Evidence
 
 The Employees page manages tags and rest targets and assigns tags to people.
 Missions specify requirements/counts and exemptions. Agenda shows qualifications,
@@ -69,3 +83,20 @@ partial coverage, rest preservation/fallback, multiple rest tags, partial nights
 URL round trips, deletion, and exports. Headless browser tests exercise creation,
 selection, sharing, deletion, shortage display, and portrait/desktop layouts.
 General weekly caps, tag inheritance, and globally optimal scheduling are out of scope.
+
+## Consequences
+
+Qualifications constrain crew coverage without adding seats. Exclusions apply
+to automatic assignment, while explicit overrides remain visible. A completed
+headcount can still have qualification errors. Night rest and overall scheduling
+remain heuristic; reported shortfalls describe this output and do not establish
+that all possible schedules are infeasible. Exact qualification-group search can
+grow expensive as distinct qualification combinations increase.
+
+## Alternatives rejected
+
+- Independent required seats for every tag: unnecessarily rejects people who
+  may cover multiple qualifications.
+- Hard rest vetoes: leave duties empty contrary to the chosen staffing policy.
+- Hidden commander exemptions: replace explicit mission exclusions with implicit
+  behavior that planners cannot inspect.

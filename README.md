@@ -1,151 +1,144 @@
 # מתכנן משמרות — Shift schedule planner
 
-A **fully static** shift planner. No backend, no database, no accounts. You enter the people and
-the missions, press **תכנן**, and get a calendar agenda showing every shift and who is on duty.
-The whole plan lives in the URL, so sharing it is copying a link — and once the page has loaded,
-it keeps working with no network at all.
+A static, Hebrew RTL shift planner. No backend, database, or accounts. The plan
+lives in the URL: copy the link to save or share it. Scheduling runs in the browser
+and the app works offline after its assets have loaded and been cached.
 
-## What it does
+## Features
 
-- **Employees** — add names (one at a time or paste a list). The header shows how many people are
-  on the list, so you can check it against the roster you copied from. A name already on the list
-  is not added twice — case and stray spaces do not count as a difference — and the names that were
-  skipped are named. Renaming a row into an existing name is flagged rather than blocked. Everyone
-  is available for the whole period by default; narrow it per person when you need to.
-- **Missions** — each has a name, a time window, how many people it needs, and a type:
-  - **מרוחקת / remote** — the *same* people staff it end to end. They are locked out of everything
-    else while it runs.
-  - **מקומית / local** — people rotate every shift length, balancing total hours and pushing each
-    person's turns as far apart as possible.
-- **Manual control** — assign specific people to a mission from the Missions page, or swap anyone
-  in any generated shift with one dropdown on the schedule. Manual choices are remembered and
-  travel with the shared link.
-- **Export** — download a CSV (Excel-safe Hebrew), or copy a message formatted for WhatsApp. A
-  separate calendar section downloads an iCal file, for the whole team or for one person.
-- **Offline** — a service worker precaches the app; all scheduling runs in the browser.
+- **Employees:** add individual names or paste a roster, detect duplicate names,
+  set availability, and assign qualifications such as driver or commander.
+- **Local missions:** rotate crews using the plan's default shift length or a
+  mission's own daytime and nighttime lengths and headcounts.
+- **Remote missions:** keep the same crew for the entire mission window.
+- **Daily missions:** keep one crew for each daily occurrence. Times use 24-hour
+  notation; 08:00–08:00 means through the following morning. Short duties block
+  only their actual hours. Completed duties rotate per mission.
+- **Required qualifications:** require a number of qualified people within the
+  existing headcount. Prefer separate people for different roles, while allowing
+  one person to cover multiple qualifications. Two required drivers still need
+  two distinct people.
+- **Exclusions:** exclude tagged people from automatic assignment to a mission,
+  such as commanders from kitchen duty. Explicit pins override exclusions visibly.
+- **Night rest:** configure preferred continuous rest per qualification. Staffing
+  continues if rest cannot be preserved, with measured shortfalls shown.
+- **Manual assignments:** assign a mission roster, swap or clear individual
+  assignments, and preserve unaffected pin ranges. Edits freeze elapsed automatic
+  assignments as editable pins.
+- **Findings and exports:** inspect shortages and schedule-quality findings;
+  share the source link, export CSV or calendars, and copy WhatsApp-formatted text.
 
 ### Example
 
-Ten employees, a remote mission needing four, and a local mission needing two: the four are locked
-to the remote mission for its whole duration, and the remaining six rotate through the local one,
-each working the same total time with the longest possible gap between turns.
+Create driver and commander qualifications and assign them to employees. Require
+one of each on a two-person patrol. Exclude commanders from the daily kitchen
+mission. Set drivers' preferred night rest to 360 minutes. The planner attempts
+coverage and rest, and shows unmet requirements rather than claiming success.
 
-## Self-hosting
+### Limits
 
-Three options, all built automatically by CI on every push to `main`:
+Scheduling is deterministic for the same absolute engine inputs, but heuristic:
+it does not guarantee equal workloads, no repeated duties, or global optimality.
+A full headcount can still lack a required qualification. Missing people,
+qualifications, and rest appear alongside the partial schedule.
 
-### 1. GitHub Pages
+Daily clock times and night windows resolve in the viewer's timezone, including
+calendar-day length changes at daylight-saving transitions. Opening the same link
+in another timezone can therefore change these intervals. Current builds read old
+links; older builds may not understand new mission types or qualifications.
 
-Live at **https://barakplasma.github.io/guard/** — nothing to do, it's already deployed.
+## Development
 
-### 2. Download and serve (no container runtime)
-
-Grab `guard-static.zip` from the [latest release](../../releases/latest), unzip,
-and serve the folder with any static file server:
-
-```bash
-unzip guard-static.zip -d guard && cd guard
-python3 -m http.server 8080
-# or: npx serve , or: caddy file-server --listen :8080
+```sh
+npm ci
+npm run dev
 ```
 
-### 3. OCI image (Caddy, automatic HTTPS)
-
-```bash
-# HTTP only (behind a reverse proxy, or local testing):
-docker run -p 80:80 ghcr.io/barakplasma/guard:latest
-
-# Automatic HTTPS with your domain:
-docker run -e DOMAIN=guard.example.com -p 80:80 -p 443:443 ghcr.io/barakplasma/guard:latest
-```
-
-Caddy provisions and renews Let's Encrypt certificates on its own.
-
-## Running it
-
-```bash
-npm install
-npm run dev        # development server
-npm run build      # static site into dist/
-npm run preview    # serve the built site
-npm test           # scheduler unit tests + property-based invariants
+```sh
 npm run lint
-```
-
-`dist/` is plain static files — host it anywhere, or open `dist/index.html` from disk.
-
-### CI/CD
-
-Every push to `main` runs `.github/workflows/release.yml`, which:
-1. Builds and runs unit tests.
-2. Runs browser e2e tests against the built app (Playwright).
-3. Publishes to three channels in parallel: GitHub Pages, a rolling Release zip, and
-   the Caddy OCI image on GHCR.
-4. Verifies each channel after it ships (HTTP smoke tests against the container and
-   the Pages URL).
-
-PR validation (lint + tests + build) runs in `ci.yml`.
-
-### Browser end-to-end check
-
-`tests/e2e.mjs` drives the built app in a real browser — planning, hand-assignment, swapping, both
-exports, opening a shared link in a clean profile, and reloading with the network switched off. It
-is not part of `npm test` because it needs a browser and a running server:
-
-```bash
+npm test
 npm run build
-npx vite preview --port 4173 --strictPort &
-npm i --no-save playwright && npx playwright install chromium
-node tests/e2e.mjs
+npm run preview
 ```
 
-## How it works
+The production output is `dist/`. Serve it over HTTP(S) using a static file server;
+opening `index.html` directly from disk is not the supported workflow.
+
+### Headless browser checks
+
+Browser suites run separately from `npm test`. Install Playwright and a headless
+Chromium binary if they are not already available:
+
+```sh
+npm i --no-save playwright
+npx playwright install chromium
+npm run build
+npm run preview -- --host 127.0.0.1 --port 4173 --strictPort
+```
+
+With that preview running, use another terminal:
+
+```sh
+BASE=http://127.0.0.1:4173 SHOT_DIR=/tmp/guard-e2e node tests/e2e.mjs
+BASE=http://127.0.0.1:4173 SHOT_DIR=/tmp/guard-mobile node tests/mobile-viewports.mjs
+BASE=http://127.0.0.1:4173 SHOT_DIR=/tmp/guard-features node tests/features.e2e.mjs
+```
+
+Set `CHROME=/usr/bin/chromium` to use an installed browser instead. The suites
+cover sharing, offline reload, manual assignments, mobile overflow, daily duties,
+qualification editing, rest findings, and computation-error sharing.
+
+## Hosting and CI
+
+The app needs only static hosting. The release workflow in
+[`.github/workflows/release.yml`](.github/workflows/release.yml) builds and checks
+pushes to `main`, then publishes GitHub Pages, a `guard-static.zip` release asset,
+and a Caddy OCI image at `ghcr.io/barakplasma/guard`. Publication success is recorded
+in the workflow run; a PR branch does not itself update the production site.
+
+- Pages address: [barakplasma.github.io/guard](https://barakplasma.github.io/guard/).
+- Static archive: download from the [releases page](../../releases) and serve with
+  any static HTTP server.
+- OCI image: run using Kubernetes or another compatible runtime. On this project's
+  cluster, expose services through STRRL's `cloudflare-tunnel` Ingress class and
+  configure the required Cloudflare Access policy before exposure.
+
+[PR CI](.github/workflows/ci.yml) runs lint, unit/property tests, and the build.
+Browser commands above can also be run locally on a headless host.
+
+## Architecture
 
 | Path | Purpose |
-| --- | --- |
-| `src/lib/planner.js` | The scheduling engine. Pure, dependency-free, deterministic. |
-| `src/lib/planSchema.js` | The plan document: zod schema, defaults, normalization. |
-| `src/lib/urlState.js` | Compresses the document into the URL hash and back. |
-| `src/lib/pins.js` | Manual-assignment edits: swapping, clearing, mission rosters. |
-| `src/lib/agenda.js` | Groups shifts into the day → slot → mission tree the UI and exports share. |
-| `src/lib/exportCsv.js`, `exportText.js` | CSV and WhatsApp output. |
-| `src/pages/`, `src/components/` | The Hebrew RTL interface. |
+|------|---------|
+| `src/lib/planner.js` | Pure scheduling orchestration over absolute intervals. |
+| `src/lib/strategies.js` | Balanced and rotation candidate ranking. |
+| `src/lib/crew.js`, `rest.js` | Qualification selection and preferred-rest assessment. |
+| `src/lib/invariants.js` | Independent assignment and timeline validation. |
+| `src/lib/planSchema.js` | Document validation, defaults, and calendar adapters. |
+| `src/lib/urlState.js` | Positional tuple encoding and compressed URL decoding. |
+| `src/lib/pins.js` | Manual assignment edits and elapsed-history freezing. |
+| `src/lib/agenda.js` | Day/slot/mission grouping for display and exports. |
+| `src/lib/exportCsv.js`, `exportText.js`, `exportIcal.js` | CSV, WhatsApp, and calendar output. |
+| `src/state/PlanContext.jsx` | URL-backed document edits. |
+| `src/pages/`, `src/components/` | Hebrew RTL interface. |
 
-### State lives in the URL
+The URL hash contains the input document, including pins, rather than generated
+shifts. There is no backend document store or localStorage save. Corrupt links
+open an empty plan with a notice. The source link remains available when schedule
+computation fails; exports requiring a result are disabled when none exists.
 
-The document is squeezed into positional tuples, LZ-compressed, and written to the hash's query
-string (`#/schedule?p=…`) — typically a few hundred characters. There is no server and no
-localStorage: the link *is* the save file. A corrupt or truncated link opens an empty plan with a
-notice rather than failing.
+Scheduling resolves pins first, then remote/daily holds, then chronological local
+demands. Scarcity ordering, qualification coverage, rest preferences, and the
+selected strategy guide automatic assignments. Independent checks reject engine
+invariant violations by default; the schedule screen reports them for diagnosis.
+Invalid output cannot become frozen history.
 
-Times are stored as absolute instants and rendered in each viewer's own timezone.
-
-### Manual assignments are inputs, not edits
-
-A hand-made assignment ("pin") is stored in the plan document and fed back into the engine, rather
-than patching the generated output. That is what makes the schedule a pure function of the
-document: re-planning, reloading, and sharing all reproduce exactly the same result, and swapping
-one person automatically frees the other to be rescheduled fairly elsewhere.
-
-A pin's `start`/`end` may be null, meaning "inherit the mission's window" — so the same stretch of
-time can be described two ways, and any edit keyed on the literal range will miss one of them. That
-is why `src/lib/pins.js` matches by *coverage*, and it is kept pure so the rule is directly
-testable.
-
-### Scheduling order
-
-1. Pins are placed first — they are immovable.
-2. Remote missions claim their people next, scarcest mission first.
-3. Local missions fill the remaining time on a segment grid built from the shift length plus every
-   mission and availability edge, so a mission starting mid-slot is clamped rather than rounded.
-4. For each segment the candidate with the fewest minutes so far wins; ties break toward whoever
-   has been off duty longest, then round-robin.
-
-Not having enough people is reported as a warning alongside a partial schedule — it is a normal
-state while editing, not an error.
+See the [architecture decision records](docs/plans/README.md) for context,
+tradeoffs, wire-format reservations, and test evidence. [Contributor guidance](CLAUDE.md)
+records implementation guardrails. [UX follow-ups](docs/ux-overhaul-followups.md)
+separates completed coverage from remaining review work.
 
 ## History
 
-This repository previously held "Guard v3", a PocketBase-backed roster app that required a running
-server. That is preserved in git history on `main`; this app replaces it with something that needs
-no backend at all.
+The previous PocketBase-backed Guard v3 is preserved in git history. This app
+replaces it with a static, URL-backed planner.

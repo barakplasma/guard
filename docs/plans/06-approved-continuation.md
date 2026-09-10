@@ -1,156 +1,66 @@
-# Approved continuation: Plans 3–5
+# ADR 006: Extend shared plan URLs without reordering existing fields
 
-Approved by the user on 2026-09-10. This document supersedes conflicting decisions
-in Plans 03–05. Implementation and acceptance checks are complete on the PR branch.
+- Status: Accepted (implemented)
+- Date: 2026-09-10
 
-## Branch and delivery
+## Context
 
-Use PR #28's existing branch, `claude/tornot-scheduling-plan-vcn99j`.
-The planning review inspected revision `1b446df`; Plans 1–2 are implemented,
-while 3–5 remain planned. Fetch all remotes and verify the latest PR head before
-continuing. Preserve unrelated local work.
+The plan document lives in a compressed URL, with positional tuples used to keep
+links compact. Existing shared links must remain readable as mission types,
+shift lengths, and qualifications are added. Reusing tuple positions would
+silently change the meaning of stored plans.
 
-Update the existing planning documents, then implement **3 → 4 → 5**. Split each
-feature into tasks touching at most three files. Start bug corrections with failing
-regression tests. Commit and push continuation work to the same branch; do not
-merge or deploy.
+## Decision
 
-## Correct the plans first
+Append fields at reserved positions and provide defaults for absent values.
+Retain the existing schema version for backward reading in the current build.
+Trim trailing unset extension fields and omit unused tag definitions so documents
+without the extensions retain their previous encoding.
 
-- Replace stale implementation order and status claims with verified branch state.
-- Resolve the URL collision: daily times occupy mission positions 9–10;
-  qualification requirements/exclusions occupy 11–12. Remove Plan 3's proposed
-  weekday-mask reservation at 11.
-- Equal daily times mean a full calendar day: **08:00–08:00 ends the next morning**.
-- Qualify fairness promises: availability, pins, and competing duties can force
-  repeats. Use occurrence counts first in both daily strategies so clipped
-  occurrences do not distort rotation.
-- Daily pin coverage, swaps, clearing, deduplication, and freezing must understand
-  expanded occurrences rather than only literal written ranges.
-- Replace Plan 5's separate-seat requirement and hard rest reservations with the
-  qualification coverage and staffing-first rules below.
-- Remove the claim that two drivers taking six hours of rest each can cover an
-  eight-hour night: together they provide only four working hours.
-- Scheduling shortages describe the scheduling attempt, not proof that no
-  solution exists.
-- Correct Plan 4's conflicting report-mode/freezing instructions and update the
-  engine import rules if a pure checker module is introduced.
-- Document viewer-timezone behavior explicitly. Old builds interpreting daily
-  missions as continuous local duty is a compatibility limitation, not safe
-  degradation.
+| Tuple | Position | Meaning | Unset |
+|-------|----------|---------|-------|
+| mission | 0–6 | id, name, type, start, end, count, nightCount | existing conventions |
+| mission | 7–8 | day/night shift minutes | 0 |
+| mission | 9–10 | daily start/end minutes | null; zero is midnight |
+| mission | 11 | flat qualification requirement pairs | [] |
+| mission | 12 | excluded tag ids | [] |
+| employee | 4 | qualification ids | [] |
+| plan | key `tg` | qualification definitions | omitted |
 
-## Plan 3: daily missions
+Mission types encode as local `0`, remote `1`, and daily `2`. Future extension
+fields must follow these reservations. Decode through the document schema;
+corrupt or unsupported links fall back to an empty document with a notice.
+The edit cache follows that fallback so a later edit cannot restore stale data.
 
-- Add `daily`, nullable `dayStart`/`dayEnd`, and adapter-resolved absolute
-  occurrences. Missing bounds produce no occurrences and a visible hint.
-- Use 24-hour inputs and labels showing “next day” for overnight/full-day duty.
-  Preserve calendar-local times through DST and clamp occurrences to mission and
-  plan bounds. Continue using the viewer's timezone, matching night windows.
-- Schedule each occurrence as one uninterrupted hold before automatic local
-  shifts. Use occurrence-specific identity for capacity, pin counting, row merging,
-  and turn accounting.
-- Daily rotation prioritizes completed occurrences on that mission, then
-  strategy-specific tie-breakers. Future pins must not count as past turns.
-- Whole-mission pins cover every occurrence; ranged pins cover each positively
-  overlapping occurrence in full. Swapping or clearing one occurrence preserves
-  other days and other people.
-- Daily duty blocks other assignments only during its actual hours. There is no
-  additional nighttime exemption. A full-day kitchen assignment blocks guard duty
-  throughout that day and night; an 08:00–14:00 assignment does not block the night.
-- Update agenda, statistics, text, CSV, calendar exports, and sharing to preserve
-  daily identity and occurrence boundaries.
+Preserve existing valid golden assignments and legacy diagnostics. Test additive
+quality findings separately. Correctness fixes are allowed to change previously
+invalid results, such as off-grid pin overstaffing; old defects are not promises.
 
-## Plan 4: output checks
+## Consequences
 
-- Check double-booking, capacity, mission/availability bounds, local slot
-  containment, whole remote/daily holds, and timeline coverage.
-- Retain documented pin availability overrides. Missing staff and violated rest
-  targets are input/quality findings, not engine bugs.
-- Add strict checking by default and explicit report mode for the schedule
-  screen. Keep copying the source plan available on errors; generated exports
-  require an available result.
-- Do not freeze invariant-invalid output into historical pins; preserve the
-  existing fallback when validation fails.
-- Aggregate quality warnings. Count distinct slots/occurrences rather than
-  fragmented rows; apply the existing pinned-row exemption to ordinary adjacency
-  warnings.
+The current build reads old links without migration, and unused extensions do
+not enlarge their encoded documents. This is backward compatibility only: old
+builds do not reliably understand new daily or qualification semantics.
 
-## Plan 5: qualifications and rest
+Viewer-local calendar resolution remains outside the wire format. Equal absolute
+planner inputs produce deterministic output, but links opened in different
+timezones may resolve daily and nighttime windows differently.
 
-- Add plan-level qualification records, employee tags, mission requirement counts,
-  and excluded tags; serialize and prune references consistently.
-- Requirements mean qualified-person coverage within existing headcount. One
-  person can satisfy different qualifications, but counts for any individual
-  qualification require distinct people.
-- Prefer separate people for required roles when feasible. Fall back to combined
-  roles, including driver/commander; do not add forbidden-pair configuration.
-- Select crews using deterministic coverage feasibility checks, respecting pins
-  and exclusions before strategy tie-breakers. Include already-pinned crew in
-  coverage calculations.
-- If complete coverage is impossible, maximize fulfilled requirements, fill
-  remaining eligible capacity, and report unmet qualifications without inventing
-  credentials or extra seats.
-- Treat nightly rest as a preferred continuous off-duty target. Attempt
-  rest-preserving staffing first; allow automatic rest violations when needed to
-  staff duties and report actual shortfalls prominently.
-- Keep rest separate from work accounting. For multiple rest-bearing tags, use
-  the largest target. Partial nights receive an explicit incomplete-assessment
-  finding rather than a false guarantee.
-- Show qualification coverage per shift and aggregate shortages/rest violations
-  without an alert wall. Manual exclusion overrides remain visible.
+## Alternatives rejected
 
-## Validation
+- Reordering or reusing tuple fields: silently corrupts existing meanings.
+- Serializing only full property names: increases URL size.
+- Claiming bidirectional compatibility without a version change: older clients
+  cannot enforce semantics they do not implement.
 
-- Cover full-day, overnight, DST, and clipped occurrences; repeated daily pins;
-  partial-pin swaps; stale cleanup; mixed grids; and daily fairness under both
-  strategies.
-- Cover combined qualifications, distinct-person counts, scarce candidates,
-  pinned coverage, exclusions, insufficient qualifications, and staffing despite
-  rest shortfalls.
-- Test each invariant using deliberately malformed output; verify error display,
-  sharing, and freeze behavior.
-- Preserve existing golden fixtures without regeneration. Extend property tests
-  with daily missions, contested pins, and qualifications.
-- Run `npm run lint`, `npm test`, `npm run build`, and existing browser/mobile
-  checks headlessly, including 360px portrait and 24-hour time display.
-- Update existing plan statuses and PR #28's description to match delivered
-  behavior. Record the clarified daily-time, combined-role, and rest-fallback
-  rules in `AGENTS.md` during implementation.
+## Evidence
 
-## Small-task execution order
+Implementation: `src/lib/urlState.js`, `src/lib/planSchema.js`, and
+`src/state/PlanContext.jsx`.
+Tests: `tests/urlState.test.js`, `tests/daily.document.test.js`,
+`tests/tags.url.test.js`, `tests/planner.golden.test.js`, and
+`tests/features.e2e.mjs`.
 
-Each task must touch at most three files; subdivide before editing if needed.
-Keep feature-specific tests with the subsystem they exercise.
-
-1. Save this approved plan, then reconcile the existing planning documents in
-   batches of at most three documents.
-2. Daily schema and occurrence adapter with tests; daily URL encoding with tests.
-3. Daily hold placement with tests; daily strategy ordering with tests.
-4. Daily pin normalization with tests; pin editing and freezing with tests.
-5. Daily mission controls and localized copy; agenda and export integration in
-   separate batches; browser/property coverage.
-6. Pure output checker with malformed-output tests; engine integration; schedule
-   error handling and freezing integration; generated invariant coverage.
-7. Qualification schema and reference editing with tests; URL encoding with tests.
-8. Qualification crew selection with tests; rest preference and assessment with
-   tests; engine integration in separate batches.
-9. Qualification management UI; employee/mission controls; agenda and export
-   integration in separate batches; browser/property coverage.
-10. Run final validation, review risks and regressions, update status documents,
-    commit and push to PR #28, and update its description.
-
-
-## Completion evidence
-
-- Lint, all 27 unit/property test files, and production build pass.
-- Existing end-to-end and mobile viewport suites pass; new feature acceptance
-  covers qualification editing, daily full-day holds, rest/coverage findings,
-  URL reloads, deletion, error-path sharing, and 360px/desktop rendering.
-- Existing golden fixture files are unchanged. New quality warnings are tested
-  separately; UTC-based snapshot inputs no longer depend on the host timezone.
-- Additional regressions cover off-grid pin overstaffing, day/night pin capacity,
-  unstaffed mission qualification findings, correct reported pinned headcounts,
-  calendar occurrence boundaries, scarce qualified/excluded crew ordering,
-  rapid UI edits preserving prior changes, and corrupt-link cache isolation.
-- Night rest remains best effort, with staffing fallback and measured shortfalls.
-  The scheduler does not claim global feasibility or optimality.
+This ADR replaces the completed continuation checklist. Its historical filename
+is retained to preserve existing references; accepted domain decisions are
+recorded in ADRs 001–005.

@@ -9,18 +9,17 @@ A static, backend-free shift planner. See `README.md` for what it does and how t
 - **No network at runtime.** No webfonts, no CDNs, no analytics. The app must work offline after
   first load; anything fetched at runtime breaks that.
 - **The engine stays pure.** `src/lib/planner.js`, strategies, and the pure crew/rest/invariant helpers import no UI, network, or clock dependencies, touch no DOM, and call neither `Date.now()` nor `Math.random()`. Every sort
-  ends in a stable id tiebreak. A shared link must render identically for everyone who opens it,
-  forever.
+  ends in a stable id tiebreak. Identical absolute engine inputs must produce identical results. The adapter
+  resolves daily and night windows in the viewer's timezone (ADR 003).
 
 ## Working on the scheduler
 
-The schedule is a pure function of the plan document. Never store generated shifts — recompute
+The schedule is a pure function of the absolute input resolved from the plan document. Never store generated shifts — recompute
 them. Manual assignments are recorded as **pins** in the document and fed back in as engine input,
 which is why a hand-edit survives sharing and why swapping one person frees the other to be
 rescheduled fairly.
 
-Infeasible input (not enough people) returns `warnings` plus a partial plan. Only structurally
-invalid input throws — someone mid-edit needs to see what is short, not a stack trace.
+Infeasible input (not enough people) returns `warnings` plus a partial plan. Structurally invalid input and output invariant violations throw in strict mode — someone mid-edit needs to see what is short, not a stack trace.
 
 `mergeRows` rejoins rows **only within one shift slot**, never across a shift boundary. Repairing a
 segment that an unrelated availability edge tore in half is what merging is for; welding
@@ -37,12 +36,13 @@ one-hour shifts at night while the gate beside it stays hourly. `gridFor`/`slotB
 set built by the same loop* that always built it, which is the only reason a link already shared
 still renders the schedule it rendered. `tests/planner.golden.test.js` is the standing proof of
 that and must never be regenerated to make a change pass — `scripts/writeGoldens.mjs` exists for
-the day the engine is genuinely meant to reschedule old plans, which has not come.
+intentional assignment changes. Correctness fixes may change previously invalid output;
+new quality findings are asserted separately from the unchanged fixtures.
 
 Equal day and night lengths anchor once, at the plan's start. Different ones anchor **each stretch
 at its own beginning** — night restarts an hourly grid at 22:00 rather than inheriting the phase
 the two-hour grid happened to be in — and a stretch that is not a whole number of slots leaves one
-partial slot at its end, exactly as the plan's own end always has. Remote missions ignore both
+partial slot at its end, exactly as the plan's own end always has. Remote and daily missions ignore both
 fields, like `nightCount`. The night length is deliberately **not** capped at the night's own
 duration: a ten-hour night slot inside an eight-hour night is one slot ending at daybreak, which is
 harmless, and a validation error there would fire while someone was still typing the number.
@@ -152,7 +152,7 @@ outcome, not a bug — `stints` is the column that means something there.
 Rotation ranks on **rest time first**, turn count second. That order is load bearing, not a
 preference: ranked on turns first, whoever starts a block keeps winning the slot after it. Both
 keys are also measured *as of the slot being filled* rather than from a running counter — the
-engine places pins first, then remote missions, then local slots chronologically, so a counter
+engine places pins first, then remote/daily holds, then local slots chronologically, so a counter
 would let a pin for a late-evening shift push its holder to the back of the ring before the
 morning slots were even assigned.
 
@@ -199,7 +199,7 @@ are simply two guards.
 tuples, so **field order is part of the wire format** — appending is safe, reordering or inserting
 is not. Bump `SCHEMA_VERSION` when the shape changes; `decodePlan` rejects unknown versions rather
 than misreading them. Positions past the ones in use are reserved in
-[docs/plans/README.md](docs/plans/README.md) so two features built in either order cannot claim
+[ADR 006](docs/plans/06-approved-continuation.md) so two features built in either order cannot claim
 the same one; take the next free position from that table rather than the next free index. An
 appended position is written only when it carries a value — `trimTail` drops the unset tail, never
 shortening a tuple below the length the last shipped build wrote — so a document using none of the
@@ -259,8 +259,9 @@ the Vite build keeps working.
 
 ## Daily missions, qualifications, and output checks
 
-See `docs/plans/03-daily-missions-and-per-job-rotation.md` through plan 05 for the
-implemented contracts. The approved decisions are in `06-approved-continuation.md`.
+See [the ADR index](docs/plans/README.md) for accepted scheduling decisions.
+ADRs 003–005 describe daily duties, validation, and qualifications; ADR 006
+records URL compatibility. The historical plan filenames remain stable.
 Daily equal times mean a full calendar day; inputs always display 24-hour time.
 The adapter resolves viewer-local calendar occurrences, and the engine holds each
 whole before local duties. Occurrence-aware pin edits preserve neighboring days.

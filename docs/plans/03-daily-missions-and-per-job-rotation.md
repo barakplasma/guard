@@ -1,9 +1,18 @@
-# 03 · Daily missions, held whole, rotated per job
+# ADR 003: Hold daily missions by calendar occurrence
 
-**Status:** implemented and verified on PR #28’s branch.
-**Approved decisions:** [continuation](06-approved-continuation.md).
+- Status: Accepted (implemented)
+- Date: 2026-09-10
 
-## Behavior
+## Context
+
+Duties such as kitchen work need one crew for a recurring daily window, rather
+than hourly rotation or one crew for the entire planning period. Fairness should
+consider completed duties on that mission, and equal clock times must express a
+full calendar day.
+
+## Decision
+
+### Daily occurrence semantics
 
 A `daily` mission has `dayStart` and `dayEnd` in minutes past midnight and a
 headcount per occurrence. Inputs use 24-hour notation. Equal times, such as
@@ -21,7 +30,7 @@ holds each occurrence uninterrupted. Its duty blocks other assignments only
 inside those hours: a full-day kitchen assignment includes the night, while an
 08:00–14:00 kitchen assignment does not create a separate nighttime exemption.
 
-## Scheduling and pins
+### Scheduling and pins
 
 Remote holds and daily occurrences fill before automatic local segments, ordered
 by start, candidate scarcity, duration, and stable identity. Pins precede both.
@@ -41,7 +50,7 @@ Pin editing uses effective occurrence coverage: clearing or swapping one day
 preserves other days, other people, and frozen flags. Elapsed occurrences freeze
 only once ended; out-of-period ranged history remains removable.
 
-## Document and UI
+### Document and UI
 
 Mission type code `2`; tuple positions `9` and `10` contain daily bounds. `null`
 means unset, while zero is midnight and must survive trimming. Existing unused
@@ -52,7 +61,7 @@ The Missions page has a daily type toggle, time fields, next-day hint, and
 headcount. Agenda, readable plan, CSV, WhatsApp, and calendar retain occurrence
 boundaries. CSV includes an end-date column when any row crosses a date boundary.
 
-## Verification
+## Evidence
 
 Document tests cover midnight, missing bounds, clipping, overnight periods, and
 Israel DST. Engine tests cover both rotations, full holds, local conflicts,
@@ -60,3 +69,17 @@ future pins, and per-occurrence capacity. Pin tests cover partial ranges, cleari
 swapping, freezing, and cleanup. Export tests prevent consecutive daily holds from
 being welded into one calendar event. `features.e2e.mjs` exercises real controls,
 sharing, and phone layout. Existing golden assignment fixtures are unchanged.
+
+## Consequences
+
+Whole occurrences make daily coverage and pin editing predictable. Calendar-local
+resolution follows the existing night-window convention, but the same shared
+link can resolve differently in another timezone. Rotation is a preference, not
+a guarantee that no person repeats a duty.
+
+## Alternatives rejected
+
+- Hourly local modeling: allows crew changes during a duty intended to be whole.
+- One remote hold across the entire period: prevents daily rotation.
+- Treating equal times as empty or adding implicit night exemptions: conflicts
+  with the intended duty hours.
