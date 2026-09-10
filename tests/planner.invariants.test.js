@@ -19,14 +19,26 @@ const planArb = fc.record({
   employeeCount: fc.integer({ min: 1, max: 8 }),
   missions: fc.array(
     fc.record({
-      type: fc.constantFrom('local', 'remote'),
+      type: fc.constantFrom('local', 'remote', 'daily'),
+      qualified: fc.boolean(),
+      exclude: fc.boolean(),
       count: fc.integer({ min: 1, max: 3 }),
       nightCount: fc.integer({ min: 1, max: 3 }),
+      // A grid of its own, or the plan's - and by night, a third possibility
+      // again. Mixed grids beside each other are the case the properties
+      // below have to keep holding for; `null` keeps plenty of missions on the
+      // shared grid so the two paths are exercised together.
+      shiftMinutes: fc.constantFrom(null, 60, 120, 180),
+      nightShiftMinutes: fc.constantFrom(null, 60, 120, 180),
       offsetMin: fc.integer({ min: 0, max: 300 }),
       lengthMin: fc.integer({ min: 30, max: 600 }),
     }),
     { minLength: 1, maxLength: 4 },
   ),
+  pins: fc.array(fc.record({ employee: fc.nat(), mission: fc.nat(),
+    whole: fc.boolean(), frozen: fc.boolean(), from: fc.integer({ min: 0, max: 300 }),
+    length: fc.integer({ min: 1, max: 180 }),
+  }), { maxLength: 6 }),
   limited: fc.array(fc.record({
     index: fc.nat(),
     fromMin: fc.integer({ min: 0, max: 300 }),
@@ -43,6 +55,7 @@ function build(spec) {
   const employees = Array.from({ length: spec.employeeCount }, (_, i) => ({
     id: `e${i + 1}`,
     name: `Emp${i + 1}`,
+    tags: i % 2 ? ['driver'] : [],
   }));
   for (const l of spec.limited) {
     const e = employees[l.index % employees.length];
@@ -56,13 +69,27 @@ function build(spec) {
     id: `m${i + 1}`,
     name: `M${i + 1}`,
     type: m.type,
+    requires: m.qualified ? [{ tag: 'driver', count: 1 }] : [],
+    excludes: m.exclude ? ['driver'] : [],
     start: start + m.offsetMin * MIN,
     end: start + (m.offsetMin + m.lengthMin) * MIN,
     count: m.count,
     nightCount: m.nightCount,
+    shiftMinutes: m.shiftMinutes,
+    nightShiftMinutes: m.nightShiftMinutes,
   })).filter((m) => m.start < end);
 
+  for (const m of missions) if (m.type === 'daily') {
+    const middle = m.start + (m.end - m.start) / 2;
+    m.occurrences = [{ start: m.start, end: middle }, { start: middle, end: m.end }];
+  }
   return {
+    tags: [{ id: 'driver', name: 'Driver' }],
+    pins: missions.length ? spec.pins.map((p) => ({
+      employeeId: employees[p.employee % employees.length].id,
+      missionId: missions[p.mission % missions.length].id, frozen: p.frozen,
+      ...(p.whole ? {} : { start: start + p.from * MIN, end: start + (p.from + p.length) * MIN }),
+    })) : [],
     start,
     end,
     shiftMinutes: spec.shiftMinutes,
@@ -81,7 +108,7 @@ function build(spec) {
  * inside a night window.
  */
 function seatsAt(input, mission, t) {
-  if (mission.type === 'remote') return mission.count;
+  if (mission.type !== 'local') return mission.count;
   const night = input.nightWindows.some((w) => t >= w.start && t < w.end);
   return night ? mission.nightCount : mission.count;
 }
@@ -169,6 +196,25 @@ test('remote missions are held end to end by the same people', () => {
   }), { numRuns: 300 });
 });
 
+test('every local shift lies inside one slot of its own mission grid', () => {
+  // The bound the whole per-mission grid rests on. A row that outran its slot
+  // would mean two shifts wearing one row - the shape that surfaced eleven
+  // slots as a single 88-hour block - and one that named a slot it is not
+  // inside would break both `mergeRows` and the ring's turn count. Remote
+  // holds are the documented exception: the slot is the mission itself.
+  fc.assert(fc.property(planArb, (spec) => {
+    const input = build(spec);
+    if (input.missions.length === 0) return;
+    const { shifts } = plan(input);
+
+    for (const s of shifts) {
+      assert.ok(Number.isFinite(s.slotStart) && Number.isFinite(s.slotEnd), 'every row names a slot');
+      assert.ok(s.slotStart <= s.start, 'a row starts before the slot it claims');
+      assert.ok(s.slotEnd >= s.end, 'a row outruns the slot it claims');
+    }
+  }), { numRuns: 300 });
+});
+
 test('identical input produces identical output', () => {
   fc.assert(fc.property(planArb, (spec) => {
     const input = build(spec);
@@ -188,6 +234,17 @@ test('the timeline always tiles the plan window exactly', () => {
     assert.equal(timeline.at(-1).end, input.end);
     for (let i = 1; i < timeline.length; i++) {
       assert.equal(timeline[i].start, timeline[i - 1].end);
+    }
+  }), { numRuns: 200 });
+});
+
+
+test('daily rows equal an occurrence even with contested pins and mixed grids', () => {
+  fc.assert(fc.property(planArb, (spec) => {
+    const input = build(spec);
+    for (const s of plan(input).shifts.filter((row) => row.type === 'daily')) {
+      const mission = input.missions.find((m) => m.id === s.missionId);
+      assert.ok(mission.occurrences.some((w) => s.start === Math.max(input.start, w.start) && s.end === Math.min(input.end, w.end)));
     }
   }), { numRuns: 200 });
 });

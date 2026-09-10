@@ -13,3 +13,9 @@ screenshots/
 
 .DS_Store
 *.log
+
+# Agent worktrees (transient, never committed)
+.claude/worktrees/
+
+# Mobile viewport check artifacts
+mobile-screenshots/

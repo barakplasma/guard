@@ -7,6 +7,8 @@ import ShiftRow from './ShiftRow.jsx';
 import { dayKey, formatDay, formatRange, formatRangeLines } from '../lib/format.js';
 import { slotContainsInstant } from '../lib/agenda.js';
 import { t } from '../strings.js';
+import { usePlan } from '../state/PlanContext.jsx';
+import ScheduleFindings from './ScheduleFindings.jsx';
 
 /**
  * The mission's name. It wraps rather than ellipsising: on a phone the column
@@ -18,7 +20,7 @@ function MissionChip({ mission }) {
     <Chip
       size="small"
       label={mission.missionName || '—'}
-      color={mission.type === 'remote' ? 'secondary' : 'default'}
+      color={mission.type !== 'local' ? 'secondary' : 'default'}
       sx={{
         maxWidth: '100%',
         height: 'auto',
@@ -33,7 +35,9 @@ function MissionChip({ mission }) {
 
 /** Everyone covering one mission in one slot, each swappable. */
 function Assignments({ mission, employees, busy, onSwap, onClearPin }) {
+  const { doc } = usePlan();
   return mission.entries.map((shift) => (
+    <Box key={`${shift.employeeId}-${shift.start}`} sx={{ minWidth: 0 }}>
     <ShiftRow
       key={`${shift.missionId}-${shift.employeeId}-${shift.start}`}
       shift={shift}
@@ -42,6 +46,10 @@ function Assignments({ mission, employees, busy, onSwap, onClearPin }) {
       onSwap={(employeeId) => onSwap(shift, employeeId)}
       onClearPin={() => onClearPin(shift)}
     />
+    {shift.qualifications?.length > 0 && <Typography variant="caption" color="text.secondary" data-testid={`shift-qualifications-${shift.employeeId}`}>
+      {shift.qualifications.map((id) => doc.tags.find((tag) => tag.id === id)?.name ?? id).join(' · ')}
+    </Typography>}
+    </Box>
   ));
 }
 
@@ -61,7 +69,7 @@ function Assignments({ mission, employees, busy, onSwap, onClearPin }) {
  * emitted as an invalid colour and dropped.
  */
 function MissionGroup({ mission, showName, first, employees, busy, onSwap, onClearPin }) {
-  const remote = mission.type === 'remote';
+  const remote = mission.type !== 'local';
   return (
     <Box
       sx={{
@@ -113,6 +121,11 @@ function SlotRow({ info, employees, hideMissionName, onSwap, onClearPin }) {
     <Box
       id={isNowAnchor ? 'now-slot' : undefined}
       data-testid={`slot-${slot.start}`}
+      // A slot is keyed on (start, end), so two of them can begin at the same
+      // instant and end at different ones - a two-hour mission beside hourly
+      // ones, or a remote block beside either. The end is published alongside
+      // so a test can tell those apart; the id keeps its old shape.
+      data-slot-end={slot.end}
       sx={{
         display: 'flex',
         gap: 1,
@@ -140,6 +153,7 @@ function SlotRow({ info, employees, hideMissionName, onSwap, onClearPin }) {
       </Box>
 
       <Box sx={{ flex: 1, minWidth: 0 }}>
+        <ScheduleFindings warnings={info.missing} compact />
         {slot.missions.map((mission, index) => (
           <MissionGroup
             key={mission.missionId}
@@ -176,6 +190,7 @@ function SlotTable({ slots, employees, onSwap, onClearPin }) {
               key={`${slot.start}-${slot.end}`}
               id={isNowAnchor ? 'now-slot' : undefined}
               data-testid={`slot-${slot.start}`}
+              data-slot-end={slot.end}
               sx={isNow ? {
                 '& > tr': { bgcolor: 'action.hover' },
                 '& > tr > td:first-of-type': {
@@ -183,6 +198,7 @@ function SlotTable({ slots, employees, onSwap, onClearPin }) {
                 },
               } : undefined}
             >
+              {info.missing.length > 0 && <TableRow><TableCell colSpan={3}><ScheduleFindings warnings={info.missing} compact /></TableCell></TableRow>}
               {slot.missions.map((mission, index) => (
                 <TableRow key={mission.missionId}>
                   {index === 0 && (
@@ -235,6 +251,9 @@ export default function AgendaDay({
 
   const slots = useMemo(() => day.slots.map((slot) => ({
     slot,
+    missing: result.warnings.filter((w) => w.code === 'missing-required-tag'
+      && slot.missions.some((m) => m.missionId === w.missionId)
+      && w.windows.some((win) => win.start < slot.end && win.end > slot.start)),
     // Everyone on duty anywhere in this slot - so the dropdown can mark
     // people who are already taken.
     busy: new Set(

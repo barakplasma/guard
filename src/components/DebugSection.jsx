@@ -8,6 +8,7 @@ import { planToReadableText } from '../lib/planText.js';
 import { whatsappText } from '../lib/exportText.js';
 import useCopyToast from '../hooks/useCopyToast.jsx';
 import { t } from '../strings.js';
+import { ERROR_FINDINGS, findingText } from '../lib/findings.js';
 
 // Codes where a manual assignment was actually dropped, so "remove this pin" is
 // a real repair. PIN_AVAILABILITY_OVERRIDDEN is deliberately absent: that pin
@@ -26,6 +27,8 @@ function warningKey(warning, index) {
 }
 
 function warningText(warning, doc) {
+  const finding = findingText(warning, doc);
+  if (finding) return finding;
   const employee = doc.employees.find((e) => e.id === warning.employeeId)?.name ?? warning.employeeId;
   const mission = doc.missions.find((m) => m.id === warning.missionId)?.name ?? warning.missionId;
   switch (warning.code) {
@@ -115,7 +118,7 @@ export default function DebugSection({ doc, result, onClearPinByWarning, onClear
             return (
               <Alert
                 key={key}
-                severity={INFO_CODES.has(w.code) ? 'info' : 'warning'}
+                severity={ERROR_FINDINGS.has(w.code) ? 'error' : INFO_CODES.has(w.code) || w.code === 'pin-excluded-tag' ? 'info' : 'warning'}
                 sx={{ mb: 1 }}
                 action={warningAction(w, key, onClearPinByWarning, onClearStalePins)}
               >

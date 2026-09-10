@@ -380,6 +380,126 @@ check('unticking restores an explicit, editable end',
 await ctx5.close();
 await ctx4.close();
 
+/* ---------- a whole-mission pin on a local mission ----------------------
+ * The "4+1" arrangement: five seats on a rotating mission, one of them given
+ * to a named person from the Missions page. That pin used to reach the agenda
+ * as a single row spanning the whole plan - a slot of its own, keyed on the
+ * same start as the first hour - while every hourly slot showed four people
+ * against a headcount of five and read as one short.
+ */
+const ctx6 = await browser.newContext();
+const page6 = await ctx6.newPage();
+page6.on('pageerror', (e) => { console.log('PAGEERROR(whole-mission pin)', e.message); failures++; });
+
+await page6.goto(`${BASE}/`, { waitUntil: 'networkidle' });
+await page6.getByTestId('bulk-names').fill(['אבי', 'דנה', 'יוסי', 'מיכל', 'רון', 'תמר'].join('\n'));
+await page6.getByTestId('add-bulk').click();
+await page6.waitForTimeout(300);
+
+await page6.getByTestId('tab-missions').click();
+await page6.waitForTimeout(200);
+await page6.getByTestId('add-mission').click();
+await page6.waitForTimeout(250);
+await page6.getByTestId('mission-name-m1').fill('כרמל מוצב');
+await page6.waitForTimeout(150);
+await page6.getByTestId('mission-count-m1').fill('5');
+await page6.waitForTimeout(250);
+await page6.getByTestId('assign-m1').click();
+await page6.waitForTimeout(300);
+await page6.getByRole('option', { name: 'אבי', exact: true }).click();
+await page6.keyboard.press('Escape');
+await page6.waitForTimeout(400);
+
+await page6.getByTestId('tab-schedule').click();
+await page6.waitForTimeout(700);
+
+const slotStarts = await page6.evaluate(() => [...document.querySelectorAll('[data-testid^="slot-"]')]
+  .map((n) => Number(n.dataset.testid.slice('slot-'.length))));
+check('every agenda slot is its own distinct hour',
+  slotStarts.length === 24 && new Set(slotStarts).size === 24, JSON.stringify(slotStarts));
+check('no slot outruns one shift',
+  slotStarts.every((t, i) => i === 0 || t - slotStarts[i - 1] === 3600 * 1000),
+  JSON.stringify(slotStarts));
+
+const firstSlot = Math.min(...slotStarts);
+const firstSlotPeople = await page6
+  .locator(`[data-testid="slot-${firstSlot}"] [data-testid^="shift-select-m1-"]`).count();
+check('the first hour is staffed by all five, the hand-assigned person included',
+  firstSlotPeople === 5, String(firstSlotPeople));
+check('the hand-assigned person shows as pinned inside that hour',
+  (await page6.locator(`[data-testid="slot-${firstSlot}"] [data-testid^="pinned-m1-"]`).count()) === 1);
+check('and inside every other hour of the plan, not just the first',
+  (await page6.locator('[data-testid^="pinned-m1-"]').count()) === 24);
+await page6.screenshot({ path: `${SHOT}/07-whole-mission-pin.png` });
+await ctx6.close();
+
+/* ---------- a mission with its own shift length ------------------------
+ * חמ"ל runs two-hour shifts by day and one-hour shifts at night while the
+ * gate beside it stays hourly. The grid is a property of the mission, so the
+ * agenda has to show three different slot lengths on one screen.
+ */
+const ctx7 = await browser.newContext();
+const page7 = await ctx7.newPage();
+page7.on('pageerror', (e) => { console.log('PAGEERROR(shift length)', e.message); failures++; });
+
+await page7.goto(`${BASE}/`, { waitUntil: 'networkidle' });
+await page7.getByTestId('bulk-names').fill(['אבי', 'דנה', 'יוסי', 'מיכל'].join('\n'));
+await page7.getByTestId('add-bulk').click();
+await page7.waitForTimeout(300);
+
+await page7.getByTestId('tab-missions').click();
+await page7.waitForTimeout(200);
+await page7.getByTestId('add-mission').click();
+await page7.waitForTimeout(250);
+await page7.getByTestId('mission-name-m1').fill('ש"ג');
+await page7.waitForTimeout(200);
+await page7.getByTestId('add-mission').click();
+await page7.waitForTimeout(250);
+await page7.getByTestId('mission-name-m2').fill('חמ"ל');
+await page7.waitForTimeout(200);
+await page7.getByTestId('mission-shift-m2').fill('120');
+await page7.waitForTimeout(250);
+await page7.getByTestId('mission-night-shift-m2').fill('60');
+await page7.waitForTimeout(400);
+check('the shift-length inputs keep what was typed',
+  (await page7.getByTestId('mission-shift-m2').inputValue()) === '120'
+  && (await page7.getByTestId('mission-night-shift-m2').inputValue()) === '60');
+await page7.screenshot({ path: `${SHOT}/08-mission-shift-length.png` });
+
+await page7.getByTestId('tab-schedule').click();
+await page7.waitForTimeout(700);
+
+// Every rendered slot, with the missions inside it. Slots are keyed on
+// (start, end), so the same start can appear twice with different ends.
+const rendered = await page7.evaluate(() => [...document.querySelectorAll('[data-testid^="slot-"]')]
+  .map((n) => ({
+    start: Number(n.dataset.testid.slice('slot-'.length)),
+    end: Number(n.dataset.slotEnd),
+    missions: [...new Set(
+      [...n.querySelectorAll('[data-testid^="shift-select-"]')]
+        .map((s) => s.dataset.testid.split('-')[2]),
+    )],
+  })));
+
+const minutes = (s) => (s.end - s.start) / 60000;
+const forMission = (id) => rendered.filter((s) => s.missions.includes(id));
+
+check('the hourly mission is still hourly throughout',
+  forMission('m1').length === 24 && forMission('m1').every((s) => minutes(s) === 60),
+  JSON.stringify(forMission('m1').map(minutes)));
+
+const opsMinutes = forMission('m2').map(minutes);
+check('חמ"ל gets two-hour slots by day',
+  opsMinutes.includes(120), JSON.stringify(opsMinutes));
+check('and one-hour slots at night',
+  opsMinutes.includes(60), JSON.stringify(opsMinutes));
+check('and never a slot longer than the two hours it asked for',
+  opsMinutes.every((m) => m <= 120), JSON.stringify(opsMinutes));
+check('the two grids together still cover the whole day',
+  opsMinutes.reduce((sum, m) => sum + m, 0) === 24 * 60, JSON.stringify(opsMinutes));
+await page7.screenshot({ path: `${SHOT}/09-mixed-shift-lengths.png`, fullPage: true });
+await ctx7.close();
+
 await browser.close();
 console.log(failures === 0 ? '\nALL E2E CHECKS PASSED' : `\n${failures} E2E CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

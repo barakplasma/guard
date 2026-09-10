@@ -11,6 +11,7 @@ import { usePlan } from '../state/PlanContext.jsx';
 import { sortByHebrewName } from '../lib/sort.js';
 import { duplicateEmployeeIds } from '../lib/employees.js';
 import { t } from '../strings.js';
+import QualificationManager, { EmployeeQualifications } from '../components/Qualifications.jsx';
 
 function EmployeeRow({ employee, planStart, planEnd, duplicate, onChange, onRemove }) {
   // "Whole period" is the default and by far the common case, so it stays a
@@ -68,6 +69,7 @@ function EmployeeRow({ employee, planStart, planEnd, duplicate, onChange, onRemo
           <DeleteOutlineIcon />
         </IconButton>
       </Stack>
+      <EmployeeQualifications employee={employee} onChange={onChange} />
     </Paper>
   );
 }
@@ -111,6 +113,7 @@ export default function EmployeesPage() {
   return (
     <Box>
       <SettingsBar />
+      <QualificationManager />
 
       <Stack direction="row" spacing={1} sx={{ mb: 1, alignItems: 'center' }}>
         <Typography variant="h6">{t.employees}</Typography>

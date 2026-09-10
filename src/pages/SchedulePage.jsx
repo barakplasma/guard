@@ -4,6 +4,7 @@ import {
   TableContainer, TableHead, TableRow, Typography,
 } from '@mui/material';
 import AgendaDay from '../components/AgendaDay.jsx';
+import ScheduleFindings from '../components/ScheduleFindings.jsx';
 import ShareBar from '../components/ShareBar.jsx';
 import DebugSection from '../components/DebugSection.jsx';
 import ConfirmDialog from '../components/ConfirmDialog.jsx';
@@ -26,7 +27,7 @@ function useSchedule(doc) {
     if (doc.employees.length === 0) return { error: t.needEmployees };
     if (doc.missions.length === 0) return { error: t.needMissions };
     try {
-      return { result: runPlanner(toPlannerInput(doc)) };
+      return { result: runPlanner({ ...toPlannerInput(doc), onInvariantViolation: 'report' }) };
     } catch (e) {
       return { error: e.message };
     }
@@ -124,11 +125,10 @@ export default function SchedulePage() {
 
       {error && <Alert severity="info" sx={{ mb: 2 }}>{error}</Alert>}
 
+      <Box sx={{ mb: { xs: 1, sm: 2 } }}><ShareBar doc={doc} result={result} /></Box>
+      {result && <ScheduleFindings warnings={result.warnings} />}
       {result && (
         <>
-          <Box sx={{ mb: { xs: 1, sm: 2 } }}>
-            <ShareBar doc={doc} result={result} />
-          </Box>
 
           {days.length === 0 && <Alert severity="info">{t.emptySchedule}</Alert>}
 

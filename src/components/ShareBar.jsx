@@ -30,7 +30,7 @@ export default function ShareBar({ doc, result }) {
   };
 
   const onCsv = () => {
-    downloadCsv(shiftsToCsv(result), `${sanitizeFilename(doc.title)}.csv`);
+    downloadCsv(shiftsToCsv(result, doc), `${sanitizeFilename(doc.title)}.csv`);
   };
 
   const onWhatsapp = async () => {
@@ -70,10 +70,10 @@ export default function ShareBar({ doc, result }) {
           <Button size="small" variant="outlined" startIcon={<LinkIcon />} onClick={onCopyLink} data-testid="copy-link">
             {t.copyLink}
           </Button>
-          <Button size="small" variant="outlined" startIcon={<DownloadIcon />} onClick={onCsv} data-testid="download-csv">
+          <Button size="small" variant="outlined" startIcon={<DownloadIcon />} disabled={!result} onClick={onCsv} data-testid="download-csv">
             {t.downloadCsv}
           </Button>
-          <Button size="small" variant="outlined" startIcon={<ChatIcon />} onClick={onWhatsapp} data-testid="copy-whatsapp">
+          <Button size="small" variant="outlined" startIcon={<ChatIcon />} disabled={!result} onClick={onWhatsapp} data-testid="copy-whatsapp">
             {t.copyWhatsapp}
           </Button>
         </Stack>
@@ -88,7 +88,7 @@ export default function ShareBar({ doc, result }) {
             size="small"
             variant="outlined"
             startIcon={<CalendarMonthIcon />}
-            onClick={onIcsOverview}
+            disabled={!result} onClick={onIcsOverview}
             data-testid="download-ics-overview"
           >
             {t.downloadIcsOverview}
@@ -111,7 +111,7 @@ export default function ShareBar({ doc, result }) {
                 size="small"
                 variant="outlined"
                 startIcon={<CalendarMonthIcon />}
-                onClick={onIcsEmployee}
+                disabled={!result} onClick={onIcsEmployee}
                 data-testid="download-ics-employee"
               >
                 {t.downloadIcsEmployee}

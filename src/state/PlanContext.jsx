@@ -35,6 +35,8 @@ export function PlanProvider({ children }) {
     const blob = new URLSearchParams(location.search).get(PARAM);
     const blank = () => {
       if (!fallback.current) fallback.current = emptyPlan();
+      lastBlob.current = null;
+      lastDoc.current = fallback.current;
       return fallback.current;
     };
 
@@ -56,8 +58,9 @@ export function PlanProvider({ children }) {
   // Every mutation passes through here, which is what makes freezing the past
   // work regardless of which page the edit was made on - see freezeElapsedBeforeEdit.
   const setDoc = useCallback((next) => {
-    const frozen = freezeElapsedBeforeEdit(doc, next);
-    const parsed = planSchema.parse(prunePins(pruneStalePins(doc, frozen)));
+    const previous = lastDoc.current ?? doc;
+    const frozen = freezeElapsedBeforeEdit(previous, next);
+    const parsed = planSchema.parse(prunePins(pruneStalePins(previous, frozen)));
     const encoded = encodePlan(parsed);
     lastBlob.current = encoded;
     lastDoc.current = parsed;
@@ -66,7 +69,9 @@ export function PlanProvider({ children }) {
     navigate({ pathname: location.pathname, search: `?${params}` }, { replace: true });
   }, [doc, location.pathname, location.search, navigate]);
 
-  const update = useCallback((fn) => setDoc(fn(doc)), [doc, setDoc]);
+  // Two controls may emit before navigation has rendered the first edit.
+  // Compose against the immediately cached document, not that render's closure.
+  const update = useCallback((fn) => setDoc(fn(lastDoc.current ?? doc)), [doc, setDoc]);
 
   /* --- document mutators ------------------------------------------------ */
 

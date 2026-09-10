@@ -13,7 +13,7 @@
  */
 
 import { plan as runPlanner, isOutOfPeriod, resolvePinWindow } from './planner.js';
-import { toPlannerInput } from './planSchema.js';
+import { toPlannerInput, dailyOccurrences } from './planSchema.js';
 
 /** Resolve a pin's effective range, following the null-inheritance chain. */
 export function pinRange(doc, pin) {
@@ -24,23 +24,56 @@ export function pinRange(doc, pin) {
 /** Does `pin` cover the whole of `[start, end)`? */
 export function pinCovers(doc, pin, start, end) {
   const range = pinRange(doc, pin);
+  const mission = doc.missions.find((m) => m.id === pin.missionId);
+  if (mission?.type === 'daily') {
+    return dailyOccurrences(doc, mission).some((w) => w.start <= start && w.end >= end
+      && range.start < w.end && range.end > w.start);
+  }
   return range.start <= start && range.end >= end;
+}
+
+/**
+ * Whatever is left of `pin` once `[start, end)` is taken out of it: nothing
+ * when the pin covered exactly that range, one pin when the range sits at one
+ * of its ends, two when it is cut out of the middle.
+ *
+ * The bound that was not cut is kept **as written**, not as resolved: a pin
+ * with `start: null` keeps `start: null` on its leading remainder, so that
+ * remainder still follows the mission's window if the mission is later moved.
+ * Only the cut bound becomes a literal instant, because that is the one thing
+ * about the pin that is now a fact of its own rather than an inheritance.
+ * Everything else on the pin - `frozen` above all - rides along unchanged, so
+ * cutting a frozen pin yields frozen remainders.
+ */
+export function cutPin(doc, pin, start, end) {
+  const range = pinRange(doc, pin);
+  const out = [];
+  if (range.start < start) out.push({ ...pin, end: start });
+  if (range.end > end) out.push({ ...pin, start: end });
+  return out;
 }
 
 /**
  * Record a manual swap: `employeeId` takes the shift `[start, end)` on
  * `missionId`, replacing `replacingEmployeeId`.
  *
- * The displaced person's pin must be removed, matched by coverage rather than
- * exact range: their assignment may be a whole-mission pin written from the
- * Missions page, which no exact-range match would find - leaving it in place
- * means both people stay pinned and compete on the next plan, so the swap
- * either does nothing (the newcomer is dropped as overflow) or quietly adds a
- * person instead of replacing one.
+ * The displaced person's pin must go, matched by coverage rather than exact
+ * range: their assignment may be a whole-mission pin written from the Missions
+ * page, which no exact-range match would find - leaving it in place means both
+ * people stay pinned and compete on the next plan, so the swap either does
+ * nothing (the newcomer is dropped as overflow) or quietly adds a person
+ * instead of replacing one.
  *
- * That removal must stay scoped to `replacingEmployeeId`. A mission with more
- * than one seat can have two different people each individually pinned to the
- * exact same [start, end) - one pin per seat - and an earlier version of this
+ * It goes by being *cut*, not deleted. A local mission's pinned person now
+ * appears in every shift slot they hold, each with its own swap dropdown, so
+ * the range being swapped is usually a single hour of a much longer pin -
+ * removing the pin whole would silently hand the rest of the week back to the
+ * rotation. Only the hour actually swapped is taken away; a pin that covered
+ * exactly that hour still disappears entirely, as before.
+ *
+ * The cut must stay scoped to `replacingEmployeeId`. A mission with more than
+ * one seat can have two different people each individually pinned to the exact
+ * same [start, end) - one pin per seat - and an earlier version of this
  * function matched on (missionId, start, end) alone, so swapping one seat
  * deleted the other seat's pin too. Only when the caller has no named
  * predecessor (a direct API call, not the schedule UI) do we fall back to
@@ -48,30 +81,36 @@ export function pinCovers(doc, pin, start, end) {
  * specific to key on.
  */
 export function applySwap(doc, { missionId, employeeId, start, end, replacingEmployeeId }) {
-  const kept = doc.pins.filter((p) => {
-    if (p.missionId !== missionId) return true;
-    if (replacingEmployeeId != null) {
-      return !(p.employeeId === replacingEmployeeId && pinCovers(doc, p, start, end));
-    }
-    return !(p.start === start && p.end === end);
-  });
+  const kept = [];
+  for (const p of doc.pins) {
+    const displaced = p.missionId === missionId && (replacingEmployeeId != null
+      ? p.employeeId === replacingEmployeeId && pinCovers(doc, p, start, end)
+      : p.start === start && p.end === end);
+    if (displaced) kept.push(...cutPin(doc, p, start, end));
+    else kept.push(p);
+  }
   return { ...doc, pins: [...kept, { missionId, employeeId, start, end }] };
 }
 
 /**
- * Remove whatever pin is holding `employeeId` over `[start, end)` of
- * `missionId` - matching by coverage, not by exact range, so the clear button
- * also works on a whole-mission assignment.
+ * Release `employeeId` from `[start, end)` of `missionId` - matching by
+ * coverage, not by exact range, so the clear button also works on a
+ * whole-mission assignment.
+ *
+ * Like a swap, this cuts rather than deletes: clearing one hour of a
+ * whole-mission pin means "not this hour", not "not this week", and the
+ * clear button now sits on every hour of such a pin.
  */
 export function applyClearPin(doc, { missionId, employeeId, start, end }) {
-  return {
-    ...doc,
-    pins: doc.pins.filter((p) => !(
-      p.missionId === missionId
+  const pins = [];
+  for (const p of doc.pins) {
+    const held = p.missionId === missionId
       && p.employeeId === employeeId
-      && pinCovers(doc, p, start, end)
-    )),
-  };
+      && pinCovers(doc, p, start, end);
+    if (held) pins.push(...cutPin(doc, p, start, end));
+    else pins.push(p);
+  }
+  return { ...doc, pins };
 }
 
 /**
@@ -109,6 +148,7 @@ export function applyClearPinsForMission(doc, { missionId, employeeId }) {
  * behaves exactly like a pin a person wrote by hand.
  */
 export function freezePastShifts(doc, result, now) {
+  if (result.warnings?.some((w) => w.code === 'engine-bug')) return doc;
   const newPins = result.shifts
     .filter((s) => !s.pinned && s.end <= now)
     .map((s) => ({
@@ -146,18 +186,37 @@ export function freezeElapsedBeforeEdit(prev, next, now = Date.now()) {
 }
 
 /**
- * Set a mission's fixed roster from the Missions page. Only whole-window pins
- * are replaced; per-shift pins are manual swaps made on the schedule and are
- * edited there.
+ * Set a mission's roster from the Missions page.
+ *
+ * The picker lists everyone holding *any* pin on the mission, because a
+ * whole-mission assignment no longer stays whole: clearing or swapping one
+ * shift cuts it into ranges, and someone who still works six days of seven
+ * must not vanish from the roster. So ticking and unticking a name have to be
+ * exact inverses of each other over that wider list:
+ *
+ *   - unticking removes every pin that person holds here, whole or partial -
+ *     nothing else could undo a tick whose range has since been trimmed;
+ *   - ticking someone with no pin at all writes them a whole-mission one;
+ *   - someone who is already pinned in *some* form keeps exactly the pins they
+ *     have. The picker cannot express a range, so rewriting theirs from here
+ *     would silently swallow a swap or a cut. Re-assigning them to the whole
+ *     mission is untick-then-tick, which reads the same way round.
  */
 export function applyMissionAssignees(doc, missionId, employeeIds) {
+  const selected = new Set(employeeIds);
+  const kept = doc.pins.filter(
+    (p) => p.missionId !== missionId || selected.has(p.employeeId),
+  );
+  const alreadyPinned = new Set(
+    kept.filter((p) => p.missionId === missionId).map((p) => p.employeeId),
+  );
   return {
     ...doc,
     pins: [
-      ...doc.pins.filter(
-        (p) => !(p.missionId === missionId && p.start == null && p.end == null),
-      ),
-      ...employeeIds.map((employeeId) => ({ missionId, employeeId, start: null, end: null })),
+      ...kept,
+      ...employeeIds
+        .filter((employeeId) => !alreadyPinned.has(employeeId))
+        .map((employeeId) => ({ missionId, employeeId, start: null, end: null })),
     ],
   };
 }

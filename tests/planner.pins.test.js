@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { plan, WARN } from '../src/lib/planner.js';
 
 const HOUR = 3600 * 1000;
@@ -556,4 +557,132 @@ test('a swap over a whole-mission pin replaces the assignee rather than competin
   assert.equal(own.length, 1);
   assert.equal(own[0].employeeId, 'e2');
   assert.ok(!result.warnings.some((w) => w.code === WARN.PIN_OVERFLOW));
+});
+
+/* --- a pin on a local mission is emitted per shift slot ---------------- */
+
+/**
+ * The rota this bug was reported from, rebuilt: a week at an hourly rotation,
+ * four local missions, sixteen guards, and one person put on the five-seat
+ * mission from the Missions page - the "4+1" arrangement, recorded as a single
+ * whole-mission pin with no range of its own.
+ */
+const carmelRota = () => {
+  // The historical digest includes absolute timestamps captured in UTC.
+  const start = Date.UTC(2026, 8, 10, 16);
+  return {
+    start,
+    end: start + 163 * HOUR,
+    shiftMinutes: 60,
+    strategy: 'rotation',
+    employees: people(16),
+    missions: [
+      { id: 'm1', name: 'Gate', type: 'local', count: 1 },
+      { id: 'm2', name: 'Kitchen', type: 'local', count: 2 },
+      { id: 'm3', name: 'Carmel', type: 'local', count: 5 },
+      { id: 'm4', name: 'Ops', type: 'local', count: 1 },
+    ],
+    pins: [{ missionId: 'm3', employeeId: 'e1' }],
+  };
+};
+
+const staffedAt = (result, missionId, t) => result.shifts.filter(
+  (s) => s.missionId === missionId && s.start <= t && s.end > t,
+).length;
+
+test('a whole-mission pin on a local mission is one row per shift, not one row for the week', () => {
+  // It used to be a single 163-hour row. The agenda keys its slots on
+  // (start, end), so that row became a slot of its own - "16:00 to 11:00, four
+  // days later", one person, pinned - while every hourly slot of the same
+  // mission showed four people against a headcount of five and read as short.
+  const input = carmelRota();
+  const result = plan(input);
+
+  for (const s of result.shifts) {
+    assert.equal(
+      s.end - s.start,
+      HOUR,
+      'no row may outrun a single shift slot, pinned or not',
+    );
+  }
+
+  const own = result.shifts.filter((s) => s.employeeId === 'e1');
+  assert.equal(own.length, 163, 'the pinned person holds one row per hour of the week');
+  assert.ok(own.every((s) => s.pinned && s.missionId === 'm3'));
+
+  for (let t = input.start; t < input.end; t += HOUR) {
+    assert.equal(staffedAt(result, 'm3', t), 5, `the mission is fully staffed at ${t}`);
+  }
+
+  const stats = result.stats.perEmployee.find((p) => p.employeeId === 'e1');
+  assert.equal(stats.stints, 163, 'and reads as 163 shifts worked, like anyone else on the rota');
+  assert.equal(stats.minutes, 163 * 60);
+});
+
+test('the rotation itself is untouched by the pin being split into rows', () => {
+  // The engine's *decision* was never wrong - only the shape it reported it
+  // in - so every generated row must land exactly where it did before. This
+  // digest is of the pre-fix engine's output for the rota above; a change to
+  // it means the split leaked into policy, which is the one thing it must not
+  // do. (The pinned rows are excluded, since they are what the fix changes.)
+  const result = plan(carmelRota());
+  const generated = JSON.stringify(
+    result.shifts.filter((s) => !s.pinned).map((s) => [s.start, s.missionId, s.employeeId]),
+  );
+  assert.equal(
+    createHash('sha256').update(generated).digest('hex'),
+    '3c12bab5f85cb0027faaf6f41983c501da27d762e4bdd01414558a51625d7afc',
+  );
+});
+
+test('a whole-mission pin on an off-grid mission gets partial rows at the mission edges only', () => {
+  // The mission runs from half past the hour to half past the hour, so its own
+  // window is the only thing off the plan's grid. The pin is not allowed to add
+  // edges of its own, so what comes out is the mission's own segmentation: a
+  // half-hour row at each end and whole slots in between.
+  const start = START;
+  const result = plan({
+    start,
+    end: start + 6 * HOUR,
+    shiftMinutes: 60,
+    employees: people(4),
+    missions: [{
+      id: 'm', name: 'Gate', type: 'local', start: start + 30 * MIN, end: start + 270 * MIN, count: 1,
+    }],
+    pins: [{ missionId: 'm', employeeId: 'e1' }],
+  });
+
+  const own = result.shifts.filter((s) => s.employeeId === 'e1');
+  assert.deepEqual(
+    own.map((s) => [(s.start - start) / MIN, (s.end - s.start) / MIN]),
+    [[30, 30], [60, 60], [120, 60], [180, 60], [240, 30]],
+  );
+  assert.ok(own.every((s) => s.pinned));
+});
+
+test('a pinned slot torn by an unrelated availability edge merges back into one row', () => {
+  // e3 arriving mid-slot breaks the segment grid at 08:30 for every local
+  // mission, e1's pinned hour included. That is exactly what mergeRows is for,
+  // and it must repair a pinned row the same way it repairs a generated one -
+  // without ever welding two consecutive slots together.
+  const start = START;
+  const result = plan({
+    start,
+    end: start + 3 * HOUR,
+    shiftMinutes: 60,
+    employees: [
+      { id: 'e1', name: 'Emp01' },
+      { id: 'e2', name: 'Emp02' },
+      { id: 'e3', name: 'Emp03', start: start + 30 * MIN, end: start + 3 * HOUR },
+    ],
+    missions: [{ id: 'm', name: 'Gate', type: 'local', count: 2 }],
+    pins: [{ missionId: 'm', employeeId: 'e1' }],
+  });
+
+  const own = result.shifts.filter((s) => s.employeeId === 'e1');
+  assert.deepEqual(
+    own.map((s) => [(s.start - start) / MIN, (s.end - s.start) / MIN]),
+    [[0, 60], [60, 60], [120, 60]],
+    'the torn first hour is rejoined, and the three hours stay three rows',
+  );
 });

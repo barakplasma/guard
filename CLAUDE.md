@@ -8,20 +8,18 @@ A static, backend-free shift planner. See `README.md` for what it does and how t
   belongs in the URL or it does not belong here.
 - **No network at runtime.** No webfonts, no CDNs, no analytics. The app must work offline after
   first load; anything fetched at runtime breaks that.
-- **The engine stays pure.** `src/lib/planner.js` and `src/lib/strategies.js` import nothing
-  outside each other, touch no DOM, and call neither `Date.now()` nor `Math.random()`. Every sort
-  ends in a stable id tiebreak. A shared link must render identically for everyone who opens it,
-  forever.
+- **The engine stays pure.** `src/lib/planner.js`, strategies, and the pure crew/rest/invariant helpers import no UI, network, or clock dependencies, touch no DOM, and call neither `Date.now()` nor `Math.random()`. Every sort
+  ends in a stable id tiebreak. Identical absolute engine inputs must produce identical results. The adapter
+  resolves daily and night windows in the viewer's timezone (ADR 003).
 
 ## Working on the scheduler
 
-The schedule is a pure function of the plan document. Never store generated shifts — recompute
+The schedule is a pure function of the absolute input resolved from the plan document. Never store generated shifts — recompute
 them. Manual assignments are recorded as **pins** in the document and fed back in as engine input,
 which is why a hand-edit survives sharing and why swapping one person frees the other to be
 rescheduled fairly.
 
-Infeasible input (not enough people) returns `warnings` plus a partial plan. Only structurally
-invalid input throws — someone mid-edit needs to see what is short, not a stack trace.
+Infeasible input (not enough people) returns `warnings` plus a partial plan. Structurally invalid input and output invariant violations throw in strict mode — someone mid-edit needs to see what is short, not a stack trace.
 
 `mergeRows` rejoins rows **only within one shift slot**, never across a shift boundary. Repairing a
 segment that an unrelated availability edge tore in half is what merging is for; welding
@@ -29,6 +27,32 @@ consecutive shifts together is not, and used to be the same operation — a guar
 slots surfaced as one 88-hour row, which read as a single monstrous shift and gave the agenda a
 second slot that also began at 22:00 but ended four days later. Bounded to one slot, `stints`
 counts shifts worked, which is the number that means something under `rotation`.
+
+**There is no single global step to do arithmetic on.** Shift length is a property of the mission:
+`shiftMinutes` and `nightShiftMinutes` on a local mission override the plan's default and its own
+day length respectively, `null` meaning "inherit" — so חמ"ל can run two-hour shifts by day and
+one-hour shifts at night while the gate beside it stays hourly. `gridFor`/`slotBoundsFor` in
+`planner.js` builds one grid per mission, and a mission that overrides neither is handed *the same
+set built by the same loop* that always built it, which is the only reason a link already shared
+still renders the schedule it rendered. `tests/planner.golden.test.js` is the standing proof of
+that and must never be regenerated to make a change pass — `scripts/writeGoldens.mjs` exists for
+intentional assignment changes. Correctness fixes may change previously invalid output;
+new quality findings are asserted separately from the unchanged fixtures.
+
+Equal day and night lengths anchor once, at the plan's start. Different ones anchor **each stretch
+at its own beginning** — night restarts an hourly grid at 22:00 rather than inheriting the phase
+the two-hour grid happened to be in — and a stretch that is not a whole number of slots leaves one
+partial slot at its end, exactly as the plan's own end always has. Remote and daily missions ignore both
+fields, like `nightCount`. The night length is deliberately **not** capped at the night's own
+duration: a ten-hour night slot inside an eight-hour night is one slot ending at daybreak, which is
+harmless, and a validation error there would fire while someone was still typing the number.
+
+Every row therefore carries `slotStart`/`slotEnd` — the grid slot it belongs to, the mission's own
+window for a remote hold. That stamp, not modulo arithmetic, is what `mergeRows` keys on and what
+`ringKeys` counts. It is the *grid's* slot, not the row's own extent: an availability edge tearing
+a slot in two leaves both halves naming the one slot they are inside. It is also **not clamped to
+the mission's window**, so two missions cutting the same slot at different points still name the
+same slot — which is what keeps half a slot on one mission and half on another a single turn.
 
 A local mission can be staffed differently at night: `count` is the daytime headcount and
 `nightCount` replaces it inside the plan's night stretches (`null` means "same", which is what
@@ -47,6 +71,26 @@ alike: **match pins by coverage, never by literal range**. Both bugs found in re
 that. Pin edits live in `src/lib/pins.js`, deliberately pure and outside the React context so the
 rule stays testable. On a remote mission a pin always means the whole mission — a partial range can
 survive a local→remote toggle, and honouring it literally leaves the rest of the window short.
+
+A pin on a **local** mission is emitted as one pinned row per segment of that mission's grid, not
+one row over the pin's whole coverage — which is why `segmentsOf` is built before phase 1 rather
+than inside phase 3, so the pinned rows and the demand walk can never disagree about where a
+segment starts. The engine's *decision* was never wrong here; the shape was. A whole-mission pin
+resolves to the mission's entire window, and one row that long is the 88-hour-row symptom above
+arriving through a different door: the agenda keys slots on `(start, end)`, so it became a slot of
+its own and left every hourly slot of that mission reading one person short. Accepted pin bounds join their own mission's segment edges, while preserving the original
+slot stamp. Otherwise an off-grid pin could overlap an automatic whole-segment row.
+Remote pins stay whole, one set of people end to end.
+
+Because that person now has the swap dropdown and the clear button on every hour they hold,
+`applySwap` and `applyClearPin` **cut** the matched pin around that hour (`cutPin`) instead of
+removing it: clearing Tuesday 14:00 must not silently unassign the week. The bound that was not cut
+is kept *as written*, so a `null` still follows the mission's window if that later moves, and
+`frozen` rides along onto both remainders. `applyClearPinsForMission` stays whole-pin — it is only
+ever offered for a pin the engine already reported as unusable. The Missions picker lists anyone
+holding *any* pin on the mission, marking a trimmed one `assignedPartially`; unticking a name
+releases every pin they hold there, and ticking one who has none writes them a whole-mission pin,
+so the two are exact inverses over that list.
 
 A shift whose window has already closed must never change hands because of an unrelated later
 edit — the engine has no notion of "past" (see the `Date.now()` rule above), so nothing stops a
@@ -101,30 +145,35 @@ way: a new strategy should never need a change in `planner.js`.
 
 `balanced` (the default, and what every link written before the setting existed means) evens out
 total time on duty. `rotation` is a fixed circular list: guards take turns round it in document
-order, and hours are never consulted, so a twelve-hour remote mission and a one-hour slot each
-cost exactly one turn. Under `rotation` a large `spreadMinutes` is the expected outcome, not a
-bug — `stints` is the column that means something there.
+order, and hours are never consulted, so a twelve-hour remote mission, a two-hour חמ"ל slot and a
+one-hour slot each cost exactly one turn. Under `rotation` a large `spreadMinutes` is the expected
+outcome, not a bug — `stints` is the column that means something there.
 
 Rotation ranks on **rest time first**, turn count second. That order is load bearing, not a
 preference: ranked on turns first, whoever starts a block keeps winning the slot after it. Both
 keys are also measured *as of the slot being filled* rather than from a running counter — the
-engine places pins first, then remote missions, then local slots chronologically, so a counter
+engine places pins first, then remote/daily holds, then local slots chronologically, so a counter
 would let a pin for a late-evening shift push its holder to the back of the ring before the
 morning slots were even assigned.
 
 Rest-first is not on its own enough, and assuming it was cost three guards eighty-eight unbroken
 hours. Whenever a slot has more seats than there are rested people, somebody *must* work the slot
 they just finished, and every candidate's last turn ended on the same grid boundary — so the rest
-key ties and the turn count decides. **A turn is one shift slot, not one unbroken run**
-(`slotSpan`): counting a multi-slot block as a single turn makes the guard who never got a break
-the cheapest candidate, so they win the tie, stay on post, and stay cheap, with `ringIndex` pinning
-it to the same lowest-numbered guards forever. A remote hold is still exactly one turn — it is one
-claim taken once — which is why `mergedRuns` refuses to merge a remote interval with its
-neighbours. `tests/planner.rotation.test.js` pins both halves of this.
+key ties and the turn count decides. **A turn is one shift slot, not one unbroken run**: counting a
+multi-slot block as a single turn makes the guard who never got a break the cheapest candidate, so
+they win the tie, stay on post, and stay cheap, with `ringIndex` pinning it to the same
+lowest-numbered guards forever. `ringKeys` counts **distinct `slotStart` values** among the
+intervals that ended before the slot being filled, plus one per remote hold — a remote mission is
+one claim taken once, however long it runs, so it never folds into the local slot that starts the
+moment it ends. The key is the **bare slot start, never `(mission, slotStart)`**: half a slot on one
+mission and half on another is one shift's worth of duty, and charging it as two would send that
+guard round the ring a lap early. `tests/planner.rotation.test.js` pins all of this.
 
-`tests/planner.invariants.test.js` is the real safety net: it asserts across ~1600 generated plans
-that nobody is ever double-booked, no mission is overstaffed, availability is respected, and the
-same input always gives the same output. Do not weaken it to make a change pass.
+`tests/planner.invariants.test.js` is the real safety net: it asserts across ~1900 generated plans
+— with mission grids drawn from `{null, 60, 120, 180}` by day and by night, so mixed grids sit
+beside each other — that nobody is ever double-booked, no mission is overstaffed, availability is
+respected, every row lies inside the slot it names, and the same input always gives the same
+output. Do not weaken it to make a change pass.
 
 ## The employee list
 
@@ -149,7 +198,13 @@ are simply two guards.
 `src/lib/planSchema.js` and `src/lib/urlState.js` move together. The encoded form is positional
 tuples, so **field order is part of the wire format** — appending is safe, reordering or inserting
 is not. Bump `SCHEMA_VERSION` when the shape changes; `decodePlan` rejects unknown versions rather
-than misreading them.
+than misreading them. Positions past the ones in use are reserved in
+[ADR 006](docs/plans/06-approved-continuation.md) so two features built in either order cannot claim
+the same one; take the next free position from that table rather than the next free index. An
+appended position is written only when it carries a value — `trimTail` drops the unset tail, never
+shortening a tuple below the length the last shipped build wrote — so a document using none of the
+new fields encodes to exactly the bytes it always did, and every link already shared keeps its
+string. `tests/urlState.test.js` pins one such blob literally.
 
 A *new plan-level field* does not need a version bump and should not get one: add a new short key
 to the compact object and give the schema field a `.default(...)`, so links written before it
@@ -200,3 +255,25 @@ column — the shape of every mobile layout bug reported so far.
 
 `lz-string` is CommonJS: import it as a default and destructure, or the Node test run breaks while
 the Vite build keeps working.
+
+
+## Daily missions, qualifications, and output checks
+
+See [the ADR index](docs/plans/README.md) for accepted scheduling decisions.
+ADRs 003–005 describe daily duties, validation, and qualifications; ADR 006
+records URL compatibility. The historical plan filenames remain stable.
+Daily equal times mean a full calendar day; inputs always display 24-hour time.
+The adapter resolves viewer-local calendar occurrences, and the engine holds each
+whole before local duties. Occurrence-aware pin edits preserve neighboring days.
+
+Qualification requirements are coverage within headcount. Prefer separate people,
+but allow combined qualifications. Exclusions filter automatic candidates; pins
+remain visible overrides. Rest is preferred: staff duties when necessary and
+report actual shortfalls. Never count rest as work or claim a greedy shortage is
+proof of infeasibility.
+
+Output invariant violations throw by default. The schedule uses report mode to
+show evidence, and copy-link remains available even on a computation error.
+History freezing stays strict and does not freeze invalid output. Quality warnings
+are additive; golden assignment fixtures must not be regenerated to hide changes.
+The committed UTC URL/digest fixtures use UTC input dates regardless of host zone.

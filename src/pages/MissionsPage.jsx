@@ -7,19 +7,40 @@ import {
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
 import AddIcon from '@mui/icons-material/Add';
 import DateTimeField from '../components/DateTimeField.jsx';
+import DailyClockField from '../components/DailyClockField.jsx';
 import ConfirmDialog from '../components/ConfirmDialog.jsx';
 import { usePlan } from '../state/PlanContext.jsx';
 import { sortByHebrewName } from '../lib/sort.js';
 import { nextTopOfHour } from '../lib/planSchema.js';
 import { t } from '../strings.js';
+import { MissionQualifications } from '../components/Qualifications.jsx';
+
+/**
+ * What a shift-length box's new text means: `null` where it was cleared, so
+ * the mission goes back to inheriting; the number where it is a usable one;
+ * and `undefined` for anything else, which the caller drops rather than
+ * writes. A number input emits on every keystroke and the document it lands in
+ * is the user's only copy, so a value that is not yet a shift length must not
+ * become one.
+ */
+function readMinutes(raw) {
+  if (raw === '') return null;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 5 && n <= 1440 ? n : undefined;
+}
 
 function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
-  // Whole-window pins are the mission's "fixed" roster. Per-shift pins (which
-  // carry a start/end) are manual swaps made on the schedule and are edited
-  // there, so they are deliberately not shown in this picker.
-  const assigned = doc.pins
-    .filter((p) => p.missionId === mission.id && p.start == null && p.end == null)
-    .map((p) => p.employeeId);
+  // Anyone holding a pin on this mission is on its roster. A whole-mission
+  // assignment does not stay whole: clearing or swapping a single shift cuts
+  // it into ranges (see cutPin in pins.js), and listing only the untouched
+  // null/null pins would drop someone who still works six days of seven the
+  // moment one hour of theirs changed hands. They are listed with a "partial"
+  // marker instead; unticking them still releases every pin they hold here.
+  const missionPins = doc.pins.filter((p) => p.missionId === mission.id);
+  const assigned = [...new Set(missionPins.map((p) => p.employeeId))];
+  const partiallyAssigned = (employeeId) => !missionPins.some(
+    (p) => p.employeeId === employeeId && p.start == null && p.end == null,
+  );
 
   // A whole-mission assignment needs the person available for the mission's
   // entire window - the planner clamps it to that regardless (see
@@ -61,13 +82,14 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
             <ToggleButton value="local" data-testid={`type-local-${mission.id}`}>
               {t.typeLocal}
             </ToggleButton>
+            <ToggleButton value="daily" data-testid={`type-daily-${mission.id}`}>{t.typeDaily}</ToggleButton>
             <ToggleButton value="remote" data-testid={`type-remote-${mission.id}`}>
               {t.typeRemote}
             </ToggleButton>
           </ToggleButtonGroup>
 
           <TextField
-            label={mission.type === 'remote' ? t.headcount : t.headcountDay}
+            label={mission.type === 'daily' ? t.headcountPerOccurrence : mission.type === 'remote' ? t.headcount : t.headcountDay}
             type="number"
             value={mission.count}
             onChange={(e) => {
@@ -113,8 +135,68 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
           </IconButton>
         </Stack>
 
+        {/*
+          How long one of this mission's own shifts is, by day and by night.
+          Remote missions have no shifts to size - one set of people holds the
+          whole window - so the pair is hidden there exactly like the night
+          headcount. Left blank each field inherits: the day length from the
+          plan's default, the night length from the day one.
+        */}
+        {mission.type === 'local' && (
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} useFlexGap sx={{ flexWrap: 'wrap', alignItems: { xs: 'stretch', sm: 'center' } }}>
+            <Tooltip title={t.shiftLengthDayHelp}>
+              <TextField
+                label={t.shiftLengthDay}
+                type="number"
+                value={mission.shiftMinutes ?? ''}
+                placeholder={String(doc.shiftMinutes)}
+                onChange={(e) => {
+                  const v = readMinutes(e.target.value);
+                  if (v !== undefined) onChange({ shiftMinutes: v });
+                }}
+                slotProps={{
+                  inputLabel: { shrink: true },
+                  htmlInput: { min: 5, max: 1440, step: 5, 'data-testid': `mission-shift-${mission.id}` },
+                }}
+                sx={{ width: 200 }}
+              />
+            </Tooltip>
+            <Tooltip title={t.shiftLengthNightHelp}>
+              <TextField
+                label={t.shiftLengthNight}
+                type="number"
+                value={mission.nightShiftMinutes ?? ''}
+                placeholder={String(mission.shiftMinutes ?? doc.shiftMinutes)}
+                onChange={(e) => {
+                  const v = readMinutes(e.target.value);
+                  if (v !== undefined) onChange({ nightShiftMinutes: v });
+                }}
+                slotProps={{
+                  inputLabel: { shrink: true },
+                  htmlInput: { min: 5, max: 1440, step: 5, 'data-testid': `mission-night-shift-${mission.id}` },
+                }}
+                sx={{ width: 200 }}
+              />
+            </Tooltip>
+          </Stack>
+        )}
+
+        {mission.type === 'daily' && (
+          <Stack direction="row" useFlexGap spacing={2} sx={{ flexWrap: 'wrap' }}>
+            {['dayStart', 'dayEnd'].map((field) => (
+              <DailyClockField key={field} label={field === 'dayStart' ? t.dailyFrom : t.dailyTo}
+                value={mission[field]} onChange={(value) => onChange({ [field]: value })}
+                testId={`mission-day-${field === 'dayStart' ? 'start' : 'end'}-${mission.id}`} />
+            ))}
+            <Typography variant="caption" sx={{ width: '100%' }}>
+              {mission.dayStart == null || mission.dayEnd == null ? t.dailyIncomplete
+                : mission.dayEnd <= mission.dayStart ? t.dailyNextDay : ''}
+            </Typography>
+          </Stack>
+        )}
+
         <Typography variant="caption" color="text.secondary">
-          {mission.type === 'remote' ? t.typeRemoteHelp : t.typeLocalHelp}
+          {mission.type === 'daily' ? t.typeDailyHelp : mission.type === 'remote' ? t.typeRemoteHelp : t.typeLocalHelp}
         </Typography>
 
         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} useFlexGap sx={{ flexWrap: 'wrap', alignItems: { xs: 'stretch', sm: 'center' } }}>
@@ -170,6 +252,7 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
           )}
         </Stack>
 
+        <MissionQualifications mission={mission} onChange={onChange} />
         {openEnded && (
           <Typography variant="caption" color="text.secondary">
             {t.missionNoEndHelp}
@@ -190,14 +273,17 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
             input={<OutlinedInput label={`${t.assignedPeople} (${assigned.length}/${mission.count})`} />}
             renderValue={(ids) => (
               <Stack direction="row" spacing={0.5} useFlexGap sx={{ flexWrap: 'wrap' }}>
-                {ids.map((id) => (
-                  <Chip
-                    key={id}
-                    size="small"
-                    color={unavailableFor(id) ? 'warning' : 'default'}
-                    label={doc.employees.find((e) => e.id === id)?.name ?? id}
-                  />
-                ))}
+                {ids.map((id) => {
+                  const name = doc.employees.find((e) => e.id === id)?.name ?? id;
+                  return (
+                    <Chip
+                      key={id}
+                      size="small"
+                      color={unavailableFor(id) ? 'warning' : 'default'}
+                      label={partiallyAssigned(id) ? `${name} · ${t.assignedPartially}` : name}
+                    />
+                  );
+                })}
               </Stack>
             )}
             data-testid={`assign-${mission.id}`}
@@ -206,6 +292,7 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
               <MenuItem key={e.id} value={e.id} sx={unavailableFor(e.id) ? { color: 'warning.main' } : undefined}>
                 {e.name}
                 {unavailableFor(e.id) ? ` — ${t.unavailable}` : ''}
+                {partiallyAssigned(e.id) && assigned.includes(e.id) ? ` — ${t.assignedPartially}` : ''}
               </MenuItem>
             ))}
           </Select>

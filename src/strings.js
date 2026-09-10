@@ -1,5 +1,33 @@
 /** All user-facing copy. Hebrew only - the app is RTL throughout. */
 export const t = {
+  missingQualification: (mission, tag, n) => `${mission}: נדרשים ${n} בעלי הסמכת ${tag}; הכיסוי אינו מלא.`,
+  restShortfall: (person, needed, got) => `${person}: מנוחת לילה רצופה ${got} דקות במקום ${needed}. המשימות אוישו למרות החריגה.`,
+  restIncomplete: (person) => `${person}: הלילה מכוסה חלקית בתקופה או בזמינות; אי אפשר לאשר מנוחה מלאה.`,
+  pinExcluded: (person, mission) => `${person} שובץ ידנית ל${mission} למרות פטור לפי הסמכה.`,
+  contradictoryTag: (mission, tag) => `${mission}: הסמכת ${tag} גם נדרשת וגם פטורה מהמשימה.`,
+  findingWindows: (n) => `הצגת ${n} טווחי זמן`,
+  qualifications: 'הסמכות',
+  qualificationName: 'שם ההסמכה',
+  addQualification: 'הוספת הסמכה',
+  removeQualification: 'מחיקת הסמכה',
+  removeQualificationBody: (name, people, missions) => `למחוק את ${name}? ההסמכה תוסר מ־${people} אנשים ומ־${missions} משימות.`,
+  nightRestMinutes: 'רצף מנוחת לילה (דקות)',
+  requiredQualifications: 'הסמכות נדרשות בכל משמרת',
+  excludedQualifications: 'פטורים מהמשימה לפי הסמכה',
+  combinedQualificationsHelp: 'עדיפות לאנשים שונים לכל תפקיד. כשצריך, אדם אחד יכול למלא כמה תפקידים.',
+  restHelp: 'עדיפות למנוחה רצופה בלילה. אם אין מספיק אנשים, המשימות יאוישו ותוצג חריגת המנוחה.',
+  engineProblem: 'זוהתה שגיאה בחישוב הסידור. יש לבדוק את הפרטים לפני שימוש; אפשר לשמור ולשתף את הקישור.',
+  qualityNoRest: (name, n) => `${name}: ${n} מעברים בין משמרות ללא הפסקה`,
+  qualitySameMission: (name, n) => `${name}: ${n} משמרות רצופות באותה משימה`,
+  qualityLongRun: (name, n) => `${name}: רצף של ${n} תורנויות ללא הפסקה`,
+  typeDaily: 'יומית',
+  typeDailyHelp: 'אותם אנשים לכל התורנות. שעות זהות מציינות יום ולילה מלאים, עד למחרת.',
+  dailyFrom: 'תחילת תורנות (24 שעות)',
+  dailyTo: 'סיום תורנות (24 שעות)',
+  dailyNextDay: 'הסיום למחרת',
+  dailyIncomplete: 'יש למלא שעת התחלה ושעת סיום',
+  headcountPerOccurrence: 'אנשים לתורנות',
+
   appTitle: 'מתכנן משמרות',
 
   // navigation
@@ -12,7 +40,8 @@ export const t = {
   planTitlePlaceholder: 'לדוגמה: סוף שבוע',
   planStart: 'תחילת התקופה',
   planEnd: 'סוף התקופה',
-  shiftLength: 'אורך משמרת (דקות)',
+  // "ברירת מחדל" because a mission may now set its own length and ignore this.
+  shiftLength: 'אורך משמרת כברירת מחדל (דקות)',
   nightStart: 'תחילת הלילה',
   nightEnd: 'סוף הלילה',
   nightWindowHelp: 'טווח שעות הלילה. משימה שהוגדר לה מספר אנשים שונה בלילה תשתמש בו בשעות האלה.',
@@ -70,10 +99,20 @@ export const t = {
   headcountDay: 'כמה ביום',
   headcountNight: 'כמה בלילה',
   headcountNightHelp: 'מספר האנשים בשעות הלילה. משפיע רק על משימות מקומיות.',
+  shiftLengthDay: 'אורך משמרת ביום (דקות)',
+  shiftLengthNight: 'אורך משמרת בלילה (דקות)',
+  shiftLengthDayHelp: 'אורך משמרת במשימה הזו. השאר ריק כדי להשתמש באורך ברירת המחדל של הסידור.',
+  // Says out loud that the night length is not capped by the night itself, so a
+  // number longer than the night reads as a deliberate choice rather than a bug.
+  shiftLengthNightHelp: 'אורך משמרת במשימה הזו בשעות הלילה. השאר ריק כדי להשתמש באורך שביום. אורך גדול מהלילה עצמו פשוט ייתן משמרת אחת שנגמרת עם עלות השחר.',
+  // Unit suffix for the shift lengths printed beside a mission in the text
+  // export, e.g. "(מקומית, 1, 120/60 דק׳)".
+  minutesShort: 'דק׳',
   missionStart: 'התחלה',
   missionEnd: 'סיום',
   assignedPeople: 'משובצים קבועים',
   assignedHelp: 'אנשים שישובצו למשימה הזו לכל אורכה. השאר ריק לשיבוץ אוטומטי.',
+  assignedPartially: 'חלקי',
   missionReturnedNow: 'חזרו עכשיו',
   missionReturnedNowHelp: 'מעדכן את שעת הסיום לשעה העגולה הקרובה, ומשחרר את האנשים לשיבוץ במשימות אחרות מאותה שעה.',
   // A mission with no chosen end. Deliberately not "ללא זמן סיום": the mission
