@@ -1,3 +1,14 @@
+/**
+ * Acceptance coverage for the date and time fields.
+ *
+ * They are native `datetime-local` / `time` inputs in a MUI TextField, not a
+ * MUI picker: a native field opens the platform's own picker on a phone, needs
+ * no date library, and speaks only 24-hour `HH:mm` whatever the device shows.
+ * That last part is why the picker went - on a 12-hour device its hour section
+ * counted inside its own half of the day, so stepping a plan's start back over
+ * noon threw it nine hours forward, and the history-freezing test only caught
+ * it after midday.
+ */
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync } from 'node:fs';
 import { chromium } from 'playwright';
@@ -12,51 +23,74 @@ try {
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
+  page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
   const start = Date.parse('2030-09-10T08:00:00+03:00');
   const doc = planSchema.parse({ start, end: start + 2 * 86400000, shiftMinutes: 60,
     employees: [{ id: 'e', name: 'אבי' }],
     missions: [{ id: 'g', name: 'מטבח', type: 'daily', count: 1, dayStart: 480, dayEnd: 480 }] });
   await page.goto(`${base}/#/employees?p=${encodeURIComponent(encodePlan(doc))}`, { waitUntil: 'networkidle' });
   const current = () => decodePlan(new URLSearchParams(page.url().split('?')[1]).get('p')).plan;
-  assert.equal(await page.getByTestId('plan-start-open').count(), 1, 'date fields must open a MUI picker');
-  await page.getByTestId('plan-start-open').tap();
-  const dialog = page.getByRole('dialog');
-  await dialog.waitFor();
-  await dialog.getByRole('gridcell', { name: '11', exact: true }).tap();
-  await dialog.getByRole('button', { name: 'ביטול', exact: true }).tap();
-  assert.equal(current().start, start, 'cancel does not change the saved date');
-  await page.getByTestId('plan-start-open').tap();
-  await dialog.getByRole('gridcell', { name: '11', exact: true }).tap();
-  await dialog.getByRole('button', { name: 'אישור', exact: true }).tap();
-  assert.equal(current().start, start + 86400000, 'accept saves the selected local date');
-  await page.getByTestId('plan-start').getByRole('spinbutton', { name: 'שעות', exact: true }).press('ArrowUp');
-  assert.equal(current().start, start + 86400000 + 3600000, 'field editing preserves viewer-local time');
+
+  const planStart = page.getByTestId('plan-start');
+  assert.equal(await planStart.getAttribute('type'), 'datetime-local',
+    'the plan bounds use the platform date field');
+  assert.equal(await planStart.inputValue(), '2030-09-10T08:00',
+    'the field shows the viewer-local instant on a 24-hour clock');
+
+  // Typing a whole value is one edit, and it is stored as the local instant.
+  await planStart.fill('2030-09-11T08:00');
+  assert.equal(current().start, start + 86400000, 'editing saves the selected local date');
+
+  // The value is 24-hour, so hour arithmetic is plain arithmetic - including
+  // across noon, where a 12-hour field wraps inside the afternoon instead.
+  await planStart.fill('2030-09-11T12:00');
+  const noon = current().start;
+  await planStart.fill('2030-09-11T09:00');
+  assert.equal(current().start, noon - 3 * 3600000, 'three hours back from noon is 09:00, not 21:00');
+
   await page.getByTestId('tab-missions').tap();
-  const daily = page.getByTestId('mission-day-start-g');
-  await daily.getByRole('spinbutton', { name: 'שעות', exact: true }).press('ArrowUp');
-  assert.equal(current().missions[0].dayStart, 540);
-  await page.getByTestId('mission-day-end-g').getByRole('spinbutton', { name: 'שעות', exact: true }).press('ArrowUp');
+  const dayStart = page.getByTestId('mission-day-start-g');
+  assert.equal(await dayStart.getAttribute('type'), 'time', 'daily clocks use the platform time field');
+  assert.equal(await dayStart.inputValue(), '08:00');
+  await dayStart.fill('09:00');
+  assert.equal(current().missions[0].dayStart, 540, 'a wall clock is stored as minutes past midnight');
+  await page.getByTestId('mission-day-end-g').fill('09:00');
   assert.equal(current().missions[0].dayEnd, 540, 'equal times remain next-day duty');
-  await page.waitForFunction(() => document.querySelector('[data-testid="mission-day-start-g"] [aria-label="שעות"]')?.getAttribute('aria-valuenow') === '9');
-  await page.getByTestId('mission-day-start-g-open').tap();
-  await dialog.waitFor();
-  const hour = await dialog.getByRole('option', { name: '10 שעות', exact: true }).boundingBox();
-  // The clock's mask handles touch coordinates over the labelled dial numbers.
-  await page.touchscreen.tap(hour.x + hour.width / 2, hour.y + hour.height / 2);
-  await dialog.getByRole('button', { name: 'אישור', exact: true }).tap();
-  assert.equal(current().missions[0].dayStart, 600, 'accept saves selected clock hours');
-  await page.getByTestId('mission-day-start-g-open').tap();
-  await page.screenshot({ animations: 'disabled', path: `${shots}/time-dialog.png` });
-  await dialog.getByRole('button', { name: 'ניקוי', exact: true }).tap();
+  await page.screenshot({ animations: 'disabled', path: `${shots}/time-fields.png` });
+
+  // An optional clock can be emptied again; the plan's own bounds cannot, so
+  // there is no clear button on those to empty them by accident.
+  await page.getByTestId('mission-day-start-g-clear').tap();
   assert.equal(current().missions[0].dayStart, null, 'optional clocks can be cleared');
   await page.reload({ waitUntil: 'networkidle' });
   assert.equal(current().missions[0].dayStart, null);
+  assert.equal(await page.getByTestId('plan-start-clear').count(), 0,
+    'a required bound offers no clear button');
+
   for (const width of [360, 412, 1280]) {
     await page.setViewportSize({ width, height: 915 });
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `no overflow at ${width}px`);
   }
+
+  // A 12-hour device gets the same 24-hour value. Every rendered time in the
+  // app goes through format.js with hourCycle 'h23', and the field's value is
+  // part of the contract, not a matter of locale.
+  const usContext = await browser.newContext({ locale: 'en-US', timezoneId: 'Asia/Jerusalem' });
+  const usPage = await usContext.newPage();
+  usPage.on('pageerror', (error) => errors.push(error.message));
+  const noonStart = Date.parse('2030-09-10T12:00:00+03:00');
+  const usDoc = planSchema.parse({ start: noonStart, end: noonStart + 86400000, shiftMinutes: 60,
+    employees: [{ id: 'e', name: 'אבי' }], missions: [] });
+  await usPage.goto(`${base}/#/employees?p=${encodeURIComponent(encodePlan(usDoc))}`, { waitUntil: 'networkidle' });
+  assert.equal(await usPage.getByTestId('plan-start').inputValue(), '2030-09-10T12:00',
+    'a 12-hour device still reads and writes a 24-hour value');
+  await usPage.getByTestId('plan-start').fill('2030-09-10T09:00');
+  const usStart = decodePlan(new URLSearchParams(usPage.url().split('?')[1]).get('p')).plan.start;
+  assert.equal(usStart, noonStart - 3 * 3600000, 'and stores the same instant a Hebrew device would');
+  await usContext.close();
+
   assert.deepEqual(errors, []);
-  console.log('PASS MUI date/time dialogs, cancel, keyboard sections, timezone, equal clocks, clear, URL persistence, responsive layout');
+  console.log('PASS native date/time fields, 24-hour values across device locales, clearable optional clocks, URL persistence, responsive layout');
 } catch (error) {
   for (const context of browser.contexts()) for (const page of context.pages()) {
     console.error((await page.locator('body').innerText()).slice(0, 5000));

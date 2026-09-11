@@ -2,6 +2,7 @@
 export const t = {
   noMatchingEmployees: 'לא נמצאו עובדים',
   replaceEmployee: 'חיפוש עובד להחלפה',
+  clearValue: 'ניקוי',
   decreaseNumber: (label) => `הקטנת ${label}`,
   increaseNumber: (label) => `הגדלת ${label}`,
   missingQualification: (mission, tag, n) => `${mission}: נדרשים ${n} בעלי הסמכת ${tag}; הכיסוי אינו מלא.`,

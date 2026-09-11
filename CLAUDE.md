@@ -240,6 +240,13 @@ validation error there takes down the whole document, which is the user's only c
   Hebrew name of any length arrived on a phone as `ש...` and the agenda stopped saying who was on
   duty; text wraps, an input does not. The dialog's search box is deliberately not auto-focused —
   on a phone that raises the keyboard over the list the reader came to read.
+- Dates and times are **native inputs** in a MUI `TextField`, never a MUI picker. A native field
+  opens the platform's own picker on a phone, needs no date library, and its value is always
+  24-hour `HH:mm`. The picker followed the *device's* clock format, and in a 12-hour field the hour
+  section counts inside its own half of the day: stepping a plan's start back over noon threw it
+  nine hours forward instead, so the history-freezing browser test failed every afternoon and
+  passed every morning. `src/lib/localInput.js` owns both conversions and is where the arithmetic
+  is tested. What the field *displays* is still the device's business — that is the accepted cost.
 - `sx` maps palette tokens for `borderColor` only. `borderInlineStartColor: 'primary.main'` is
   emitted as an invalid colour and dropped — resolve it via a callback (`(theme) => …`).
 
@@ -267,7 +274,9 @@ the Vite build keeps working.
 See [the ADR index](docs/plans/README.md) for accepted scheduling decisions.
 ADRs 003–005 describe daily duties, validation, and qualifications; ADR 006
 records URL compatibility. The historical plan filenames remain stable.
-Daily equal times mean a full calendar day; inputs always display 24-hour time.
+Daily equal times mean a full calendar day. Time inputs are native
+`datetime-local`/`time` fields (`DateTimeField`, `DailyClockField`), so their
+**value** is always 24-hour `HH:mm` while their rendering follows the device.
 The adapter resolves viewer-local calendar occurrences, and the engine holds each
 whole before local duties. Occurrence-aware pin edits preserve neighboring days.
 

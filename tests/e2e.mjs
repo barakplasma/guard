@@ -13,7 +13,8 @@
  * binary when the sandbox already ships one.
  */
 import { chromium } from 'playwright';
-import { decodePlan } from '../src/lib/urlState.js';
+import { encodePlan, decodePlan } from '../src/lib/urlState.js';
+import { planSchema, topOfHour } from '../src/lib/planSchema.js';
 import { readFileSync, mkdirSync } from 'node:fs';
 
 const BASE = process.env.BASE || 'http://localhost:4173';
@@ -264,26 +265,24 @@ const ctx3 = await browser.newContext({ permissions: ['clipboard-read', 'clipboa
 const page3 = await ctx3.newPage();
 page3.on('pageerror', (e) => { console.log('PAGEERROR(freeze)', e.message); failures++; });
 
-await page3.goto(`${BASE}/`, { waitUntil: 'networkidle' });
-await page3.getByTestId('bulk-names').fill(['רותם', 'עדי'].join('\n'));
-await page3.getByTestId('add-bulk').click();
-await page3.waitForTimeout(300);
-
-// Push the window's start three hours into the past, so the first few hourly
-// shifts are already-elapsed history by the time the mission below exists.
-const startHours = page3.getByTestId('plan-start').getByRole('spinbutton', { name: 'שעות', exact: true });
-for (let i = 0; i < 3; i++) await startHours.press('ArrowDown');
-await page3.waitForTimeout(200);
-
-await page3.getByTestId('tab-missions').click();
-await page3.waitForTimeout(200);
-// Deliberately not naming the mission: filling the name field would itself be
-// a second edit, and this check wants to observe the state right after the
-// single edit that created the mission - before anything has a chance to freeze.
-await page3.getByTestId('add-mission').click();
-await page3.waitForTimeout(250);
-
-await page3.getByTestId('tab-schedule').click();
+// The window starts three hours in the past, so its first few hourly shifts
+// are already-elapsed history, and the document arrives carrying no pins and
+// no edit yet - the state this check wants to observe.
+//
+// Seeded through the URL rather than typed: nudging the start field backwards
+// is arithmetic on a clock, and a 12-hour field counts inside its own half of
+// the day, so the same three keypresses moved the start back three hours in
+// the morning and forward nine in the afternoon. The freeze this tests has
+// nothing to do with how a date got entered.
+const elapsedStart = topOfHour(Date.now()) - 3 * 3600 * 1000;
+const freezeDoc = planSchema.parse({
+  start: elapsedStart,
+  end: elapsedStart + 24 * 3600 * 1000,
+  shiftMinutes: 60,
+  employees: [{ id: 'e1', name: 'רותם' }, { id: 'e2', name: 'עדי' }],
+  missions: [{ id: 'm1', name: '', type: 'local', count: 1 }],
+});
+await page3.goto(`${BASE}/#/schedule?p=${encodeURIComponent(encodePlan(freezeDoc))}`, { waitUntil: 'networkidle' });
 await page3.waitForTimeout(500);
 const firstShift = page3.locator('[data-testid^="shift-select-m1-"]').first();
 const firstShiftTestId = await firstShift.getAttribute('data-testid');
@@ -384,7 +383,7 @@ await page5.screenshot({ path: `${SHOT}/06-open-ended.png` });
 await page4.getByTestId('mission-open-ended-m1').click();
 await page4.waitForTimeout(400);
 check('unticking restores an explicit, editable end',
-  (await page4.getByTestId('mission-end-m1').locator('input').inputValue()) !== '');
+  (await page4.getByTestId('mission-end-m1').inputValue()) !== '');
 
 await ctx5.close();
 await ctx4.close();

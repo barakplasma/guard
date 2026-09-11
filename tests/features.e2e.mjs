@@ -42,10 +42,8 @@ try {
   await page.screenshot({ path: `${SHOT}/qualifications-360.png`, fullPage: true });
   await page.getByTestId('tab-missions').click();
   await page.getByTestId('type-daily-k').click();
-  await page.getByTestId('mission-day-start-k').getByRole('spinbutton', { name: 'שעות', exact: true }).press('8');
-  await page.getByTestId('mission-day-start-k').getByRole('spinbutton', { name: 'דקות', exact: true }).press('0');
-  await page.getByTestId('mission-day-end-k').getByRole('spinbutton', { name: 'שעות', exact: true }).press('8');
-  await page.getByTestId('mission-day-end-k').getByRole('spinbutton', { name: 'דקות', exact: true }).press('0');
+  await page.getByTestId('mission-day-start-k').fill('08:00');
+  await page.getByTestId('mission-day-end-k').fill('08:00');
   await pick('mission-requires-k', 'נהג');
   await pick('mission-requires-k', 'מפקד');
   assert.equal(current().missions[0].dayEnd, 480);
