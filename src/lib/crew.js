@@ -25,10 +25,10 @@ function separateRoles(crew, requirements) {
 /**
  * Exact search over qualification groups, not permutations of employees.
  * Ranking within a group remains the strategy's order. Optimize coverage, then
- * distinct role holders, then lexicographic strategy preference. No rest or
+ * optional preference costs, distinct role holders, then strategy preference. No rest or
  * qualification configuration changes the legacy slice path.
  */
-export function selectCrew(candidates, pinned, need, rawRequirements = []) {
+export function selectCrew(candidates, pinned, need, rawRequirements = [], costs = new Map()) {
   const requirements = requirementsOf(rawRequirements);
   const take = Math.min(Math.max(0, need), candidates.length);
   if (!take || !requirements.length) return candidates.slice(0, take);
@@ -39,17 +39,23 @@ export function selectCrew(candidates, pinned, need, rawRequirements = []) {
     grouped.get(key).push(index);
   });
   const groups = [...grouped.values()];
-  let best = null, bestScore = [-1, -1];
+  let best = null, bestScore = null;
   function visit(group, chosen) {
     if (chosen.length === take) {
       const indices = [...chosen].sort((a, b) => a - b);
       const crew = [...pinned, ...indices.map((i) => candidates[i])];
       const coverage = requirements.reduce((n, r) => n + Math.min(r.count, crew.filter((p) => (p.tags ?? []).includes(r.tag)).length), 0);
-      if (coverage < bestScore[0]) return;
+      if (bestScore && coverage < bestScore[0]) return;
       const separate = separateRoles(crew, requirements);
+      const penalty = indices.reduce((sum, i) => {
+        (costs.get(candidates[i].id) ?? []).forEach((value, j) => { sum[j] = (sum[j] ?? 0) + value; });
+        return sum;
+      }, []);
+      const score = [coverage, ...penalty.map((value) => -value), separate];
+      const difference = bestScore == null ? 1 : score.map((value, i) => value - bestScore[i]).find((value) => value !== 0) ?? 0;
       const betterTie = best == null || indices.some((v, i) => v !== best[i] && indices.slice(0, i).every((x, j) => x === best[j]) && v < best[i]);
-      if (coverage > bestScore[0] || (coverage === bestScore[0] && (separate > bestScore[1] || (separate === bestScore[1] && betterTie)))) {
-        best = indices; bestScore = [coverage, separate];
+      if (difference > 0 || (difference === 0 && betterTie)) {
+        best = indices; bestScore = score;
       }
       return;
     }

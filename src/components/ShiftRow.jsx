@@ -1,6 +1,6 @@
 import { Autocomplete, Box, Chip, IconButton, TextField, Tooltip } from '@mui/material';
-import PushPinIcon from '@mui/icons-material/PushPin';
 import LockIcon from '@mui/icons-material/Lock';
+import HistoryIcon from '@mui/icons-material/History';
 import CloseIcon from '@mui/icons-material/Close';
 import { t } from '../strings.js';
 
@@ -65,19 +65,22 @@ export default function ShiftRow({ shift, employees, busyElsewhere, onSwap, onCl
 
       {shift.pinned && (
         // Badge and its clear button stay one unit so they never wrap apart.
-        // Icon-only: a lock means the engine froze this shift because its time
-        // already elapsed, a pin means a person chose it by hand - the text
-        // label this used to carry is gone, so the distinction has to survive
-        // on the icon and the tooltip alone.
+        // Icon-only: a lock means a person chose this assignment by hand and
+        // it always wins over scheduling, a history icon means the engine
+        // preserved an already-elapsed assignment - the two kinds of lock
+        // must never read as the same thing, so each carries its own icon,
+        // accessible label, and release-button label.
         <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.25 }}>
-          <Tooltip title={shift.frozen ? t.frozenPinNote : t.pinned}>
+          <Tooltip title={shift.frozen ? t.frozenHistory : t.pinnedLocked}>
             <Chip
               size="small"
-              icon={shift.frozen ? <LockIcon fontSize="small" /> : <PushPinIcon fontSize="small" />}
+              icon={shift.frozen
+                ? <HistoryIcon fontSize="small" data-testid="HistoryIcon" />
+                : <LockIcon fontSize="small" data-testid="LockIcon" />}
               label=""
               color="primary"
               variant="outlined"
-              aria-label={shift.frozen ? t.frozenPinNote : t.pinned}
+              aria-label={shift.frozen ? t.frozenHistory : t.pinnedLocked}
               sx={{
                 maxWidth: '100%',
                 // The icon's built-in margin assumes a label follows it; with
@@ -91,7 +94,7 @@ export default function ShiftRow({ shift, employees, busyElsewhere, onSwap, onCl
           </Tooltip>
           <IconButton
             size="small"
-            aria-label={t.clearPin}
+            aria-label={shift.frozen ? t.releaseFrozen : t.clearPin}
             onClick={onClearPin}
             sx={{ p: 0.5 }}
             data-testid={`clear-pin-${shift.missionId}-${shift.start}`}

@@ -27,7 +27,8 @@
 import { getStrategy, DEFAULT_STRATEGY } from './strategies.js';
 import { validateSchedule } from './invariants.js';
 import { selectCrew, missingQualifications, requirementsOf } from './crew.js';
-import { preferredRest, overlapsRest, assessRest } from './rest.js';
+import { preferredRest, overlapsRest, assessRest, restCost, restMetrics, restDeficit } from './rest.js';
+import { proposeCorrections } from './corrections.js';
 
 const MINUTE = 60 * 1000;
 
@@ -511,11 +512,14 @@ function occupy(st, mission, start, end, slotStart, counter) {
  *   timeline: {start:number,end:number,onDuty:{employeeId:string,missionId:string}[],offDuty:string[],unavailable:string[]}[],
  *   stats: {perEmployee:{employeeId:string,name:string,minutes:number,stints:number,minGapMinutes:number|null}[], spreadMinutes:number},
  *   warnings: object[],
+ *   rest: {employeeId:string,start:number,end:number,needed:number,totalMinutes:number,longestMinutes:number}[],
+ *   proposals: object[],
  * }}
  */
-export function plan({
+function planOnce({
   start, end, shiftMinutes, strategy: strategyName = DEFAULT_STRATEGY,
   employees = [], missions = [], pins = [], nightWindows = [], tags = [],
+  repairHints = [],
   onInvariantViolation = 'throw',
 }) {
   /* --- structural validation: these are bugs in the input, not planner findings --- */
@@ -581,15 +585,19 @@ export function plan({
     // Sleep-compatible duty: rest blocks neither deprioritize nor exclude
     // anyone from an on-call mission.
     if (mission.onCall) return selectCrew(candidates, fixed, need, mission.requires);
-    const ordered = [...candidates].sort((a, b) => Number(overlapsRest(a.id, lo, hi, rest)) - Number(overlapsRest(b.id, lo, hi, rest)));
-    const picked = selectCrew(ordered, fixed, need, mission.requires);
-    const rested = ordered.filter((e) => !overlapsRest(e.id, lo, hi, rest));
-    if (rested.length >= picked.length && rested.length < ordered.length) {
-      const safe = selectCrew(rested, fixed, need, mission.requires);
-      const deficit = (crew) => missingQualifications([...fixed, ...crew], mission.requires).reduce((n, r) => n + r.needed - r.got, 0);
-      if (deficit(safe) <= deficit(picked)) return safe;
-    }
-    return picked;
+    // Priority ladder per candidate: configured total-minimum deficit, then
+    // the 8-hour total and 6-hour continuous preferences, then overlap with a
+    // reserved rest block. `selectCrew` re-reads the same vector per crew, so
+    // qualification coverage still outranks every tier here.
+    const costs = new Map(candidates.map((e) => [e.id, [
+      ...restCost(e, tags, nightWindows, rows.filter((r) => r.employeeId === e.id && !sleepable.has(r.missionId)), start, end, lo, hi),
+      Number(overlapsRest(e.id, lo, hi, rest)),
+    ]]));
+    const ordered = [...candidates].sort((a, b) => {
+      const left = costs.get(a.id), right = costs.get(b.id);
+      return left.map((v, i) => v - right[i]).find((v) => v !== 0) ?? 0;
+    });
+    return selectCrew(ordered, fixed, need, mission.requires, costs);
   };
   let seqCounter = emps.length;
   const nextSeq = () => seqCounter++;
@@ -763,6 +771,36 @@ export function plan({
     }
   }
 
+  /* --- 1b. repair hints: a generated seat reserved for a qualification ---
+   * The repair orchestration in `plan` tries schedules in which a qualified
+   * employee is pre-seeded onto a short local segment. Hints ride through the
+   * same segment machinery as pins but stay ordinary generated duty: an input
+   * to this one run, never a decision the plan remembers. Local only,
+   * deliberately: a remote or daily mission picks any free qualified person
+   * through coverage maximization already, so a hint there could never help -
+   * and the remote/daily phases count only real pins as occupancy, so a hint
+   * row would double-staff the very seat it was meant to fill. A hint that
+   * would double-book, overstaff, or ignore availability is skipped here,
+   * which simply makes that trial equal the base schedule and the
+   * orchestrator move on to the next candidate.
+   */
+  for (const hint of repairHints) {
+    const mission = missionById.get(hint.missionId);
+    const st = state.get(hint.employeeId);
+    if (!mission || !st || mission.type !== 'local') continue;
+    const window = { start: hint.start ?? mission.start, end: hint.end ?? mission.end };
+    for (const seg of segmentsOf(mission)) {
+      const rowStart = Math.max(seg.start, window.start);
+      const rowEnd = Math.min(seg.end, window.end);
+      if (rowEnd <= rowStart) continue;
+      const covered = rows.filter((r) => r.missionId === mission.id && r.start <= rowStart && r.end >= rowEnd);
+      if (covered.length >= countAt(mission, rowStart, nightWindows)) continue;
+      if (covered.some((r) => r.employeeId === st.id)) continue;
+      if (!isFree(st, rowStart, rowEnd) || !isAvailable(st, rowStart, rowEnd)) continue;
+      addRow(mission, st, rowStart, rowEnd, seg.slot, false);
+    }
+  }
+
   /* --- 2. remote missions: hard constraints, so they claim people first --- */
   const eligibleForRemote = (m) => [...state.values()].filter(
     (st) => isAvailable(st, m.start, m.end) && isFree(st, m.start, m.end)
@@ -877,6 +915,15 @@ export function plan({
     }
   }
 
+  // Whatever pinned history still blocks a qualified person is described in a
+  // proposal the UI offers for acceptance - the engine itself never edits a
+  // pin. (Repairs of generated duty happen one level up, in `plan`, by
+  // re-running this function with repair hints.) Runs before merging so it
+  // reasons about the same segment rows the staffing pass produced.
+  const proposals = proposeCorrections(rows, {
+    employees: emps, tags, missions: miss, nightWindows, start, end, sleepable, segmentsOf,
+  });
+
   const shifts = mergeRows(rows);
 
   for (const e of emps) {
@@ -891,6 +938,10 @@ export function plan({
       .flatMap((m) => m.type === 'daily' ? m.occurrences.flatMap((w) => [w.start, w.end]) : [m.start, m.end])),
     stats: buildStats(shifts, emps, sleepable),
     warnings,
+    // Per-employee, per-night total and continuous rest, and the actionable
+    // corrections for shortages that only an accepted change can fix.
+    rest: restMetrics(shifts, emps, tags, nightWindows, start, end, sleepable),
+    proposals,
   };
   const missing = new Map();
   for (const seg of result.timeline) {
@@ -911,6 +962,79 @@ export function plan({
   warnings.push(...missing.values());
   warnings.push(...assessRest(shifts, emps, tags, nightWindows, start, end, sleepable));
   return validateSchedule(result, { start, end, shiftMinutes, employees: emps, missions: miss, nightWindows }, onInvariantViolation);
+}
+
+/**
+ * Plan, then repair what generated duty can repair.
+ *
+ * When the base schedule leaves a required qualification unmet, each short
+ * window is tried with a repair hint - a pre-seeded generated seat for a
+ * qualified employee (see phase 1b) - and the hinted schedule is kept only
+ * when it is strictly better on the resulting output: fewer unmet
+ * qualification minutes, then fewer understaffed minutes, then a lower total
+ * rest deficit. Everything a hint rearranges is rearranged by the engine's
+ * own phases, so every invariant a normal plan holds holds for the repaired
+ * one too, and the repair is recomputed from scratch on every replan -
+ * generated output, never a remembered edit. Preserved history and manual
+ * assignments are never hintable (see `repairCandidates`); those are the
+ * proposal half's domain (see corrections.js).
+ */
+export function plan(input) {
+  const base = planOnce(input);
+  if (input.repairHints?.length) return base; // a trial: never recurse
+  const shortages = base.warnings.filter((w) => w.code === 'missing-required-tag');
+  if (!shortages.length) return base;
+
+  const quality = (result) => {
+    let missing = 0, understaffed = 0;
+    for (const w of result.warnings) {
+      if (w.code === 'missing-required-tag') {
+        for (const win of w.windows) missing += (w.needed - win.got) * (win.end - win.start);
+      } else if (w.code === WARN.UNDERSTAFFED) {
+        understaffed += (w.needed - w.got) * (w.end - w.start);
+      }
+    }
+    return [missing, understaffed, restDeficit(result.rest)];
+  };
+  let best = base;
+  let hints = [];
+  for (const warning of shortages) {
+    for (const win of warning.windows) {
+      const hint = { missionId: warning.missionId, start: win.start, end: win.end };
+      for (const employee of repairCandidates(input, base, warning, win)) {
+        const trial = planOnce({ ...input, repairHints: [...hints, { ...hint, employeeId: employee.id }] });
+        // Staffing is never sacrificed for qualification coverage: a repair
+        // that empties one post to fill another is no repair.
+        const baseQuality = quality(best), trialQuality = quality(trial);
+        if (trialQuality[1] <= baseQuality[1] && lexLess(trialQuality, baseQuality)) {
+          best = trial;
+          hints = [...hints, { ...hint, employeeId: employee.id }];
+          break;
+        }
+      }
+    }
+  }
+  return best;
+}
+
+/** Lexicographic comparison: the first differing tier decides. */
+const lexLess = (a, b) => (a.map((v, i) => v - b[i]).find((v) => v !== 0) ?? 0) < 0;
+
+/**
+ * Who may be hinted onto a short window: qualified, available for all of it,
+ * not excluded from the mission, and neither already covering the window nor
+ * held over it by a pin - pins are decisions, so a driver preserved history
+ * or a manual assignment holds is proposal territory, never an auto-repair.
+ */
+function repairCandidates(input, base, warning, win) {
+  const mission = input.missions.find((m) => m.id === warning.missionId);
+  if (!mission) return [];
+  return input.employees.filter((e) => (e.tags ?? []).includes(warning.tag)
+    && !(mission.excludes ?? []).some((t) => (e.tags ?? []).includes(t))
+    && (e.start ?? input.start) <= win.start && (e.end ?? input.end) >= win.end
+    && !base.shifts.some((s) => s.employeeId === e.id && s.missionId === mission.id
+      && s.start <= win.start && s.end >= win.end)
+    && !base.shifts.some((s) => s.employeeId === e.id && s.pinned && s.start < win.end && win.start < s.end));
 }
 
 /* ------------------------------------------------------------------ */
