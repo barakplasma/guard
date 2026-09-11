@@ -1,27 +1,43 @@
-import { useLayoutEffect, useState } from 'react';
-import dayjs from 'dayjs';
-import { uses12HourClock } from '../lib/pickerLocale.js';
-import { MobileDateTimePicker } from '@mui/x-date-pickers/MobileDateTimePicker';
+import { TextField } from '@mui/material';
+import { fromLocalDateTimeInput, toLocalDateTimeInput } from '../lib/localInput.js';
 
-/** Local calendar values cross the document boundary only as epoch milliseconds. */
-export default function DateTimeField({ label, value, onChange, testId, sx, nullable = true, ...rest }) {
-  const saved = value == null ? null : dayjs(value);
-  const [draft, setDraft] = useState(saved);
-  useLayoutEffect(() => setDraft(value == null ? null : dayjs(value)), [value]);
-  const save = (next, context) => {
-    if (context.validationError == null && (next?.isValid() || (nullable && next == null))) {
-      onChange(next == null ? null : next.second(0).millisecond(0).valueOf());
-    }
-  };
-  return <MobileDateTimePicker {...rest} label={label} value={draft}
-    ampm={uses12HourClock} format={uses12HourClock ? 'DD/MM/YYYY hh:mm A' : 'DD/MM/YYYY HH:mm'} closeOnSelect={false}
-    onChange={(next, context) => { setDraft(next); if (context.source === 'field') save(next, context); }}
-    onAccept={save}
-    onClose={() => setDraft(saved)}
-    slotProps={{
-      textField: { 'data-testid': testId },
-      openPickerButton: { 'data-testid': `${testId}-open` },
-      actionBar: { actions: nullable ? ['clear', 'cancel', 'accept'] : ['cancel', 'accept'] },
-    }}
-    sx={{ width: { xs: '100%', md: 260 }, ...sx }} />;
+/**
+ * A date and time, as the platform's own field.
+ *
+ * This used to be a MUI `MobileDateTimePicker`. A native `datetime-local` input
+ * opens the OS picker on a phone, needs no date library, and - the reason it
+ * replaced the picker - speaks only 24-hour `HH:mm`, so hour arithmetic cannot
+ * depend on the device's clock format. The picker followed that format, and on
+ * a 12-hour device its hour section counted inside its own half of the day:
+ * stepping a plan's start back over noon threw it nine hours forward instead.
+ *
+ * Local calendar values cross the document boundary only as epoch milliseconds.
+ */
+export default function DateTimeField({
+  label, value, onChange, testId, sx, nullable = true, ...rest
+}) {
+  return (
+    <TextField
+      {...rest}
+      type="datetime-local"
+      size="small"
+      label={label}
+      value={toLocalDateTimeInput(value)}
+      onChange={(event) => {
+        const next = fromLocalDateTimeInput(event.target.value);
+        // A half-filled field reads as an empty string. Only a field that may
+        // be empty takes that as "cleared"; a required one keeps what it had
+        // rather than tearing a bound out of the document mid-edit.
+        if (next != null) onChange(next);
+        else if (nullable && event.target.value === '') onChange(null);
+      }}
+      slotProps={{
+        // A native date input always shows its own placeholder, so the label
+        // has to sit above it or the two overlap.
+        inputLabel: { shrink: true },
+        htmlInput: { 'data-testid': testId, step: 60, dir: 'ltr' },
+      }}
+      sx={{ width: { xs: '100%', md: 260 }, ...sx }}
+    />
+  );
 }

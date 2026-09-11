@@ -9,6 +9,7 @@ import {
   clearStalePins, freezeElapsedBeforeEdit, pruneStalePins,
 } from '../lib/pins.js';
 import { addUniqueEmployees } from '../lib/employees.js';
+import { t } from '../strings.js';
 
 const PlanContext = createContext(null);
 
@@ -128,6 +129,34 @@ export function PlanProvider({ children }) {
       ...d,
       missions: d.missions.map((m) => (m.id === id ? { ...m, ...patch } : m)),
     })),
+
+    /**
+     * Copy a mission, placed right after the one it came from so the pair is
+     * obvious in a long list.
+     *
+     * Its **pins do not come along**. A pin says a named person holds this
+     * mission over this range; copied onto a mission covering the same hours,
+     * every one of them would double-book its holder the instant the copy
+     * exists, and the engine would drop them with a conflict warning nobody
+     * asked for. The settings are what is worth copying - a second gate with
+     * the same grid, headcount and qualifications - and the roster is the part
+     * that has to differ.
+     */
+    duplicateMission: (id) => update((d) => {
+      const index = d.missions.findIndex((m) => m.id === id);
+      if (index < 0) return d;
+      const source = d.missions[index];
+      const copy = {
+        ...source,
+        id: makeId('m', d.missions.map((m) => m.id)),
+        // A half-typed mission stays half-typed; a named one says it is a copy,
+        // because two identical names in the agenda are unreadable.
+        name: source.name ? t.missionCopyName(source.name) : source.name,
+      };
+      const missions = [...d.missions];
+      missions.splice(index + 1, 0, copy);
+      return { ...d, missions };
+    }),
 
     removeMission: (id) => update((d) => ({
       ...d,

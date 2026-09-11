@@ -240,6 +240,28 @@ validation error there takes down the whole document, which is the user's only c
   Hebrew name of any length arrived on a phone as `ש...` and the agenda stopped saying who was on
   duty; text wraps, an input does not. The dialog's search box is deliberately not auto-focused —
   on a phone that raises the keyboard over the list the reader came to read.
+- Dates and times are **native inputs** in a MUI `TextField`, never a MUI picker. A native field
+  opens the platform's own picker on a phone, needs no date library, and its value is always
+  24-hour `HH:mm`. The picker followed the *device's* clock format, and in a 12-hour field the hour
+  section counts inside its own half of the day: stepping a plan's start back over noon threw it
+  nine hours forward instead, so the history-freezing browser test failed every afternoon and
+  passed every morning. `src/lib/localInput.js` owns both conversions and is where the arithmetic
+  is tested. What the field *displays* is still the device's business — that is the accepted cost.
+- Sharing carries a **window**, not the whole rota: the WhatsApp message and the iCal files cover
+  24 hours from a chosen start, three whole hours back by default (`src/lib/shareWindow.js`), and
+  the default is clamped into the plan so a rota written for next week does not copy an empty
+  message. The copied **link and the CSV are deliberately exempt** — a link *is* the document, and
+  narrowing its period would make the recipient's engine recompute a different schedule from the
+  one you were looking at.
+- The schedule's per-person filter is **view state, never document state**. It is the same
+  `EmployeeSelect` the iCal row uses, and the summary table stays whole underneath it: the question
+  it answers is "why is this person on so much more than the others", which needs the others. A
+  filter in the URL would travel with every shared link.
+- Duplicating a mission (`duplicateMission`) copies every setting and **no pins**. A pin names a
+  person holding that mission over a range; copied onto a mission covering the same hours it would
+  double-book its holder the moment the copy existed, and the engine would drop it with a conflict
+  warning nobody asked for. The copy's name gets a `(עותק)` suffix — two identical names make the
+  agenda unreadable.
 - `sx` maps palette tokens for `borderColor` only. `borderInlineStartColor: 'primary.main'` is
   emitted as an invalid colour and dropped — resolve it via a callback (`(theme) => …`).
 
@@ -267,7 +289,9 @@ the Vite build keeps working.
 See [the ADR index](docs/plans/README.md) for accepted scheduling decisions.
 ADRs 003–005 describe daily duties, validation, and qualifications; ADR 006
 records URL compatibility. The historical plan filenames remain stable.
-Daily equal times mean a full calendar day; inputs always display 24-hour time.
+Daily equal times mean a full calendar day. Time inputs are native
+`datetime-local`/`time` fields (`DateTimeField`, `DailyClockField`), so their
+**value** is always 24-hour `HH:mm` while their rendering follows the device.
 The adapter resolves viewer-local calendar occurrences, and the engine holds each
 whole before local duties. Occurrence-aware pin edits preserve neighboring days.
 
