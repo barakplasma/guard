@@ -247,6 +247,21 @@ validation error there takes down the whole document, which is the user's only c
   nine hours forward instead, so the history-freezing browser test failed every afternoon and
   passed every morning. `src/lib/localInput.js` owns both conversions and is where the arithmetic
   is tested. What the field *displays* is still the device's business — that is the accepted cost.
+- Sharing carries a **window**, not the whole rota: the WhatsApp message and the iCal files cover
+  24 hours from a chosen start, three whole hours back by default (`src/lib/shareWindow.js`), and
+  the default is clamped into the plan so a rota written for next week does not copy an empty
+  message. The copied **link and the CSV are deliberately exempt** — a link *is* the document, and
+  narrowing its period would make the recipient's engine recompute a different schedule from the
+  one you were looking at.
+- The schedule's per-person filter is **view state, never document state**. It is the same
+  `EmployeeSelect` the iCal row uses, and the summary table stays whole underneath it: the question
+  it answers is "why is this person on so much more than the others", which needs the others. A
+  filter in the URL would travel with every shared link.
+- Duplicating a mission (`duplicateMission`) copies every setting and **no pins**. A pin names a
+  person holding that mission over a range; copied onto a mission covering the same hours it would
+  double-book its holder the moment the copy existed, and the engine would drop it with a conflict
+  warning nobody asked for. The copy's name gets a `(עותק)` suffix — two identical names make the
+  agenda unreadable.
 - `sx` maps palette tokens for `borderColor` only. `borderInlineStartColor: 'primary.main'` is
   emitted as an invalid colour and dropped — resolve it via a callback (`(theme) => …`).
 
