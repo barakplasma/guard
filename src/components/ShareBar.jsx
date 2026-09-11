@@ -1,14 +1,17 @@
 import { useMemo, useState } from 'react';
 import {
-  Box, Button, Divider, Paper, Stack, Typography,
+  Box, Button, Divider, IconButton, Paper, Stack, Tooltip, Typography,
 } from '@mui/material';
 import LinkIcon from '@mui/icons-material/Link';
 import DownloadIcon from '@mui/icons-material/Download';
 import ChatIcon from '@mui/icons-material/Chat';
+import ShareIcon from '@mui/icons-material/Share';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import { shareUrl, URL_WARN_LENGTH } from '../lib/urlState.js';
 import { downloadCsv, shiftsToCsv } from '../lib/exportCsv.js';
-import { copyText, whatsappText } from '../lib/exportText.js';
+import {
+  canShareNatively, copyText, shareNative, whatsappText,
+} from '../lib/exportText.js';
 import { downloadIcs, employeeIcs, overviewIcs } from '../lib/exportIcal.js';
 import { SHARE_WINDOW_MS, clipResult, defaultShareFrom } from '../lib/shareWindow.js';
 import DateTimeField from './DateTimeField.jsx';
@@ -49,6 +52,21 @@ export default function ShareBar({ doc, result, now = Date.now() }) {
 
   const onWhatsapp = async () => {
     await copy(whatsappText(shared, { title: doc.title }));
+  };
+
+  // Progressive enhancement: only phones and some desktop browsers offer a
+  // native share sheet, so the buttons that call it only render there - the
+  // copy buttons above are the fallback everywhere else.
+  const shareSupported = canShareNatively();
+
+  const onShareLink = async () => {
+    const status = await shareNative({ title: doc.title || undefined, url: shareUrl(doc, '/schedule') });
+    if (status === 'error') setToast(t.shareFailed);
+  };
+
+  const onShareWhatsapp = async () => {
+    const status = await shareNative({ text: whatsappText(shared, { title: doc.title }) });
+    if (status === 'error') setToast(t.shareFailed);
   };
 
   const onIcsOverview = () => {
@@ -106,12 +124,32 @@ export default function ShareBar({ doc, result, now = Date.now() }) {
           <Button size="small" variant="outlined" startIcon={<LinkIcon />} onClick={onCopyLink} data-testid="copy-link">
             {t.copyLink}
           </Button>
+          {shareSupported && (
+            <Tooltip title={t.shareLinkNative}>
+              <IconButton size="small" onClick={onShareLink} data-testid="share-link-native" aria-label={t.shareLinkNative}>
+                <ShareIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
           <Button size="small" variant="outlined" startIcon={<DownloadIcon />} disabled={!result} onClick={onCsv} data-testid="download-csv">
             {t.downloadCsv}
           </Button>
           <Button size="small" variant="outlined" startIcon={<ChatIcon />} disabled={!result} onClick={onWhatsapp} data-testid="copy-whatsapp">
             {t.copyWhatsapp}
           </Button>
+          {shareSupported && (
+            <Tooltip title={t.shareWhatsappNative}>
+              <IconButton
+                size="small"
+                disabled={!result}
+                onClick={onShareWhatsapp}
+                data-testid="share-whatsapp-native"
+                aria-label={t.shareWhatsappNative}
+              >
+                <ShareIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
         </Stack>
 
         <Divider sx={{ my: 1.25 }} />
