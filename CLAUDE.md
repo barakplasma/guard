@@ -235,6 +235,11 @@ validation error there takes down the whole document, which is the user's only c
   are real: four table columns on a 360px phone truncated the mission name to a single letter and
   spilled the times over it, while a card per slot cost a screenful per hour. Portrait density is
   the constraint to design against — a day is 24 of these rows.
+- A shift's assignee is **text plus an edit button** (`ShiftRow`), never an inline dropdown, and
+  the roster lives in a dialog (`AssignDialog`). An input is only as wide as its column, so a
+  Hebrew name of any length arrived on a phone as `ש...` and the agenda stopped saying who was on
+  duty; text wraps, an input does not. The dialog's search box is deliberately not auto-focused —
+  on a phone that raises the keyboard over the list the reader came to read.
 - `sx` maps palette tokens for `borderColor` only. `borderInlineStartColor: 'primary.main'` is
   emitted as an invalid colour and dropped — resolve it via a callback (`(theme) => …`).
 

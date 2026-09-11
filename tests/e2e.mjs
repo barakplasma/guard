@@ -27,6 +27,11 @@ const check = (name, cond, extra = '') => {
 };
 // MUI's Select injects zero-width and bidi marks into its rendered label.
 const norm = (x) => x.replace(/[​-‏‪-‮]/g, '').trim();
+// Who a shift-select control says is on duty. It is a button showing the name
+// as wrapping text, not an input - a dropdown truncated every Hebrew name
+// longer than four letters to "ש..." on a phone, so the name is plain text
+// now and the roster moved into a dialog behind it.
+const assignee = (locator) => locator.innerText().then(norm);
 
 const browser = await chromium.launch(
   process.env.CHROME ? { executablePath: process.env.CHROME } : {},
@@ -122,7 +127,7 @@ check('manual assignments show as pinned',
   (await page.locator('[data-testid^="pinned-"]').count()) >= 2);
 
 const remotePeople = await page.evaluate(() => [...document.querySelectorAll('[data-testid^="shift-select-m1-"]')]
-  .map((n) => n.value.trim()));
+  .map((n) => n.innerText.trim()));
 check('remote mission staffed by 4', remotePeople.length === 4, JSON.stringify(remotePeople));
 check('the hand-assigned people are the ones on it',
   remotePeople.some((p) => p.includes('אבי')) && remotePeople.some((p) => p.includes('דנה')),
@@ -160,16 +165,21 @@ await page.waitForTimeout(300);
 
 /* ---------- manual swap ---------- */
 const firstLocal = page.locator('[data-testid^="shift-select-m2-"]').first();
-const beforeSwap = norm(await firstLocal.inputValue());
+const beforeSwap = await assignee(firstLocal);
+check('a shift shows the full name, not a truncated one', !beforeSwap.includes('…'), beforeSwap);
 await firstLocal.click();
 await page.waitForTimeout(300);
+check('tapping a shift opens the roster dialog',
+  await page.getByTestId('assign-search').isVisible());
 
 const options = page.getByRole('option');
 let swappedTo = null;
 for (let i = 0, n = await options.count(); i < n; i++) {
   const o = options.nth(i);
-  const label = norm(await o.innerText());
-  if (label !== beforeSwap && (await o.getAttribute('aria-disabled')) !== 'true' && !label.includes('—')) {
+  // The name is the first line; an availability note, when there is one,
+  // follows it on a second.
+  const [label, note] = norm(await o.innerText()).split('\n').map((line) => line.trim());
+  if (label !== beforeSwap && (await o.getAttribute('aria-disabled')) !== 'true' && !note) {
     swappedTo = label;
     await o.click();
     break;
@@ -177,10 +187,13 @@ for (let i = 0, n = await options.count(); i < n; i++) {
 }
 await page.waitForTimeout(500);
 check('a swap target was available', swappedTo !== null);
+check('choosing someone closes the dialog',
+  await page.getByTestId('assign-search').isHidden());
 check('the swap took effect',
-  norm(await page.locator('[data-testid^="shift-select-m2-"]').first().inputValue()) === swappedTo);
+  (await assignee(page.locator('[data-testid^="shift-select-m2-"]').first())) === swappedTo);
 check('the displaced person is rescheduled, not dropped',
-  (await page.locator('[data-testid^="shift-select-"]').evaluateAll((nodes) => nodes.map((node) => node.value))).includes(beforeSwap));
+  (await page.locator('[data-testid^="shift-select-"]')
+    .evaluateAll((nodes) => nodes.map((node) => node.innerText.trim()))).includes(beforeSwap));
 await page.screenshot({ path: `${SHOT}/02-after-swap.png` });
 const urlWithSwap = page.url();
 
@@ -214,7 +227,7 @@ await page2.goto(urlWithSwap, { waitUntil: 'networkidle' });
 await page2.waitForTimeout(700);
 
 const dump = (p) => p.evaluate(() => [...document.querySelectorAll('[data-testid^="shift-select-"]')]
-  .map((n) => `${n.dataset.testid}=${n.value.trim()}`).join('|'));
+  .map((n) => `${n.dataset.testid}=${n.innerText.trim()}`).join('|'));
 const [a, b] = [await dump(page), await dump(page2)];
 check('a shared URL reproduces the identical schedule, manual swap included',
   a === b && a.length > 0);
@@ -275,7 +288,7 @@ await page3.waitForTimeout(500);
 const firstShift = page3.locator('[data-testid^="shift-select-m1-"]').first();
 const firstShiftTestId = await firstShift.getAttribute('data-testid');
 const [, , missionId, shiftStart] = firstShiftTestId.split('-');
-const beforeAssignee = norm(await firstShift.inputValue());
+const beforeAssignee = await assignee(firstShift);
 const pinnedBefore = await page3.locator('[data-testid^="pinned-m1-"]').count();
 check('the elapsed shift is not yet pinned before any further edit', pinnedBefore === 0, String(pinnedBefore));
 
@@ -288,7 +301,7 @@ await page3.waitForTimeout(300);
 
 await page3.getByTestId('tab-schedule').click();
 await page3.waitForTimeout(500);
-const afterAssignee = norm(await page3.locator(`[data-testid="${firstShiftTestId}"]`).inputValue());
+const afterAssignee = await assignee(page3.locator(`[data-testid="${firstShiftTestId}"]`));
 check('an edit made on the Employees page did not reshuffle an elapsed shift',
   afterAssignee === beforeAssignee, `${beforeAssignee} -> ${afterAssignee}`);
 const pinnedAfter = await page3.locator('[data-testid^="pinned-m1-"]').count();
