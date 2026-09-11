@@ -13,6 +13,7 @@
  * binary when the sandbox already ships one.
  */
 import { chromium } from 'playwright';
+import { decodePlan } from '../src/lib/urlState.js';
 import { readFileSync, mkdirSync } from 'node:fs';
 
 const BASE = process.env.BASE || 'http://localhost:4173';
@@ -96,9 +97,9 @@ check('two missions defined', (await page.locator('[data-testid^="mission-name-"
 /* ---------- "returned now" rounds a remote mission's end up to the hour ---------- */
 await page.getByTestId('mission-returned-now-m1').click();
 await page.waitForTimeout(200);
-const returnedEnd = await page.getByTestId('mission-end-m1').inputValue();
-check('returned-now sets an end time', returnedEnd !== '', returnedEnd);
-check('returned-now rounds to the top of the hour', /T\d{2}:00$/.test(returnedEnd), returnedEnd);
+const returnedEnd = decodePlan(new URLSearchParams(page.url().split('?')[1]).get('p')).plan.missions.find((m) => m.id === 'm1').end;
+check('returned-now sets an end time', Number.isFinite(returnedEnd), returnedEnd);
+check('returned-now rounds to the top of the hour', new Date(returnedEnd).getMinutes() === 0, returnedEnd);
 check('local mission has no returned-now button',
   (await page.locator('[data-testid="mission-returned-now-m2"]').count()) === 0);
 
@@ -121,7 +122,7 @@ check('manual assignments show as pinned',
   (await page.locator('[data-testid^="pinned-"]').count()) >= 2);
 
 const remotePeople = await page.evaluate(() => [...document.querySelectorAll('[data-testid^="shift-select-m1-"]')]
-  .map((n) => n.textContent.trim()));
+  .map((n) => n.value.trim()));
 check('remote mission staffed by 4', remotePeople.length === 4, JSON.stringify(remotePeople));
 check('the hand-assigned people are the ones on it',
   remotePeople.some((p) => p.includes('אבי')) && remotePeople.some((p) => p.includes('דנה')),
@@ -159,7 +160,7 @@ await page.waitForTimeout(300);
 
 /* ---------- manual swap ---------- */
 const firstLocal = page.locator('[data-testid^="shift-select-m2-"]').first();
-const beforeSwap = norm(await firstLocal.innerText());
+const beforeSwap = norm(await firstLocal.inputValue());
 await firstLocal.click();
 await page.waitForTimeout(300);
 
@@ -177,9 +178,9 @@ for (let i = 0, n = await options.count(); i < n; i++) {
 await page.waitForTimeout(500);
 check('a swap target was available', swappedTo !== null);
 check('the swap took effect',
-  norm(await page.locator('[data-testid^="shift-select-m2-"]').first().innerText()) === swappedTo);
+  norm(await page.locator('[data-testid^="shift-select-m2-"]').first().inputValue()) === swappedTo);
 check('the displaced person is rescheduled, not dropped',
-  (await page.locator('body').innerText()).includes(beforeSwap));
+  (await page.locator('[data-testid^="shift-select-"]').evaluateAll((nodes) => nodes.map((node) => node.value))).includes(beforeSwap));
 await page.screenshot({ path: `${SHOT}/02-after-swap.png` });
 const urlWithSwap = page.url();
 
@@ -213,7 +214,7 @@ await page2.goto(urlWithSwap, { waitUntil: 'networkidle' });
 await page2.waitForTimeout(700);
 
 const dump = (p) => p.evaluate(() => [...document.querySelectorAll('[data-testid^="shift-select-"]')]
-  .map((n) => `${n.dataset.testid}=${n.textContent.trim()}`).join('|'));
+  .map((n) => `${n.dataset.testid}=${n.value.trim()}`).join('|'));
 const [a, b] = [await dump(page), await dump(page2)];
 check('a shared URL reproduces the identical schedule, manual swap included',
   a === b && a.length > 0);
@@ -250,12 +251,6 @@ const ctx3 = await browser.newContext({ permissions: ['clipboard-read', 'clipboa
 const page3 = await ctx3.newPage();
 page3.on('pageerror', (e) => { console.log('PAGEERROR(freeze)', e.message); failures++; });
 
-const pad2 = (n) => String(n).padStart(2, '0');
-const localInput = (ms) => {
-  const d = new Date(ms);
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
-};
-
 await page3.goto(`${BASE}/`, { waitUntil: 'networkidle' });
 await page3.getByTestId('bulk-names').fill(['רותם', 'עדי'].join('\n'));
 await page3.getByTestId('add-bulk').click();
@@ -263,7 +258,8 @@ await page3.waitForTimeout(300);
 
 // Push the window's start three hours into the past, so the first few hourly
 // shifts are already-elapsed history by the time the mission below exists.
-await page3.getByTestId('plan-start').fill(localInput(Date.now() - 3 * 3600 * 1000));
+const startHours = page3.getByTestId('plan-start').getByRole('spinbutton', { name: 'שעות', exact: true });
+for (let i = 0; i < 3; i++) await startHours.press('ArrowDown');
 await page3.waitForTimeout(200);
 
 await page3.getByTestId('tab-missions').click();
@@ -279,7 +275,7 @@ await page3.waitForTimeout(500);
 const firstShift = page3.locator('[data-testid^="shift-select-m1-"]').first();
 const firstShiftTestId = await firstShift.getAttribute('data-testid');
 const [, , missionId, shiftStart] = firstShiftTestId.split('-');
-const beforeAssignee = norm(await firstShift.innerText());
+const beforeAssignee = norm(await firstShift.inputValue());
 const pinnedBefore = await page3.locator('[data-testid^="pinned-m1-"]').count();
 check('the elapsed shift is not yet pinned before any further edit', pinnedBefore === 0, String(pinnedBefore));
 
@@ -292,7 +288,7 @@ await page3.waitForTimeout(300);
 
 await page3.getByTestId('tab-schedule').click();
 await page3.waitForTimeout(500);
-const afterAssignee = norm(await page3.locator(`[data-testid="${firstShiftTestId}"]`).innerText());
+const afterAssignee = norm(await page3.locator(`[data-testid="${firstShiftTestId}"]`).inputValue());
 check('an edit made on the Employees page did not reshuffle an elapsed shift',
   afterAssignee === beforeAssignee, `${beforeAssignee} -> ${afterAssignee}`);
 const pinnedAfter = await page3.locator('[data-testid^="pinned-m1-"]').count();
@@ -375,7 +371,7 @@ await page5.screenshot({ path: `${SHOT}/06-open-ended.png` });
 await page4.getByTestId('mission-open-ended-m1').click();
 await page4.waitForTimeout(400);
 check('unticking restores an explicit, editable end',
-  (await page4.getByTestId('mission-end-m1').inputValue()) !== '');
+  (await page4.getByTestId('mission-end-m1').locator('input').inputValue()) !== '');
 
 await ctx5.close();
 await ctx4.close();

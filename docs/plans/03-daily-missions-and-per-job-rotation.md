@@ -15,7 +15,7 @@ full calendar day.
 ### Daily occurrence semantics
 
 A `daily` mission has `dayStart` and `dayEnd` in minutes past midnight and a
-headcount per occurrence. Native time pickers use the device locale; stored values remain minutes past midnight. Equal times, such as
+headcount per occurrence. MUI time pickers use the device locale; stored values remain minutes past midnight. Equal times, such as
 08:00–08:00, mean duty until the following morning. An earlier end crosses
 midnight. Missing either bound yields no occurrence and a visible editing hint.
 

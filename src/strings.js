@@ -1,5 +1,7 @@
 /** All user-facing copy. Hebrew only - the app is RTL throughout. */
 export const t = {
+  noMatchingEmployees: 'לא נמצאו עובדים',
+  replaceEmployee: 'חיפוש עובד להחלפה',
   decreaseNumber: (label) => `הקטנת ${label}`,
   increaseNumber: (label) => `הגדלת ${label}`,
   missingQualification: (mission, tag, n) => `${mission}: נדרשים ${n} בעלי הסמכת ${tag}; הכיסוי אינו מלא.`,

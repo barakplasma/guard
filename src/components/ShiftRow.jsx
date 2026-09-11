@@ -1,4 +1,4 @@
-import { Box, Chip, IconButton, MenuItem, Select, Tooltip } from '@mui/material';
+import { Autocomplete, Box, Chip, IconButton, TextField, Tooltip } from '@mui/material';
 import PushPinIcon from '@mui/icons-material/PushPin';
 import LockIcon from '@mui/icons-material/Lock';
 import CloseIcon from '@mui/icons-material/Close';
@@ -41,30 +41,27 @@ export default function ShiftRow({ shift, employees, busyElsewhere, onSwap, onCl
         }),
       }}
     >
-      <Select
-        value={shift.employeeId}
-        onChange={(e) => onSwap(e.target.value)}
+      <Autocomplete
+        disableClearable
+        value={employees.find((e) => e.id === shift.employeeId) ?? null}
+        options={employees}
+        getOptionLabel={(e) => e.name}
+          getOptionKey={(e) => e.id}
+        isOptionEqualToValue={(a, b) => a.id === b.id}
+        getOptionDisabled={(e) => (e.start ?? -Infinity) > shift.start || (e.end ?? Infinity) < shift.end}
+        noOptionsText={t.noMatchingEmployees}
+        onChange={(_, employee) => employee && onSwap(employee.id)}
         size="small"
-        sx={{
-          flex: '1 1 auto',
-          minWidth: { xs: 0, sm: 150 },
-          maxWidth: '100%',
-          // A denser control on phones: 24 of these stacked is most of the page.
-          '& .MuiSelect-select': { py: { xs: 0.75, sm: 1 } },
+        sx={{ flex: '1 1 auto', minWidth: { xs: 0, sm: 180 }, maxWidth: '100%' }}
+        renderOption={({ key, ...props }, employee) => {
+          const unavailable = (employee.start ?? -Infinity) > shift.start || (employee.end ?? Infinity) < shift.end;
+          const taken = busyElsewhere.has(employee.id) && employee.id !== shift.employeeId;
+          return <li key={key} {...props}>{employee.name}{unavailable ? ` — ${t.unavailable}` : taken ? ` — ${t.onDuty}` : ''}</li>;
         }}
-        data-testid={`shift-select-${shift.missionId}-${shift.start}-${shift.employeeId}`}
-      >
-        {employees.map((e) => {
-          const unavailable = (e.start ?? -Infinity) > shift.start || (e.end ?? Infinity) < shift.end;
-          const taken = busyElsewhere.has(e.id) && e.id !== shift.employeeId;
-          return (
-            <MenuItem key={e.id} value={e.id} disabled={unavailable}>
-              {e.name}
-              {unavailable ? ` — ${t.unavailable}` : taken ? ` — ${t.onDuty}` : ''}
-            </MenuItem>
-          );
-        })}
-      </Select>
+        renderInput={(params) => <TextField {...params}
+          slotProps={{ ...params.slotProps, htmlInput: { ...params.slotProps.htmlInput,
+            'aria-label': t.replaceEmployee,
+            'data-testid': `shift-select-${shift.missionId}-${shift.start}-${shift.employeeId}` } }} />} />
 
       {shift.pinned && (
         // Badge and its clear button stay one unit so they never wrap apart.

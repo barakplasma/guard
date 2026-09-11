@@ -5,7 +5,7 @@ import {
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import DateTimeField from './DateTimeField.jsx';
 import NumberField from './NumberField.jsx';
-import { toTimeInput, fromTimeInput } from './DailyClockField.jsx';
+import DailyClockField from './DailyClockField.jsx';
 import { usePlan } from '../state/PlanContext.jsx';
 import { topOfHour, nextTopOfHour } from '../lib/planSchema.js';
 import { STRATEGY } from '../lib/strategies.js';
@@ -18,14 +18,6 @@ import { t } from '../strings.js';
 export default function SettingsBar() {
   const { doc, setField, update } = usePlan();
   const [anchorEl, setAnchorEl] = useState(null);
-
-  // An unparseable value is dropped rather than written: a time input emits on
-  // every keystroke, and half of "22:00" is a real number that would move the
-  // night boundary - and with it the schedule - while it was being typed.
-  const setMinuteOfDay = (field, value) => {
-    const minutes = fromTimeInput(value);
-    if (minutes != null) setField(field, minutes);
-  };
 
   // Moving the start keeps the plan's duration, so `end` doesn't detach from it.
   const jumpStart = (newStart) => {
@@ -49,7 +41,7 @@ export default function SettingsBar() {
           label={t.planStart}
           value={doc.start}
           onChange={(v) => v != null && setField('start', v)}
-          testId="plan-start"
+          testId="plan-start" nullable={false}
         />
         <Button
           startIcon={<ScheduleIcon />}
@@ -71,7 +63,7 @@ export default function SettingsBar() {
           label={t.planEnd}
           value={doc.end}
           onChange={(v) => v != null && setField('end', v)}
-          testId="plan-end"
+          testId="plan-end" nullable={false}
         />
         <NumberField
           label={t.shiftLength}
@@ -79,35 +71,12 @@ export default function SettingsBar() {
           onChange={(n) => setField('shiftMinutes', n)}
           min={5} max={1440} step={5} testId="shift-minutes"
         />
-        {/*
-          Night is a wall clock range, not a pair of instants: it repeats every
-          day of the period. `<input type="time">` speaks exactly that, and the
-          value stored is minutes past midnight.
-        */}
         <Tooltip title={t.nightWindowHelp}>
-          <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: 'center' }}>
-            <TextField
-              label={t.nightStart}
-              type="time"
-              value={toTimeInput(doc.nightStart)}
-              onChange={(e) => setMinuteOfDay('nightStart', e.target.value)}
-              slotProps={{
-                inputLabel: { shrink: true },
-                htmlInput: { step: 300, 'data-testid': 'night-start' },
-              }}
-              sx={{ width: 130 }}
-            />
-            <TextField
-              label={t.nightEnd}
-              type="time"
-              value={toTimeInput(doc.nightEnd)}
-              onChange={(e) => setMinuteOfDay('nightEnd', e.target.value)}
-              slotProps={{
-                inputLabel: { shrink: true },
-                htmlInput: { step: 300, 'data-testid': 'night-end' },
-              }}
-              sx={{ width: 130 }}
-            />
+          <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
+            <DailyClockField label={t.nightStart} value={doc.nightStart} nullable={false}
+              onChange={(minutes) => setField('nightStart', minutes)} testId="night-start" />
+            <DailyClockField label={t.nightEnd} value={doc.nightEnd} nullable={false}
+              onChange={(minutes) => setField('nightEnd', minutes)} testId="night-end" />
           </Stack>
         </Tooltip>
         <Tooltip
