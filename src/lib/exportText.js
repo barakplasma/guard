@@ -129,3 +129,29 @@ export async function copyText(text) {
 export function whatsappShareLink(text) {
   return `https://wa.me/?text=${encodeURIComponent(text)}`;
 }
+
+/** True when the device offers a native OS share sheet. */
+export function canShareNatively() {
+  return typeof navigator !== 'undefined' && typeof navigator.share === 'function';
+}
+
+/**
+ * Hand data ({ title?, text?, url? }) to the native OS share sheet, when there
+ * is one - a phone's share sheet reaches WhatsApp, Telegram, mail, anything
+ * installed, not just the clipboard the copy buttons fall back to.
+ *
+ * Returns 'shared', 'cancelled' (the person closed the sheet without picking
+ * anything - `AbortError`, not a failure worth a toast), 'error' (a real
+ * failure the caller should report), or 'unsupported' when there is no share
+ * sheet to call, so the caller only needs to render the button when this
+ * would resolve to 'shared' or 'cancelled'.
+ */
+export async function shareNative(data) {
+  if (!canShareNatively()) return 'unsupported';
+  try {
+    await navigator.share(data);
+    return 'shared';
+  } catch (err) {
+    return err?.name === 'AbortError' ? 'cancelled' : 'error';
+  }
+}
