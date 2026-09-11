@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
-  Box, Button, Checkbox, Chip, FormControl, FormControlLabel, IconButton, InputLabel, MenuItem,
-  OutlinedInput, Paper, Select, Stack, Switch, TextField, ToggleButton,
+  Autocomplete, Box, Button, Checkbox, Chip, FormControlLabel, IconButton,
+  Paper, Stack, Switch, TextField, ToggleButton,
   ToggleButtonGroup, Tooltip, Typography,
 } from '@mui/material';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
@@ -218,47 +218,34 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
           </Typography>
         )}
 
-        <FormControl fullWidth>
-          <InputLabel id={`assign-${mission.id}`}>
-            {`${t.assignedPeople} (${assigned.length}/${mission.count})`}
-          </InputLabel>
-          <Select
-            labelId={`assign-${mission.id}`}
-            multiple
-            value={assigned}
-            onChange={(e) => onAssign(
-              typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value,
-            )}
-            input={<OutlinedInput label={`${t.assignedPeople} (${assigned.length}/${mission.count})`} />}
-            renderValue={(ids) => (
-              <Stack direction="row" spacing={0.5} useFlexGap sx={{ flexWrap: 'wrap' }}>
-                {ids.map((id) => {
-                  const name = doc.employees.find((e) => e.id === id)?.name ?? id;
-                  return (
-                    <Chip
-                      key={id}
-                      size="small"
-                      color={unavailableFor(id) ? 'warning' : 'default'}
-                      label={partiallyAssigned(id) ? `${name} · ${t.assignedPartially}` : name}
-                    />
-                  );
-                })}
-              </Stack>
-            )}
-            data-testid={`assign-${mission.id}`}
-          >
-            {sortByHebrewName(doc.employees).map((e) => (
-              <MenuItem key={e.id} value={e.id} sx={unavailableFor(e.id) ? { color: 'warning.main' } : undefined}>
-                {e.name}
-                {unavailableFor(e.id) ? ` — ${t.unavailable}` : ''}
-                {partiallyAssigned(e.id) && assigned.includes(e.id) ? ` — ${t.assignedPartially}` : ''}
-              </MenuItem>
-            ))}
-          </Select>
-          <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
-            {t.assignedHelp}
-          </Typography>
-        </FormControl>
+        <Autocomplete
+          multiple disableCloseOnSelect
+          options={sortByHebrewName(doc.employees)}
+          value={doc.employees.filter((e) => assigned.includes(e.id))}
+          getOptionLabel={(e) => e.name}
+          getOptionKey={(e) => e.id}
+          isOptionEqualToValue={(a, b) => a.id === b.id}
+          noOptionsText={t.noMatchingEmployees}
+          onChange={(_, selected) => onAssign(selected.map((e) => e.id))}
+          renderOption={({ key, ...props }, employee, { selected }) => (
+            <li key={key} {...props}>
+              <Checkbox checked={selected} tabIndex={-1} disableRipple sx={{ mr: 1 }} />
+              {employee.name}
+              {unavailableFor(employee.id) ? ` — ${t.unavailable}` : ''}
+              {partiallyAssigned(employee.id) && assigned.includes(employee.id) ? ` — ${t.assignedPartially}` : ''}
+            </li>
+          )}
+          renderValue={(selected, getItemProps) => selected.map((employee, index) => {
+            const { key, ...itemProps } = getItemProps({ index });
+            return <Chip key={key} {...itemProps} size="small"
+              color={unavailableFor(employee.id) ? 'warning' : 'default'}
+              label={partiallyAssigned(employee.id) ? `${employee.name} · ${t.assignedPartially}` : employee.name} />;
+          })}
+          sx={{ minWidth: 0, '& .MuiChip-root': { maxWidth: '100%' } }}
+          renderInput={(params) => <TextField {...params}
+            label={`${t.assignedPeople} (${assigned.length}/${mission.count})`}
+            helperText={t.assignedHelp}
+            slotProps={{ ...params.slotProps, htmlInput: { ...params.slotProps.htmlInput, 'data-testid': `assign-${mission.id}` } }} />} />
       </Stack>
     </Paper>
   );
