@@ -20,7 +20,7 @@ pending implementation plans.
 | [011](11-solver-selection.md) | MiniZinc with Chuffed as the one engine. *(Accepted, provisionally)* |
 | [012](12-planning-horizon.md) | Plan 72 hours at a time, rolled forward. *(Proposed)* |
 | [013](13-replanning-under-churn.md) | Continuous re-planning is the operating model. *(Proposed)* |
-| [014](14-exclusions-and-flexibility.md) | Exclude individuals; keep scarce people free. *(Proposed)* |
+| [014](14-exclusions-and-flexibility.md) | Exclude individuals; keep scarce people free. *(First half implemented)* |
 
 Each record states the context, decision, consequences, rejected alternatives,
 and implementation or test evidence. Acceptance dates record this design, not a
@@ -57,10 +57,11 @@ be taken or left on its own:
 - **013** records that the rota is re-solved continuously against a moving
   present, not planned once. That re-rated 008's third defect from rare to the
   main path, which #40 then addressed for the reported shape.
-- **014** adds per-person exclusions, which the document cannot express at all
-  today, and the softer rule that scarce qualifications should be kept
-  uncommitted so they can answer a callout. The first half needs no solver; the
-  second is an objective term and waits for 011.
+- **014** adds per-person exclusions - **implemented**, at wire position 14,
+  with one shared `isExcluded` predicate replacing five copies of the tag check
+  - and the softer rule that scarce qualifications should be kept uncommitted so
+  they can answer a callout. That second half is an objective term and waits for
+  011.
 
 Suggested order, updated now that 009's core rule has landed:
 
@@ -68,9 +69,8 @@ Suggested order, updated now that 009's core rule has landed:
    removes recorded duty automatically, and the out-of-period button exports
    before it clears. What remains is showing elapsed assignments outside the
    period read-only, which is no longer urgent.
-2. ~~010's fragment move~~ - **not needed**, the plan is already in the
-   fragment. Next is the **first half of 014** (per-person exclusions), which is
-   small, independent, and needs no solver.
+2. ~~010's fragment move~~ (not needed - already in the fragment) and
+   ~~014's first half~~ (**done** - per-person exclusions).
 3. **011** - the MiniZinc model, which closes the shortage class #40 narrowed
    but did not eliminate, and which carries the `invariants.js` gap with it.
 

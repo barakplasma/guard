@@ -76,6 +76,10 @@ export function encodePlan(doc) {
       // Position 13: on-call. Written only when true, so plans that never
       // heard of the flag encode to the exact bytes they always did.
       x.onCall ? 1 : null,
+      // Position 14: excluded employee ids. Empty arrays are trimmed by
+      // `trimTail`, so the same holds - a mission excluding nobody encodes
+      // exactly as it did before this field existed (ADR 006, ADR 014).
+      x.excludeEmployees ?? [],
     ], MISSION_TUPLE_WAS)),
     pin: doc.pins.map((x) => [x.missionId, x.employeeId, outTs(x.start), outTs(x.end), x.frozen ? 1 : 0]),
     ...(doc.tags?.length ? { tg: doc.tags.map((t) => [t.id, t.name, t.minNightRestMinutes]) } : {}),
@@ -120,7 +124,7 @@ export function decodePlan(blob) {
         id, name, start: inTs(s), end: inTs(e), tags,
       })),
       missions: (raw.mis ?? []).map((
-        [id, name, type, s, e, count, nightCount, shiftMinutes, nightShiftMinutes, dayStart, dayEnd, requires, excludes, onCall],
+        [id, name, type, s, e, count, nightCount, shiftMinutes, nightShiftMinutes, dayStart, dayEnd, requires, excludes, onCall, excludeEmployees],
       ) => ({
         id,
         name,
@@ -140,6 +144,7 @@ export function decodePlan(blob) {
         requires: requires == null ? [] : Array.from({ length: Math.ceil(requires.length / 2) }, (_, i) => ({ tag: requires[i * 2], count: requires[i * 2 + 1] })),
         excludes: excludes ?? [],
         onCall: onCall === 1,
+        excludeEmployees: excludeEmployees ?? [],
       })),
       pins: (raw.pin ?? []).map(([missionId, employeeId, s, e, f]) => ({
         missionId, employeeId, start: inTs(s), end: inTs(e), frozen: Boolean(f),

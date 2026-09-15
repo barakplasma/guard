@@ -58,6 +58,25 @@ function overlaps(aStart, aEnd, bStart, bEnd) {
 }
 
 /**
+ * Is `person` kept off `mission` by an exclusion?
+ *
+ * Two kinds, deliberately one predicate (ADR 014). A qualification exclusion
+ * says "no commander in the kitchen"; a per-person one says "not him, here",
+ * which no statement about a qualification can express. Both are hard filters
+ * on *automatic* assignment only - a pin still overrides either, visibly,
+ * because a manual assignment is an input fact and not a suggestion.
+ *
+ * One predicate rather than a check at each of the five candidate filters:
+ * remote eligibility, the scarcity pool, the local candidate list, repair
+ * hints and correction substitutes. A guard that has to be repeated is a guard
+ * that will eventually be repeated wrongly.
+ */
+export function isExcluded(mission, person) {
+  return (mission.excludes ?? []).some((tag) => (person.tags ?? []).includes(tag))
+    || (mission.excludeEmployees ?? []).includes(person.id);
+}
+
+/**
  * Resolve a pin to the window it actually refers to, following the
  * null-inheritance chain: a pin's missing bound comes from its mission, and a
  * mission's missing bound from the plan period.
@@ -243,6 +262,7 @@ function normalizeMissions(missions, planStart, planEnd, warnings) {
       id: m.id,
       name: m.name,
       requires: requirementsOf(m.requires), excludes: m.excludes ?? [],
+      excludeEmployees: m.excludeEmployees ?? [],
       type: ['remote', 'daily'].includes(m.type) ? m.type : 'local',
       ...(m.type === 'daily' ? { occurrences: normalizeOccurrences(m.occurrences ?? [], start, end) } : {}),
       start,
@@ -564,6 +584,7 @@ function planOnce({
   for (const p of goodPins) {
     const m = missionById.get(p.missionId), e = employeeById.get(p.employeeId);
     if (m.excludes.some((t) => e.tags.includes(t))) warnings.push({ code: 'pin-excluded-tag', missionId: m.id, employeeId: e.id, start: p.start, end: p.end });
+    if (m.excludeEmployees.includes(e.id)) warnings.push({ code: 'pin-excluded-employee', missionId: m.id, employeeId: e.id, start: p.start, end: p.end });
   }
 
   // Assignments left behind by a period that has since moved on. Counted once
@@ -810,7 +831,7 @@ function planOnce({
   /* --- 2. remote missions: hard constraints, so they claim people first --- */
   const eligibleForRemote = (m) => [...state.values()].filter(
     (st) => isAvailable(st, m.start, m.end) && isFree(st, m.start, m.end)
-      && !m.excludes.some((tag) => st.tags.includes(tag)),
+      && !isExcluded(m, st),
   );
 
   const remotes = miss.flatMap((m) => m.type === 'remote' ? [m]
@@ -900,7 +921,7 @@ function planOnce({
   // the demand rather than something that shifts as assignments are made.
   for (const d of demands) {
     const eligible = [...state.values()].filter((st) => isAvailable(st, d.start, d.end)
-      && !d.mission.excludes.some((tag) => st.tags.includes(tag)));
+      && !isExcluded(d.mission, st));
     d.pool = scarcity(d.mission, eligible, d.start, d.end);
   }
   for (const d of demands) {
@@ -918,7 +939,7 @@ function planOnce({
   for (const d of demands) {
     const candidates = [...state.values()].filter(
       (st) => isAvailable(st, d.start, d.end) && isFree(st, d.start, d.end)
-        && !d.mission.excludes.some((tag) => st.tags.includes(tag)),
+        && !isExcluded(d.mission, st),
     );
     // Who among them actually gets it is the strategy's call - see
     // `strategies.js` for what each one optimizes for.
@@ -1061,7 +1082,7 @@ function repairCandidates(input, base, warning, win) {
   const mission = input.missions.find((m) => m.id === warning.missionId);
   if (!mission) return [];
   return input.employees.filter((e) => (e.tags ?? []).includes(warning.tag)
-    && !(mission.excludes ?? []).some((t) => (e.tags ?? []).includes(t))
+    && !isExcluded(mission, e)
     && (e.start ?? input.start) <= win.start && (e.end ?? input.end) >= win.end
     && !base.shifts.some((s) => s.employeeId === e.id && s.missionId === mission.id
       && s.start <= win.start && s.end >= win.end)

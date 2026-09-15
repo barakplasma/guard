@@ -25,6 +25,7 @@ without the extensions retain their previous encoding.
 | mission | 11 | flat qualification requirement pairs | [] |
 | mission | 12 | excluded tag ids | [] |
 | mission | 13 | on-call flag | absent; `1` when on-call |
+| mission | 14 | excluded employee ids | [] |
 | employee | 4 | qualification ids | [] |
 | plan | key `tg` | qualification definitions | omitted |
 

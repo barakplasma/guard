@@ -242,6 +242,7 @@ export const t = {
     ? 'שיבוץ ידני אחד נמצא מחוץ לתקופת הסידור ולכן לא נלקח בחשבון.'
     : `${count} שיבוצים ידניים נמצאים מחוץ לתקופת הסידור ולכן לא נלקחו בחשבון.`),
   removeStalePins: 'ייצא ונקה שיבוצים ישנים',
+  excludedEmployees: 'לא לשבץ את',
 
   // assignment badges: a manual assignment is a locked decision, an
   // automatically preserved elapsed one is history - the two must never read

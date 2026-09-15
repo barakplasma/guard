@@ -50,6 +50,7 @@ export function checkSchedule(result, input) {
     if (!s.pinned && (s.start < (e.start ?? input.start) || s.end > (e.end ?? input.end))) report('OUTSIDE_AVAILABILITY', details);
     if ((s.qualifications ?? []).some((tag) => !(e.tags ?? []).includes(tag))) report('FALSE_QUALIFICATION', details);
     if (!s.pinned && (m.excludes ?? []).some((tag) => (e.tags ?? []).includes(tag))) report('EXCLUDED_QUALIFICATION', details);
+    if (!s.pinned && (m.excludeEmployees ?? []).includes(e.id)) report('EXCLUDED_EMPLOYEE', details);
     if (m.type === 'remote' && (s.start !== lo || s.end !== hi)) report('REMOTE_NOT_WHOLE', details);
     if (m.type === 'daily' && !(m.occurrences ?? []).some((w) => s.start === Math.max(lo, w.start) && s.end === Math.min(hi, w.end))) report('DAILY_NOT_WHOLE', details);
     if (m.type === 'local') {

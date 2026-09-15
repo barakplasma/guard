@@ -1,6 +1,8 @@
 # ADR 014: Exclude individuals, not just qualifications - and keep scarce people free
 
-- Status: Proposed. Depends on ADR 011 for the second half.
+- Status: **First half implemented.** Per-person exclusions exist. The second
+  half - preferring to keep scarce qualifications uncommitted - is an objective
+  term and still depends on ADR 011.
 - Date: 2026-09-15
 
 ## Context
@@ -40,8 +42,32 @@ discipline: a new position on the mission tuple, written only when non-empty, so
 every link already shared encodes to the bytes it always did.
 
 It needs no solver. It is a filter on the candidate list, which is exactly where
-the existing tag exclusion already lives, and it can land independently of
+the existing tag exclusion already lives, and it landed independently of
 everything else here.
+
+**As built.** `excludeEmployees` on the mission, at wire position 14 under
+ADR 006's reservations, written only when non-empty - a mission excluding
+nobody encodes to the bytes it always did, asserted in
+`tests/planner.excludeEmployees.test.js`.
+
+The five candidate filters that used to each carry their own copy of the tag
+check - remote eligibility, the scarcity pool, the local candidate list, repair
+hints and correction substitutes - now share one exported predicate,
+`isExcluded(mission, person)`. A guard that has to be repeated is a guard that
+will eventually be repeated wrongly, and this one had already been repeated five
+times before a second kind of exclusion existed.
+
+A pin still overrides, visibly: the assignment stands and a
+`pin-excluded-employee` warning says so, mirroring `pin-excluded-tag`.
+`invariants.js` gains `EXCLUDED_EMPLOYEE` alongside `EXCLUDED_QUALIFICATION`,
+exempting pinned rows for the same reason.
+
+The control is its own component rather than part of `MissionQualifications`,
+which returns null when the plan defines no qualifications - excluding a person
+has nothing to do with qualifications existing, which is the whole reason this
+is a separate field. Anyone already pinned to the mission is shown disabled
+rather than hidden, since offering to exclude somebody whose assignment would
+survive anyway reads as a control that did nothing.
 
 ### 2. Preferring to keep scarce qualifications uncommitted
 

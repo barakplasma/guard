@@ -34,6 +34,11 @@ export const missionSchema = z.object({
   id,
   requires: z.array(z.object({ tag: id, count: z.number().int().min(1).max(999) })).default([]),
   excludes: z.array(id).default([]).transform((tags) => [...new Set(tags)]),
+  // Excluded *people*, by id, alongside excluded qualifications above.
+  // A qualification cannot say "not this particular person", and minting a tag
+  // to name one individual pollutes the same list that drives required coverage
+  // and night rest - so this is its own field (ADR 014).
+  excludeEmployees: z.array(id).default([]).transform((ids) => [...new Set(ids)]),
   name: z.string().max(80),
   type: z.enum(['remote', 'local', 'daily']),
   dayStart: minuteOfDay.nullable().default(null),
@@ -255,6 +260,7 @@ export function toPlannerInput(doc, now) {
       name: m.name,
       requires: m.requires ?? [],
       excludes: m.excludes ?? [],
+      excludeEmployees: m.excludeEmployees ?? [],
       type: m.type,
       start: m.start ?? undefined,
       end: m.end ?? undefined,
