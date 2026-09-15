@@ -1,27 +1,50 @@
-import { useLayoutEffect, useState } from 'react';
-import dayjs from 'dayjs';
-import { uses12HourClock } from '../lib/pickerLocale.js';
-import { MobileTimePicker } from '@mui/x-date-pickers/MobileTimePicker';
+import { IconButton, InputAdornment, TextField } from '@mui/material';
+import CloseIcon from '@mui/icons-material/Close';
+import { fromClockInput, toClockInput } from '../lib/localInput.js';
+import { t } from '../strings.js';
 
-/** Wall-clock minutes are independent of the arbitrary calendar date used by the picker. */
-export default function DailyClockField({ value, onChange, label, testId, nullable = true, sx }) {
-  const time = value == null ? null : dayjs('2000-01-01').hour(Math.floor(value / 60)).minute(value % 60);
-  const [draft, setDraft] = useState(time);
-  useLayoutEffect(() => setDraft(value == null ? null : dayjs('2000-01-01').hour(Math.floor(value / 60)).minute(value % 60)), [value]);
-  const save = (next, context) => {
-    if (context.validationError == null && (next?.isValid() || (nullable && next == null))) {
-      onChange(next == null ? null : next.hour() * 60 + next.minute());
-    }
-  };
-  return <MobileTimePicker label={label} value={draft} ampm={uses12HourClock} format={uses12HourClock ? 'hh:mm A' : 'HH:mm'} minutesStep={1}
-    closeOnSelect={false}
-    onChange={(next, context) => { setDraft(next); if (context.source === 'field') save(next, context); }}
-    onAccept={save}
-    onClose={() => setDraft(time)}
-    slotProps={{
-      textField: { 'data-testid': testId },
-      openPickerButton: { 'data-testid': `${testId}-open` },
-      actionBar: { actions: nullable ? ['clear', 'cancel', 'accept'] : ['cancel', 'accept'] },
-    }}
-    sx={{ width: 180, maxWidth: '100%', ...sx }} />;
+/**
+ * A bare wall-clock time, as the platform's own field.
+ *
+ * Wall-clock minutes are independent of the arbitrary calendar date a picker
+ * would need, and a native `time` input's value is always 24-hour `HH:mm` -
+ * see `DateTimeField` for why that matters more than it sounds.
+ */
+export default function DailyClockField({
+  value, onChange, label, testId, nullable = true, sx,
+}) {
+  const clearable = nullable && value != null;
+  return (
+    <TextField
+      type="time"
+      size="small"
+      label={label}
+      value={toClockInput(value)}
+      onChange={(event) => {
+        const next = fromClockInput(event.target.value);
+        if (next != null) onChange(next);
+        else if (nullable && event.target.value === '') onChange(null);
+      }}
+      slotProps={{
+        inputLabel: { shrink: true },
+        htmlInput: { 'data-testid': testId, step: 60, dir: 'ltr' },
+        input: clearable ? {
+          endAdornment: (
+            <InputAdornment position="end">
+              <IconButton
+                size="small"
+                aria-label={t.clearValue}
+                onClick={() => onChange(null)}
+                data-testid={`${testId}-clear`}
+                sx={{ p: 0.25 }}
+              >
+                <CloseIcon fontSize="small" />
+              </IconButton>
+            </InputAdornment>
+          ),
+        } : undefined,
+      }}
+      sx={{ width: 180, maxWidth: '100%', ...sx }}
+    />
+  );
 }

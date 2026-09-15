@@ -121,12 +121,18 @@ for (const strategy of ['balanced', 'rotation']) {
     // Making the pinned on-call duty ordinary cannot manufacture a shortfall
     // either: relief, not overwork, is the answer whenever a colleague exists.
     d.missions[0].onCall = false;
-    assert.ok(!plan(d).warnings.some((w) => w.code === 'rest-unsatisfied' && w.employeeId === 'e0'));
+    const awake = plan(d);
+    assert.ok(!awake.warnings.some((w) => w.code === 'rest-unsatisfied' && w.employeeId === 'e0'), 'split rest still meets six total hours');
+    const measured = assessRest(awake.shifts, d.employees, [{ ...d.tags[0], minNightRestMinutes: 480 }], d.nightWindows, d.start, d.end);
+    const worked = awake.shifts.filter((s) => s.employeeId === 'e0').reduce((n, s) => n + (s.end - s.start) / 60000, 0);
+    assert.equal(measured[0].got, 480 - worked, 'ordinary duty is deducted from total rest');
+    assert.equal(measured[0].longestMinutes, 300, 'only five hours are uninterrupted');
   });
 }
 
-test('ordinary duty between pinned on-call duties splits rest but no longer fails the total minimum', () => {
+test('ordinary duty between pinned on-call duties reports total and continuous rest', () => {
   const d = input(1);
+  d.tags[0].minNightRestMinutes = 480;
   d.missions = [
     { id: 'before', name: 'Before', type: 'remote', count: 1, onCall: true, start: 0, end: 3 * H },
     { id: 'awake', name: 'Awake', type: 'local', count: 1, start: 3 * H, end: 4 * H },
@@ -134,13 +140,19 @@ test('ordinary duty between pinned on-call duties splits rest but no longer fail
   ];
   d.pins = d.missions.map((m) => ({ missionId: m.id, employeeId: 'e0' }));
   const r = plan(d);
-  assert.ok(!r.warnings.some((w) => w.code === 'rest-unsatisfied'), '3h before plus 4h after adds up to the 6h total');
+  const warning = r.warnings.find((w) => w.code === 'rest-unsatisfied');
+  assert.equal(warning.got, 420, 'seven total rest hours exclude the ordinary hour');
+  assert.equal(warning.longestMinutes, 240, 'continuous rest cannot bridge the ordinary hour');
+  assert.equal(warning.needed, 480);
   assert.equal(r.stats.perEmployee[0].minutes, 480);
   assert.ok(r.shifts.every((s) => s.pinned));
   // The interruption is real and still measured - as the longest continuous
-  // block, reported next to the total, never as a total-rest failure.
+  // block, reported next to the total.
   assert.deepEqual(r.rest.map((m) => [m.totalMinutes, m.longestMinutes]), [[420, 240]]);
-  assert.equal(r.rest[0].needed, 360);
+  assert.equal(r.rest[0].needed, 480);
+  d.tags[0].minNightRestMinutes = 360;
+  assert.ok(!plan(d).warnings.some((w) => w.code === 'rest-unsatisfied'),
+    'three hours before plus four after meet the six-hour total minimum');
 });
 
 for (const type of ['local', 'remote', 'daily']) {

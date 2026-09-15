@@ -2,6 +2,7 @@
 export const t = {
   noMatchingEmployees: 'לא נמצאו עובדים',
   replaceEmployee: 'חיפוש עובד להחלפה',
+  clearValue: 'ניקוי',
   decreaseNumber: (label) => `הקטנת ${label}`,
   increaseNumber: (label) => `הגדלת ${label}`,
   missingQualification: (mission, tag, n) => `${mission}: נדרשים ${n} בעלי הסמכת ${tag}; הכיסוי אינו מלא.`,
@@ -21,6 +22,8 @@ export const t = {
   removeQualification: 'מחיקת הסמכה',
   removeQualificationBody: (name, people, missions) => `למחוק את ${name}? ההסמכה תוסר מ־${people} אנשים ומ־${missions} משימות.`,
   nightRestMinutes: 'מנוחת לילה כוללת (דקות)',
+  restUnitsHelp: '6 שעות = 360 דקות · 3 שעות = 180 דקות',
+  restUseHours: (hours) => `התכוונת ל־${hours} שעות? הגדרה ל־${hours * 60} דקות`,
   requiredQualifications: 'הסמכות נדרשות בכל משמרת',
   excludedQualifications: 'פטורים מהמשימה לפי הסמכה',
   combinedQualificationsHelp: 'עדיפות לאנשים שונים לכל תפקיד. כשצריך, אדם אחד יכול למלא כמה תפקידים.',
@@ -101,6 +104,10 @@ export const t = {
   missions: 'משימות',
   missionName: 'שם המשימה',
   addMission: 'הוסף משימה',
+  duplicateMission: 'שכפול משימה',
+  // A copy keeps every setting but not the roster - two missions with the same
+  // name are unreadable in the agenda, so the copy says what it is.
+  missionCopyName: (name) => `${name} (עותק)`,
   missionType: 'סוג',
   typeRemote: 'מרוחקת',
   typeLocal: 'מקומית',
@@ -157,6 +164,12 @@ export const t = {
   now: 'כעת',
   today: 'היום',
   jumpToNow: 'קפוץ לעכשיו',
+  // Filtering the agenda to one person. The summary table deliberately stays
+  // whole underneath it: the question this answers is "why does this person
+  // have more time on duty than the others", and that needs the others.
+  filterEmployee: 'סינון לפי אדם',
+  allEmployees: 'כולם',
+  filterNoShifts: (name) => `${name} לא משובץ לאף משמרת בסידור.`,
 
   // summary
   summary: 'סיכום',
@@ -167,11 +180,24 @@ export const t = {
 
   // sharing
   shareSection: 'שיתוף וייצוא',
+  // The share window. Deliberately says which actions it touches: the link and
+  // the CSV deliberately carry the whole plan, and a range control that looked
+  // like it applied to all four would read as a bug the first time someone
+  // opened a "trimmed" link and found the whole rota in it.
+  shareWindow: 'טווח לשיתוף',
+  shareWindowFrom: 'החל מ־',
+  shareWindowHelp: 'ההודעה לוואטסאפ וקובצי היומן כוללים עד 24 שעות מהמועד הזה. ברירת המחדל היא שלוש שעות אחורה — אין צורך לשלוח את מה שכבר עבר.',
+  shareWindowRange: (range) => `נשלח: ${range}`,
+  shareWindowCount: (n) => (n === 0 ? 'אין משמרות בטווח הזה.'
+    : n === 1 ? 'משמרת אחת בטווח.' : `${n} משמרות בטווח.`),
   copyLink: 'העתק קישור',
   copied: 'הועתק!',
   copyFailed: 'ההעתקה נכשלה',
   downloadCsv: 'הורד CSV',
   copyWhatsapp: 'העתק לוואטסאפ',
+  shareLinkNative: 'שתף קישור',
+  shareWhatsappNative: 'שתף הודעה',
+  shareFailed: 'השיתוף נכשל',
   longUrlWarning: 'הקישור ארוך מאוד. חלק מהאפליקציות עלולות לקצר אותו.',
   calendarSection: 'ייצוא ליומן (iCal)',
   downloadIcsOverview: 'יומן כלל הצוות',

@@ -1,10 +1,14 @@
 /** Manual locks and preserved history remain distinct on a touch viewport. */
 import assert from 'node:assert/strict';
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import { chromium } from 'playwright';
 import { planSchema } from '../src/lib/planSchema.js';
 import { encodePlan, decodePlan } from '../src/lib/urlState.js';
 
 const BASE = process.env.BASE || 'http://127.0.0.1:4173';
+const SHOT_DIR = process.env.SHOT_DIR || '/tmp/guard-shots';
+await mkdir(SHOT_DIR, { recursive: true });
 const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROME || '/usr/bin/chromium' });
 try {
   const context = await browser.newContext({ viewport: { width: 360, height: 800 }, isMobile: true, hasTouch: true, locale: 'he-IL', timezoneId: 'Asia/Jerusalem' });
@@ -35,7 +39,7 @@ try {
   assert.equal(await page.getByTestId(`clear-pin-gate-${start + hour}`).getAttribute('aria-label'), 'שחרור שיבוץ עבר שנשמר');
   assert.equal(await page.locator('[data-testid^="pinned-gate-"]').count(), 2, 'automatic future assignment has no lock');
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'phone has no horizontal overflow');
-  await page.screenshot({ path: '/tmp/guard-assignment-badges.png', fullPage: true });
+  await page.screenshot({ path: join(SHOT_DIR, 'assignment-badges.png'), fullPage: true });
   await page.getByTestId(`clear-pin-gate-${start}`).tap();
   await manual.waitFor({ state: 'detached' });
   const shared = decodePlan(new URLSearchParams(page.url().split('?')[1]).get('p')).plan;
@@ -74,7 +78,7 @@ try {
   await proposal.waitFor();
   assert.ok((await proposal.innerText()).includes('אבי'), 'the proposal names the held driver');
   assert.ok((await page2.getByTestId(`finding-missing-required-tag`).count()) >= 1, 'the shortage is reported alongside the fix');
-  await page2.screenshot({ path: '/tmp/guard-correction-proposal.png', fullPage: true });
+  await page2.screenshot({ path: join(SHOT_DIR, 'correction-proposal.png'), fullPage: true });
   assert.ok(await page2.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'phone has no horizontal overflow');
 
   await page2.getByTestId(`apply-proposal-initiative2-${day + 2 * hour}`).tap();

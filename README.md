@@ -70,11 +70,11 @@ opening `index.html` directly from disk is not the supported workflow.
 
 ### Headless browser checks
 
-Browser suites run separately from `npm test`. Install Playwright and a headless
-Chromium binary if they are not already available:
+Browser suites run separately from `npm test`. Playwright is locked with the
+development dependencies; install a headless Chromium binary if needed:
 
 ```sh
-npm i --no-save playwright
+npm ci
 npx playwright install chromium
 npm run build
 npm run preview -- --host 127.0.0.1 --port 4173 --strictPort
@@ -89,11 +89,15 @@ BASE=http://127.0.0.1:4173 SHOT_DIR=/tmp/guard-features node tests/features.e2e.
 BASE=http://127.0.0.1:4173 node tests/number-inputs.e2e.mjs
 BASE=http://127.0.0.1:4173 node tests/mui-controls.e2e.mjs
 BASE=http://127.0.0.1:4173 node tests/mui-pickers.e2e.mjs
+BASE=http://127.0.0.1:4173 node tests/short-shifts.e2e.mjs
+BASE=http://127.0.0.1:4173 node tests/assignment-badges.e2e.mjs
 ```
 
 Set `CHROME=/usr/bin/chromium` to use an installed browser instead. The suites
 cover sharing, offline reload, manual assignments, mobile overflow, daily duties,
-qualification editing, rest findings, and computation-error sharing.
+qualification editing, rest findings, unexpected short shifts, unit corrections,
+and computation-error sharing. See [shift boundary checks](docs/shift-boundaries.md)
+for the regression and runtime validation design.
 
 ## Hosting and CI
 

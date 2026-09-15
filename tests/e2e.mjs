@@ -13,7 +13,9 @@
  * binary when the sandbox already ships one.
  */
 import { chromium } from 'playwright';
-import { decodePlan } from '../src/lib/urlState.js';
+import { encodePlan, decodePlan } from '../src/lib/urlState.js';
+import { planSchema, topOfHour } from '../src/lib/planSchema.js';
+import { fromLocalDateTimeInput, toLocalDateTimeInput } from '../src/lib/localInput.js';
 import { readFileSync, mkdirSync } from 'node:fs';
 
 const BASE = process.env.BASE || 'http://localhost:4173';
@@ -27,6 +29,11 @@ const check = (name, cond, extra = '') => {
 };
 // MUI's Select injects zero-width and bidi marks into its rendered label.
 const norm = (x) => x.replace(/[​-‏‪-‮]/g, '').trim();
+// Who a shift-select control says is on duty. It is a button showing the name
+// as wrapping text, not an input - a dropdown truncated every Hebrew name
+// longer than four letters to "ש..." on a phone, so the name is plain text
+// now and the roster moved into a dialog behind it.
+const assignee = (locator) => locator.innerText().then(norm);
 
 const browser = await chromium.launch(
   process.env.CHROME ? { executablePath: process.env.CHROME } : {},
@@ -122,7 +129,7 @@ check('manual assignments show as pinned',
   (await page.locator('[data-testid^="pinned-"]').count()) >= 2);
 
 const remotePeople = await page.evaluate(() => [...document.querySelectorAll('[data-testid^="shift-select-m1-"]')]
-  .map((n) => n.value.trim()));
+  .map((n) => n.innerText.trim()));
 check('remote mission staffed by 4', remotePeople.length === 4, JSON.stringify(remotePeople));
 check('the hand-assigned people are the ones on it',
   remotePeople.some((p) => p.includes('אבי')) && remotePeople.some((p) => p.includes('דנה')),
@@ -160,16 +167,21 @@ await page.waitForTimeout(300);
 
 /* ---------- manual swap ---------- */
 const firstLocal = page.locator('[data-testid^="shift-select-m2-"]').first();
-const beforeSwap = norm(await firstLocal.inputValue());
+const beforeSwap = await assignee(firstLocal);
+check('a shift shows the full name, not a truncated one', !beforeSwap.includes('…'), beforeSwap);
 await firstLocal.click();
 await page.waitForTimeout(300);
+check('tapping a shift opens the roster dialog',
+  await page.getByTestId('assign-search').isVisible());
 
 const options = page.getByRole('option');
 let swappedTo = null;
 for (let i = 0, n = await options.count(); i < n; i++) {
   const o = options.nth(i);
-  const label = norm(await o.innerText());
-  if (label !== beforeSwap && (await o.getAttribute('aria-disabled')) !== 'true' && !label.includes('—')) {
+  // The name is the first line; an availability note, when there is one,
+  // follows it on a second.
+  const [label, note] = norm(await o.innerText()).split('\n').map((line) => line.trim());
+  if (label !== beforeSwap && (await o.getAttribute('aria-disabled')) !== 'true' && !note) {
     swappedTo = label;
     await o.click();
     break;
@@ -177,10 +189,13 @@ for (let i = 0, n = await options.count(); i < n; i++) {
 }
 await page.waitForTimeout(500);
 check('a swap target was available', swappedTo !== null);
+check('choosing someone closes the dialog',
+  await page.getByTestId('assign-search').isHidden());
 check('the swap took effect',
-  norm(await page.locator('[data-testid^="shift-select-m2-"]').first().inputValue()) === swappedTo);
+  (await assignee(page.locator('[data-testid^="shift-select-m2-"]').first())) === swappedTo);
 check('the displaced person is rescheduled, not dropped',
-  (await page.locator('[data-testid^="shift-select-"]').evaluateAll((nodes) => nodes.map((node) => node.value))).includes(beforeSwap));
+  (await page.locator('[data-testid^="shift-select-"]')
+    .evaluateAll((nodes) => nodes.map((node) => node.innerText.trim()))).includes(beforeSwap));
 await page.screenshot({ path: `${SHOT}/02-after-swap.png` });
 const urlWithSwap = page.url();
 
@@ -206,6 +221,61 @@ check('WhatsApp text uses a plain time - names table, not bulleted mission rows'
   !clip.includes('•') && clip.includes('*שער*') && /\*[^*\n]*סיור מרוחק\*/.test(clip), clip);
 check('WhatsApp text lists only who is on duty', !clip.includes('פנויים'));
 
+/* ---------- the share window ------------------------------------------
+ * Nobody needs yesterday. The message and the calendar files carry a day
+ * from a chosen start; the link and the CSV stay the whole plan, because a
+ * link *is* the document and trimming it would change the schedule the
+ * recipient computes.
+ */
+const shareFrom = page.getByTestId('share-from');
+check('the share window offers a start time', (await shareFrom.count()) === 1);
+const rangeBefore = await page.getByTestId('share-window-range').innerText();
+const movedFrom = fromLocalDateTimeInput(await shareFrom.inputValue()) + 6 * 3600 * 1000;
+await shareFrom.fill(toLocalDateTimeInput(movedFrom));
+await page.waitForTimeout(400);
+check('moving the start moves the window',
+  (await page.getByTestId('share-window-range').innerText()) !== rangeBefore);
+
+await page.getByTestId('copy-whatsapp').click();
+await page.waitForTimeout(400);
+const trimmedClip = await page.evaluate(() => navigator.clipboard.readText());
+check('a later start trims the message', trimmedClip.length < clip.length, `${trimmedClip.length} < ${clip.length}`);
+check('and the message still has its heading and some shifts',
+  trimmedClip.startsWith('*בדיקה*') && /\d{1,2}:\d{2}/.test(trimmedClip), trimmedClip.slice(0, 60));
+
+await page.getByTestId('copy-link').click();
+await page.waitForTimeout(400);
+const linkAfterWindow = await page.evaluate(() => navigator.clipboard.readText());
+check('the copied link is still the whole plan, not the window',
+  decodePlan(new URLSearchParams(linkAfterWindow.split('?')[1]).get('p')).plan.start
+    === decodePlan(new URLSearchParams(page.url().split('?')[1]).get('p')).plan.start);
+
+/* ---------- filtering the agenda to one person ------------------------
+ * "Why is this person on so much more than everyone else" is answered by
+ * seeing only their rows - with the summary table still whole underneath,
+ * because the answer is a comparison.
+ */
+const soloName = await assignee(page.locator('[data-testid^="shift-select-"]').first());
+await page.getByTestId('filter-employee').click();
+await page.waitForTimeout(300);
+await page.getByRole('option', { name: soloName, exact: true }).click();
+await page.waitForTimeout(500);
+const shownNames = await page.locator('[data-testid^="shift-select-"]')
+  .evaluateAll((nodes) => [...new Set(nodes.map((node) => node.innerText.trim()))]);
+check('filtering shows that person and nobody else',
+  shownNames.length === 1 && shownNames[0] === soloName, JSON.stringify(shownNames));
+check('the summary still compares them against everyone',
+  (await page.locator('[data-testid^="summary-"]').count()) > 1);
+await page.screenshot({ path: `${SHOT}/09-filtered-by-person.png` });
+
+await page.getByTestId('filter-employee').click();
+await page.waitForTimeout(300);
+await page.getByRole('option', { name: 'כולם', exact: true }).click();
+await page.waitForTimeout(500);
+check('clearing the filter brings everyone back',
+  (await page.locator('[data-testid^="shift-select-"]')
+    .evaluateAll((nodes) => new Set(nodes.map((n) => n.innerText.trim())).size)) > 1);
+
 /* ---------- the shared link ---------- */
 const ctx2 = await browser.newContext();
 const page2 = await ctx2.newPage();
@@ -214,7 +284,7 @@ await page2.goto(urlWithSwap, { waitUntil: 'networkidle' });
 await page2.waitForTimeout(700);
 
 const dump = (p) => p.evaluate(() => [...document.querySelectorAll('[data-testid^="shift-select-"]')]
-  .map((n) => `${n.dataset.testid}=${n.value.trim()}`).join('|'));
+  .map((n) => `${n.dataset.testid}=${n.innerText.trim()}`).join('|'));
 const [a, b] = [await dump(page), await dump(page2)];
 check('a shared URL reproduces the identical schedule, manual swap included',
   a === b && a.length > 0);
@@ -251,31 +321,29 @@ const ctx3 = await browser.newContext({ permissions: ['clipboard-read', 'clipboa
 const page3 = await ctx3.newPage();
 page3.on('pageerror', (e) => { console.log('PAGEERROR(freeze)', e.message); failures++; });
 
-await page3.goto(`${BASE}/`, { waitUntil: 'networkidle' });
-await page3.getByTestId('bulk-names').fill(['רותם', 'עדי'].join('\n'));
-await page3.getByTestId('add-bulk').click();
-await page3.waitForTimeout(300);
-
-// Push the window's start three hours into the past, so the first few hourly
-// shifts are already-elapsed history by the time the mission below exists.
-const startHours = page3.getByTestId('plan-start').getByRole('spinbutton', { name: 'שעות', exact: true });
-for (let i = 0; i < 3; i++) await startHours.press('ArrowDown');
-await page3.waitForTimeout(200);
-
-await page3.getByTestId('tab-missions').click();
-await page3.waitForTimeout(200);
-// Deliberately not naming the mission: filling the name field would itself be
-// a second edit, and this check wants to observe the state right after the
-// single edit that created the mission - before anything has a chance to freeze.
-await page3.getByTestId('add-mission').click();
-await page3.waitForTimeout(250);
-
-await page3.getByTestId('tab-schedule').click();
+// The window starts three hours in the past, so its first few hourly shifts
+// are already-elapsed history, and the document arrives carrying no pins and
+// no edit yet - the state this check wants to observe.
+//
+// Seeded through the URL rather than typed: nudging the start field backwards
+// is arithmetic on a clock, and a 12-hour field counts inside its own half of
+// the day, so the same three keypresses moved the start back three hours in
+// the morning and forward nine in the afternoon. The freeze this tests has
+// nothing to do with how a date got entered.
+const elapsedStart = topOfHour(Date.now()) - 3 * 3600 * 1000;
+const freezeDoc = planSchema.parse({
+  start: elapsedStart,
+  end: elapsedStart + 24 * 3600 * 1000,
+  shiftMinutes: 60,
+  employees: [{ id: 'e1', name: 'רותם' }, { id: 'e2', name: 'עדי' }],
+  missions: [{ id: 'm1', name: '', type: 'local', count: 1 }],
+});
+await page3.goto(`${BASE}/#/schedule?p=${encodeURIComponent(encodePlan(freezeDoc))}`, { waitUntil: 'networkidle' });
 await page3.waitForTimeout(500);
 const firstShift = page3.locator('[data-testid^="shift-select-m1-"]').first();
 const firstShiftTestId = await firstShift.getAttribute('data-testid');
 const [, , missionId, shiftStart] = firstShiftTestId.split('-');
-const beforeAssignee = norm(await firstShift.inputValue());
+const beforeAssignee = await assignee(firstShift);
 const pinnedBefore = await page3.locator('[data-testid^="pinned-m1-"]').count();
 check('the elapsed shift is not yet pinned before any further edit', pinnedBefore === 0, String(pinnedBefore));
 
@@ -288,7 +356,7 @@ await page3.waitForTimeout(300);
 
 await page3.getByTestId('tab-schedule').click();
 await page3.waitForTimeout(500);
-const afterAssignee = norm(await page3.locator(`[data-testid="${firstShiftTestId}"]`).inputValue());
+const afterAssignee = await assignee(page3.locator(`[data-testid="${firstShiftTestId}"]`));
 check('an edit made on the Employees page did not reshuffle an elapsed shift',
   afterAssignee === beforeAssignee, `${beforeAssignee} -> ${afterAssignee}`);
 const pinnedAfter = await page3.locator('[data-testid^="pinned-m1-"]').count();
@@ -371,7 +439,7 @@ await page5.screenshot({ path: `${SHOT}/06-open-ended.png` });
 await page4.getByTestId('mission-open-ended-m1').click();
 await page4.waitForTimeout(400);
 check('unticking restores an explicit, editable end',
-  (await page4.getByTestId('mission-end-m1').locator('input').inputValue()) !== '');
+  (await page4.getByTestId('mission-end-m1').inputValue()) !== '');
 
 await ctx5.close();
 await ctx4.close();
@@ -493,8 +561,56 @@ check('and never a slot longer than the two hours it asked for',
   opsMinutes.every((m) => m <= 120), JSON.stringify(opsMinutes));
 check('the two grids together still cover the whole day',
   opsMinutes.reduce((sum, m) => sum + m, 0) === 24 * 60, JSON.stringify(opsMinutes));
-await page7.screenshot({ path: `${SHOT}/09-mixed-shift-lengths.png`, fullPage: true });
+await page7.screenshot({ path: `${SHOT}/10-mixed-shift-lengths.png`, fullPage: true });
 await ctx7.close();
+
+/* ---------- duplicating a mission --------------------------------------
+ * A second post with the same grid, headcount and qualifications is the
+ * common case; retyping all of it is not. The copy takes every setting and
+ * deliberately leaves the roster behind - pinned people copied onto a
+ * mission covering the same hours would double-book themselves the instant
+ * the copy existed.
+ */
+const ctx8 = await browser.newContext();
+const page8 = await ctx8.newPage();
+page8.on('pageerror', (e) => { console.log('PAGEERROR(duplicate)', e.message); failures++; });
+
+const dupStart = Date.parse('2030-09-10T08:00:00Z');
+const dupDoc = planSchema.parse({
+  start: dupStart,
+  end: dupStart + 6 * 3600 * 1000,
+  shiftMinutes: 60,
+  employees: [{ id: 'e1', name: 'רותם' }, { id: 'e2', name: 'עדי' }],
+  missions: [{ id: 'm1', name: 'שער', type: 'local', count: 1, shiftMinutes: 120 }],
+  pins: [{ missionId: 'm1', employeeId: 'e1', start: null, end: null }],
+});
+await page8.goto(`${BASE}/#/missions?p=${encodeURIComponent(encodePlan(dupDoc))}`, { waitUntil: 'networkidle' });
+await page8.waitForTimeout(500);
+await page8.getByTestId('duplicate-mission-m1').click();
+await page8.waitForTimeout(500);
+
+const dupPlan = decodePlan(new URLSearchParams(page8.url().split('?')[1]).get('p')).plan;
+check('duplicating adds one mission', dupPlan.missions.length === 2, String(dupPlan.missions.length));
+const [original, copy] = dupPlan.missions;
+check('the copy sits right after the mission it came from', copy.id !== original.id);
+check('the copy keeps every setting',
+  copy.type === original.type && copy.count === original.count
+    && copy.shiftMinutes === original.shiftMinutes,
+  JSON.stringify(copy));
+check('the copy says it is one', copy.name === `${original.name} (עותק)`, copy.name);
+check('the manual assignments stay with the original only',
+  dupPlan.pins.length === 1 && dupPlan.pins[0].missionId === original.id,
+  JSON.stringify(dupPlan.pins));
+check('and the copy is editable in its own right',
+  (await page8.getByTestId(`mission-name-${copy.id}`).count()) === 1);
+
+await page8.getByTestId('tab-schedule').click();
+await page8.waitForTimeout(600);
+check('both missions are staffed, by different people',
+  (await page8.locator(`[data-testid^="shift-select-${copy.id}-"]`).count()) > 0
+  && (await page8.locator(`[data-testid^="shift-select-${original.id}-"]`).count()) > 0);
+await page8.screenshot({ path: `${SHOT}/11-duplicated-mission.png`, fullPage: true });
+await ctx8.close();
 
 await browser.close();
 console.log(failures === 0 ? '\nALL E2E CHECKS PASSED' : `\n${failures} E2E CHECK(S) FAILED`);

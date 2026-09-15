@@ -54,9 +54,18 @@ export default function QualificationManager() {
       {doc.tags.map((tag) => <Stack key={tag.id} direction="row" useFlexGap spacing={1} sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
         <TextField label={t.qualificationName} value={tag.name} sx={{ flex: '1 1 140px', minWidth: 0 }}
           slotProps={{ htmlInput: { maxLength: 80, 'data-testid': `tag-name-${tag.id}` } }} onChange={(e) => change(tag.id, { name: e.target.value })} />
-        <NumberField label={t.nightRestMinutes} value={tag.minNightRestMinutes} sx={{ flex: '1 1 220px', minWidth: 0 }}
+        <Stack sx={{ flex: '1 1 220px', minWidth: 0 }}>
+        <NumberField label={t.nightRestMinutes} value={tag.minNightRestMinutes} sx={{ width: '100%' }}
           nullable max={1440} testId={`tag-rest-${tag.id}`}
           onChange={(minNightRestMinutes) => change(tag.id, { minNightRestMinutes })} />
+        <Typography variant="caption" color="text.secondary">{t.restUnitsHelp}</Typography>
+        {tag.minNightRestMinutes >= 1 && tag.minNightRestMinutes <= 24 && (
+          <Button size="small" data-testid={`tag-rest-hours-${tag.id}`} sx={{ minHeight: 44 }}
+            onClick={() => change(tag.id, { minNightRestMinutes: tag.minNightRestMinutes * 60 })}>
+            {t.restUseHours(tag.minNightRestMinutes)}
+          </Button>
+        )}
+        </Stack>
         <IconButton aria-label={t.remove} data-testid={`remove-tag-${tag.id}`} onClick={() => setPending(tag)}><DeleteOutlineIcon /></IconButton>
       </Stack>)}
     </Stack>

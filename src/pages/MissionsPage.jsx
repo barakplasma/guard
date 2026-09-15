@@ -5,6 +5,7 @@ import {
   ToggleButtonGroup, Tooltip, Typography,
 } from '@mui/material';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
+import ContentCopyIcon from '@mui/icons-material/ContentCopyOutlined';
 import AddIcon from '@mui/icons-material/Add';
 import DateTimeField from '../components/DateTimeField.jsx';
 import NumberField from '../components/NumberField.jsx';
@@ -16,7 +17,7 @@ import { nextTopOfHour } from '../lib/planSchema.js';
 import { t } from '../strings.js';
 import { MissionQualifications } from '../components/Qualifications.jsx';
 
-function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
+function MissionCard({ mission, doc, onChange, onRemove, onDuplicate, onAssign }) {
   // Anyone holding a pin on this mission is on its roster. A whole-mission
   // assignment does not stay whole: clearing or swapping a single shift cuts
   // it into ranges (see cutPin in pins.js), and listing only the untouched
@@ -108,14 +109,26 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
             />
           </Tooltip>
 
-          <IconButton
-            aria-label={t.remove}
-            onClick={onRemove}
-            sx={{ marginInlineStart: 'auto', p: 1 }}
-            data-testid={`remove-mission-${mission.id}`}
-          >
-            <DeleteOutlineIcon />
-          </IconButton>
+          <Box sx={{ marginInlineStart: 'auto', display: 'flex', gap: 0.5 }}>
+            <Tooltip title={t.duplicateMission}>
+              <IconButton
+                aria-label={t.duplicateMission}
+                onClick={onDuplicate}
+                sx={{ p: 1 }}
+                data-testid={`duplicate-mission-${mission.id}`}
+              >
+                <ContentCopyIcon />
+              </IconButton>
+            </Tooltip>
+            <IconButton
+              aria-label={t.remove}
+              onClick={onRemove}
+              sx={{ p: 1 }}
+              data-testid={`remove-mission-${mission.id}`}
+            >
+              <DeleteOutlineIcon />
+            </IconButton>
+          </Box>
         </Stack>
 
         {/*
@@ -252,7 +265,9 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
 }
 
 export default function MissionsPage() {
-  const { doc, addMission, updateMission, removeMission, setMissionAssignees } = usePlan();
+  const {
+    doc, addMission, updateMission, removeMission, duplicateMission, setMissionAssignees,
+  } = usePlan();
   const [pendingRemove, setPendingRemove] = useState(null);
 
   return (
@@ -278,6 +293,7 @@ export default function MissionsPage() {
             doc={doc}
             onChange={(patch) => updateMission(m.id, patch)}
             onRemove={() => setPendingRemove(m)}
+            onDuplicate={() => duplicateMission(m.id)}
             onAssign={(ids) => setMissionAssignees(m.id, ids)}
           />
         ))}

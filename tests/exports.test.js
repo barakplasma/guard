@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { shiftsToCsv } from '../src/lib/exportCsv.js';
-import { whatsappText, whatsappShareLink } from '../src/lib/exportText.js';
+import {
+  whatsappText, whatsappShareLink, canShareNatively, shareNative,
+} from '../src/lib/exportText.js';
 import { groupAgenda } from '../src/lib/agenda.js';
 import { employeeIcs, overviewIcs } from '../src/lib/exportIcal.js';
 import { plan } from '../src/lib/planner.js';
@@ -223,6 +225,53 @@ test('the wa.me link escapes the message', () => {
   assert.ok(!link.includes('\n'), 'newlines must be percent-encoded');
   assert.equal(decodeURIComponent(link.split('text=')[1]), '*כותרת*\n• שער: אבי');
 });
+
+/* --- native share --------------------------------------------------- */
+
+/**
+ * Node defines a global `navigator` getter with no setter, so a plain
+ * assignment throws under ESM's strict mode; `defineProperty` replaces the
+ * whole property (and restores it after) instead.
+ */
+function withNavigator(stub, fn) {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  Object.defineProperty(globalThis, 'navigator', { value: stub, configurable: true });
+  return Promise.resolve(fn()).finally(() => {
+    Object.defineProperty(globalThis, 'navigator', original);
+  });
+}
+
+test('canShareNatively is false without navigator.share', () => withNavigator({}, () => {
+  assert.equal(canShareNatively(), false);
+}));
+
+test('canShareNatively is true when navigator.share exists', () => withNavigator({ share: async () => {} }, () => {
+  assert.equal(canShareNatively(), true);
+}));
+
+test('shareNative resolves "unsupported" without a share sheet', () => withNavigator({}, async () => {
+  assert.equal(await shareNative({ text: 'x' }), 'unsupported');
+}));
+
+test('shareNative resolves "shared" and passes the data through untouched', () => {
+  let received;
+  return withNavigator({ share: async (data) => { received = data; } }, async () => {
+    assert.equal(await shareNative({ text: 'hello' }), 'shared');
+    assert.deepEqual(received, { text: 'hello' });
+  });
+});
+
+test('shareNative resolves "cancelled" on AbortError, not "error"', () => withNavigator({
+  share: async () => { const err = new Error('cancelled'); err.name = 'AbortError'; throw err; },
+}, async () => {
+  assert.equal(await shareNative({ text: 'x' }), 'cancelled');
+}));
+
+test('shareNative resolves "error" on a real failure', () => withNavigator({
+  share: async () => { throw new Error('nope'); },
+}, async () => {
+  assert.equal(await shareNative({ text: 'x' }), 'error');
+}));
 
 /* --- agenda grouping ------------------------------------------------- */
 
