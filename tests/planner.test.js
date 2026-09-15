@@ -75,6 +75,39 @@ test('local rotation spreads load within one shift length', () => {
   assert.equal(result.stats.spreadMinutes, Math.max(...totals) - Math.min(...totals));
 });
 
+test('an off-grid qualified callout can reclaim scarce staff from ordinary posts', () => {
+  const start = START;
+  const employees = people(8).map((employee, index) => ({
+    ...employee,
+    tags: index < 2 ? ['driver'] : [],
+  }));
+  const calloutStart = start + 20 * MIN;
+  const result = plan({
+    start,
+    end: start + 24 * HOUR,
+    shiftMinutes: 60,
+    strategy: 'balanced',
+    employees,
+    tags: [{ id: 'driver', name: 'Driver' }],
+    missions: [
+      { id: 'gate', name: 'Gate', type: 'local', count: 3 },
+      { id: 'patrol', name: 'Patrol', type: 'local', count: 2 },
+      {
+        id: 'callout', name: 'Callout', type: 'local', count: 2,
+        start: calloutStart, end: calloutStart + 2 * HOUR,
+        requires: [{ tag: 'driver', count: 2 }],
+      },
+    ],
+  });
+
+  const calloutCrew = result.shifts.filter((shift) => shift.missionId === 'callout'
+    && shift.start <= calloutStart && shift.end > calloutStart);
+  assert.equal(calloutCrew.length, 2);
+  assert.ok(calloutCrew.every((shift) => shift.qualifications?.includes('driver')));
+  assert.equal(result.warnings.some((warning) => warning.code === 'missing-required-tag'), false);
+  assert.equal(result.warnings.some((warning) => warning.code === WARN.UNDERSTAFFED), false);
+});
+
 test('gap maximization: nobody repeats until everyone has had a turn', () => {
   const start = START;
   const end = start + 6 * HOUR;

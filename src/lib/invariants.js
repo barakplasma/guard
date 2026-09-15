@@ -109,19 +109,36 @@ export function validateSchedule(result, input, mode = 'throw') {
     const v = violations[0];
     throw new Error(`Engine invariant ${v.rule}: ${JSON.stringify(v)}. This is a bug in the scheduler.`);
   }
-  result.warnings.push(...violations.map((v) => ({ code: 'engine-bug', ...v })), ...qualityWarnings(result.shifts));
+  result.warnings.push(...violations.map((v) => ({ code: 'engine-bug', ...v })), ...qualityWarnings(result.shifts, input));
   return result;
 }
 
 /** Aggregated quality findings: a pin breaks the automatic-duty run. */
-export function qualityWarnings(shifts) {
+export function qualityWarnings(shifts, input) {
   const byEmployee = new Map();
   for (const s of shifts) {
     if (!byEmployee.has(s.employeeId)) byEmployee.set(s.employeeId, []);
     byEmployee.get(s.employeeId).push(s);
   }
   const out = [];
+  const turns = new Map([...byEmployee].map(([id, rows]) => [id,
+    new Set(rows.map((s) => `${s.missionId}|${s.slotStart}`)).size]));
+  const average = input?.employees.length ? [...turns.values()].reduce((n, count) => n + count, 0) / input.employees.length : Infinity;
+  const missions = new Map((input?.missions ?? []).map((m) => [m.id, m]));
   for (const [employeeId, rows] of byEmployee) {
+    const count = turns.get(employeeId);
+    if (count >= 3 && count > 2 * average) out.push({ code: 'workload-outlier', employeeId, count, average });
+    for (const s of rows) {
+      const mission = missions.get(s.missionId);
+      if (s.type !== 'local' || !mission) continue;
+      const day = mission.shiftMinutes ?? input.shiftMinutes;
+      const night = (input.nightWindows ?? []).some((w) => s.start >= w.start && s.start < w.end);
+      const expectedMinutes = night ? mission.nightShiftMinutes ?? day : day;
+      const actualMinutes = (s.end - s.start) / 60000;
+      if (!Number.isFinite(actualMinutes) || actualMinutes <= 0) continue;
+      if (actualMinutes !== expectedMinutes) out.push({ code: actualMinutes < expectedMinutes ? 'short-shift' : 'long-shift',
+        missionId: s.missionId, employeeId, start: s.start, end: s.end, actualMinutes, expectedMinutes, count: 1 });
+    }
     rows.sort((a, b) => a.start - b.start || a.end - b.end);
     let prev = null, run = new Set(), longest = 0, adjacent = 0, same = 0;
     for (const s of rows) {
