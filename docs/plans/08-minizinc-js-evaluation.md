@@ -99,6 +99,19 @@ The cost is real and should be stated: **a link stops being the document.**
 Copy-link becomes "share a snapshot of this window" rather than "here is my
 entire plan, recomputed on your machine."
 
+Use `dexie` rather than raw IndexedDB or a hand-rolled wrapper: 189 releases
+since 2014, two maintainers, last published five days before this record, and
+about 8.3 million downloads a month. `idb` is thinner and more widely
+installed, but it is a single-maintainer wrapper and the schema/migration
+handling is the part worth not writing.
+
+`@automerge/automerge` is the one library surveyed here with a real team - six
+maintainers, Ink & Switch behind it - and its core competency is a document
+with an append-only change history, which is close to what "the past is a log"
+is asking for. It is not the recommendation, because it is built for
+multi-device sync and merge, and the answer here is one editor on one device.
+Worth revisiting only if that changes.
+
 ### 3. Only then, the solver
 
 With the past out of reach and a single editor on a single device, the two
@@ -106,12 +119,30 @@ objections in this record's first draft evaporate. A varying future schedule
 costs nothing when nobody is diffing two renders of the same link, and payload
 size is not a constraint that was ever in play.
 
-`or-tools-wasm` exposes CP-SAT, which is the right solver class for this
-problem - crew assignment with coverage, exclusions, rest windows and a
-fairness objective is close to textbook CP-SAT. It is Apache-2.0. It is also a
-community port at version 0.9.1 with a single maintainer, which is a
-supply-chain fact worth weighing for something that rosters real guard duty,
-not a reason on its own to refuse.
+**Take MiniZinc, not `or-tools-wasm`.** An earlier revision of this record
+recommended the opposite, on the strength of CP-SAT being the better-known
+solver for this problem shape. The registry says the binding is the risk, not
+the algorithm:
+
+| package | maintainers | releases | first | latest |
+|---|---|---|---|---|
+| `minizinc` | 3 | 409 | 2019-06-04 | 2026-09-14 |
+| `or-tools-wasm` | 1 | 6 | 2026-05-13 | 2026-06-08 |
+
+`minizinc` is published from `github.com/MiniZinc/minizinc-js`, the project's
+own organisation, and has shipped continuously for seven years. `or-tools-wasm`
+is one person's WebAssembly port at version 0.9.1, four months old, with no
+release in the last three. Google maintains OR-Tools; nobody with a team
+maintains *that binding*, and the binding is what would be depended on.
+
+MiniZinc's WebAssembly build carries gecode, cbc, chuffed and highs. Chuffed is
+a lazy-clause-generation constraint solver and is strong on exactly this shape
+of rostering, so little is given up on capability.
+
+Two honest caveats. Three maintainers is not many, and there is **no browser
+solver with a large maintainer base** - that option does not exist, so the
+choice is between small teams. And MiniZinc is MPL-2.0, which is file-level
+copyleft: fine for shipping in a bundle, worth knowing rather than discovering.
 
 Seed it and pin the version. Not for reproducibility's own sake, but because a
 seeded solver keeps the option of storing only deviations rather than the whole
@@ -120,14 +151,50 @@ characters against 960 pins and 9,228. Local-first storage makes that a
 convenience rather than a necessity, which is the right order - the seed should
 be an optimisation, never the thing history depends on.
 
+### What the libraries would actually replace
+
+The point of this is to shrink hand-written algorithm code down to domain
+modelling and glue. Roughly, by module:
+
+| module | lines | fate |
+|---|---|---|
+| `crew.js` | 78 | **replaced** - `selectCrew` and `separateRoles` are a matching problem stated in the model |
+| `strategies.js` | 204 | **replaced** - ranking comparators become an objective function |
+| `corrections.js` | 219 | **mostly replaced** - a solver re-solves instead of proposing local repairs |
+| `rest.js` | 140 | **split** - the ranking ladder becomes constraints; the measurement stays |
+| `planner.js` | 1148 | **split** - the staffing phases go; normalization, the segment grid and pin semantics stay |
+| `invariants.js` | 141 | **stays, and matters more** |
+
+`invariants.js` is the piece to keep deliberately. Independent validation of a
+schedule is *more* valuable against a solver than against a greedy walk,
+because a model with a subtly wrong constraint fails silently and
+confidently. It is the one place hand-written code earns its keep, and it is
+already written.
+
+What no library can take is the domain: missions, pins, night windows, the
+inheritance chain, the Hebrew RTL interface. That is the app, and it should be
+what the custom code is spent on.
+
 ### What stays true from the first draft
 
 The engine is provably incomplete: it reports shortages on rosters that can be
 staffed in full, at up to 0.94% of feasible small instances with exclusions,
 though never on realistic rota shapes. `scripts/completenessSearch.mjs`
-measures it. CP-SAT would close that class by construction; so would lifting
-`choose` from per-mission to per-segment, which needs no dependency. Either is
-defensible, and this is genuinely the part a solver is good at.
+measures it. A solver closes that class by construction.
+
+That earlier revision also offered the alternative of lifting `choose` from
+per-mission to per-segment "with no new dependency", which means hand-writing a
+bipartite matcher. That is the wrong trade here. Hand-rolled optimisation code
+is precisely what has gone wrong in this engine before - the ring that counted
+merged runs and stranded three guards for 88 hours, the scarcity ordering that
+was meant to close this same gap and did not. The matching libraries that might
+have stood in are dead: `munkres-js` last published in 2017, `logic-solver` in
+2016, `kiwi.js` in 2021.
+
+So the solver is not merely one way to close the gap; it is the way that
+*removes* custom algorithm code rather than adding more. Stating the problem
+declaratively and handing it to a maintained solver is the smaller long-term
+surface, even though it is the larger dependency.
 
 ## Consequences
 
@@ -144,6 +211,11 @@ the real price here. It buys a rota that remembers what actually happened.
 
 - **A solver without the timeline split.** Fixes nothing that was asked for and
   makes the headcount defect worse by giving the past more reasons to move.
+- **`or-tools-wasm`.** Better-known solver, unmaintainable binding: one person,
+  six releases, nothing shipped in three months. See the table above.
+- **A hand-written per-segment matcher.** Smaller diff, wrong direction. It adds
+  bespoke optimisation code to an engine whose bespoke optimisation code is
+  where the defects came from.
 - **Versioning `count` in the document.** Fixes one column of the drift table.
   Every other field that feeds a past slot would need the same treatment, one
   at a time, forever.
@@ -157,4 +229,6 @@ the real price here. It buys a rota that remembers what actually happened.
 `scripts/historyDriftCheck.mjs` for the drift table,
 `scripts/completenessSearch.mjs` for the completeness measurements. URL lengths
 from `encodePlan` over a seventeen-guard, ten-seat, seven-day rota. Package
-facts from the `minizinc@4.5.2` and `or-tools-wasm@0.9.1` registry entries.
+facts, maintainer counts and release histories from the npm registry for
+`minizinc`, `or-tools-wasm`, `dexie`, `@automerge/automerge`, `munkres-js`,
+`logic-solver` and `kiwi.js`, read on 2026-09-15.
