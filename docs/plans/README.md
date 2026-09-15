@@ -15,7 +15,7 @@ pending implementation plans.
 | [006](06-approved-continuation.md) | Extend shared plan URLs without reordering existing fields. |
 | [007](07-on-call-missions.md) | Count on-call missions toward night rest. |
 | [008](08-history-and-staffing-bugs.md) | Three defects to fix regardless of any refactor. *(Proposed)* |
-| [009](09-timeline-split.md) | Log the past, schedule only the future. *(Proposed)* |
+| [009](09-timeline-split.md) | Log the past, schedule only the future. *(Partly implemented)* |
 | [010](10-plan-storage.md) | Keep the plan in the URL, in the fragment. *(Proposed)* |
 | [011](11-solver-selection.md) | MiniZinc with Chuffed as the one engine. *(Accepted, provisionally)* |
 | [012](12-planning-horizon.md) | Plan 72 hours at a time, rolled forward. *(Proposed)* |
@@ -29,12 +29,13 @@ ADRs 001-007 are implemented. **011 is accepted provisionally and 012's
 retention question is decided; the rest are proposed**, and are split so each can
 be taken or left on its own:
 
-- **008** is the bug list, and stands alone. A headcount edit rewrites history,
-  history outside the period becomes unreachable, and the staffing pass reports
-  shortages that are not real. The third was partly fixed by #40; the first two
-  are open. Worth fixing whether or not 009-014 happen.
-- **009** fixes the first two structurally by never scheduling elapsed time.
-  No dependency, no storage change, no solver. **This is the one to do first.**
+- **008** is the bug list, and stands alone. A headcount edit rewrote history
+  (**fixed**), history outside the period becomes unreachable (open), and the
+  staffing pass reports shortages that are not real (partly fixed by #40).
+- **009** fixes the first two by never re-deciding elapsed time. Its core rule
+  is **implemented**: the clock enters at the adapter as an absolute instant,
+  an elapsed segment carrying a record defers to it, and the headcount cap stops
+  applying there. The log as its own structure, and 012's export, remain.
 - **010** is where the growing log is kept. It concludes the plan should stay in
   the URL, moved from the query string to the fragment, with local-first held in
   reserve.

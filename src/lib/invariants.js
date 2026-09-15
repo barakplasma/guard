@@ -90,7 +90,11 @@ export function checkSchedule(result, input) {
       const m = missions.get(id);
       const night = (input.nightWindows ?? []).some((w) => at >= w.start && at < w.end);
       const capacity = m.type === 'local' && night ? m.nightCount ?? m.count : m.count;
-      if (count > capacity) report('OVERSTAFFED', { missionId: id, start: at, end: next });
+      // Elapsed time is the log, and the log can legitimately hold more people
+      // than the mission's *current* headcount - somebody lowered it after the
+      // fact. Capacity is only a rule about time still to be scheduled.
+      const logged = next <= (input.loggedBefore ?? -Infinity);
+      if (!logged && count > capacity) report('OVERSTAFFED', { missionId: id, start: at, end: next });
     }
     while (ti < result.timeline.length && result.timeline[ti].end <= at) ti++;
     const seg = result.timeline[ti];

@@ -1,7 +1,7 @@
 # ADR 008: Three defects to fix regardless of any refactor
 
-- Status: Proposed. Independent of ADRs 009-011. Defect 3's severity is
-  re-rated by ADR 013.
+- Status: Defect 1 **fixed** (ADR 009's core rule). Defect 2 open. Defect 3
+  partly fixed on `main` by #40 and re-rated by ADR 013.
 - Date: 2026-09-15
 
 ## Context
@@ -44,12 +44,13 @@ stood post.
 This is the reported defect, in the user's words: the algorithm changing
 history for a more optimal schedule breaks business logic about reality.
 
-**Minimal fix, independent of ADR 009:** elapsed demand must be capped by the
-record rather than recomputed from today's `count`. Generated staffing in
-already-elapsed time should not exceed what the freeze recorded for that slot,
-and should not fall below it either. ADR 009 fixes this structurally by never
-scheduling elapsed time at all; this narrower change closes the hole without
-waiting for that.
+**Fixed** by ADR 009's core rule. An elapsed segment that already carries a
+record defers to it: no demand is raised for it, and the headcount cap does not
+apply to a claim inside it. Both columns now read zero, and
+`historyDriftCheck.mjs` is the regression fixture; `tests/planner.history.test.js`
+pins both halves plus the two cases that must keep working - the future still
+following a new headcount, and an unrecorded elapsed segment still being planned
+so history stays visible.
 
 ## Defect 2: history outside the period becomes unreachable
 
@@ -164,9 +165,9 @@ boundaries.
 ## Consequences
 
 Defects 1 and 2 are the ones that hurt: they corrupt or hide a record of who
-actually stood post. They should be fixed first and do not need any dependency,
-any storage change, or any solver. Under ADR 012's 72-hour rolling horizon both
-fire on the normal path.
+actually stood post, and under ADR 012's 72-hour rolling horizon both fire on
+the normal path. **Defect 1 is fixed**; defect 2 waits on the log and the export
+in ADRs 009 and 012.
 
 Defect 3 was initially rated as rare, which was wrong, and #40 has since fixed
 the reported shape. The class remains open at 2.8% of shortage instants on

@@ -221,8 +221,22 @@ export function dailyOccurrences(doc, mission) {
 }
 
 /** Shape the document into the planner engine's input. */
-export function toPlannerInput(doc) {
+/**
+ * The only route from the plan document into the engine.
+ *
+ * `now` is where the clock enters, and it enters *here* rather than in
+ * `planner.js` for the same reason the night windows are resolved here: the
+ * engine does interval arithmetic on absolute instants and owns no clock. It
+ * becomes `loggedBefore`, the boundary before which time is a log rather than
+ * a schedule (ADR 009).
+ *
+ * Omitting `now` means "nothing has elapsed", which is what every caller
+ * written before this parameter meant - so the golden fixtures, the export
+ * tests and the URL round-trips all keep their exact previous results.
+ */
+export function toPlannerInput(doc, now) {
   return {
+    loggedBefore: now ?? -Infinity,
     start: doc.start,
     end: doc.end,
     shiftMinutes: doc.shiftMinutes,

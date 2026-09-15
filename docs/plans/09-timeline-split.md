@@ -1,7 +1,10 @@
 # ADR 009: Split the timeline - log the past, schedule only the future
 
-- Status: Proposed. Fixes ADR 008's defects 1 and 2 structurally.
-  Adds no dependency. Independent of ADRs 010 and 011.
+- Status: **Partly implemented on this branch.** The core rule - elapsed time
+  that carries a record is a record, not a slot to fill - closes ADR 008's
+  defect 1. The log as a first-class structure, and the export ADR 012 decided
+  on, are not built, so defect 2 is still open. Adds no dependency. Independent
+  of ADRs 010 and 011.
 - Date: 2026-09-15
 
 ## Context
@@ -45,6 +48,49 @@ defect 1 at the root rather than per field.
 discarding history, which closes defect 2: elapsed assignments outside the
 current period are still displayable, read-only, because they belong to the log
 rather than to the plan.
+
+## What is implemented
+
+The clock enters at `toPlannerInput(doc, now)` and reaches the engine only as
+`loggedBefore`, an absolute instant, so `planner.js` still owns no clock and
+stays deterministic on absolute input.
+
+Three rules follow from it:
+
+1. **No demand is raised for an elapsed segment that already carries a record.**
+   Raising a headcount cannot retroactively staff a finished shift.
+2. **The headcount cap does not apply to a claim wholly in elapsed time.**
+   Lowering a headcount cannot delete somebody who genuinely stood post, and a
+   person correcting the record is not blocked by today's seat count.
+3. **Qualification gaps in elapsed time are not reported.** The engine no longer
+   staffs that time, so the warning would be an alert nobody can act on.
+
+`OVERSTAFFED` is exempted in `invariants.js` for the same reason: capacity is a
+rule about time still to be scheduled, not about what happened.
+
+Two deliberate asymmetries are worth knowing, because both look like bugs:
+
+- **The `covered > 0` gate.** An elapsed segment nobody is recorded on has no
+  history to protect, so it is still planned. Without that gate, opening a plan
+  whose first days had elapsed would show an empty past rather than the schedule
+  it would have had.
+- **`freezeElapsedBeforeEdit` calls the planner *without* `now`.** Its job is to
+  capture what the engine had already decided for elapsed time, so it needs the
+  unrestricted schedule. Passing `now` there would make the engine decline to
+  plan the very hours the freeze is about to record, and history would be lost
+  rather than preserved.
+
+Omitting `now` means "nothing has elapsed", which is what every caller written
+before this meant - so the golden fixtures, the export tests and the URL
+round-trips keep their exact previous results.
+
+## What is not implemented
+
+The log is still expressed as pins rather than as a structure of its own, so a
+logged assignment does not yet carry its own seat count - the `covered` gate
+achieves the same outcome by a narrower route. History outside the plan period
+is still invisible (ADR 008's defect 2), and ADR 012's export of a rolled-past
+window does not exist. Those are the remainder of this record.
 
 ## Consequences
 

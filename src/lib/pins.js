@@ -175,6 +175,11 @@ export function freezeElapsedBeforeEdit(prev, next, now = Date.now()) {
   if (prev.employees.length === 0 || prev.missions.length === 0) return next;
   let result;
   try {
+    // Deliberately *without* `now`. The freeze's whole job is to capture what
+    // the engine had already decided for elapsed time, so it needs the
+    // unrestricted schedule; passing `now` here would make the engine decline
+    // to plan the very hours this is about to record, and history would be lost
+    // rather than preserved (ADR 009).
     result = runPlanner(toPlannerInput(prev));
   } catch {
     return next;

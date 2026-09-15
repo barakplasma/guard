@@ -28,7 +28,11 @@ function useSchedule(doc) {
     if (doc.employees.length === 0) return { error: t.needEmployees };
     if (doc.missions.length === 0) return { error: t.needMissions };
     try {
-      return { result: runPlanner({ ...toPlannerInput(doc), onInvariantViolation: 'report' }) };
+      // `Date.now()` enters here, in the UI, and reaches the engine only as the
+      // absolute `loggedBefore` instant the adapter resolves - the engine still
+      // owns no clock (ADR 009). Recomputing on `doc` alone is deliberate: the
+      // schedule should move when the plan moves, not tick over on its own.
+      return { result: runPlanner({ ...toPlannerInput(doc, Date.now()), onInvariantViolation: 'report' }) };
     } catch (e) {
       return { error: e.message };
     }

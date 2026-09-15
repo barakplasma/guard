@@ -262,7 +262,7 @@ function normalizeMissions(missions, planStart, planEnd, warnings) {
  * shared link must keep working rather than erroring. Everything else that
  * cannot be honoured degrades to a warning.
  */
-function normalizePins(pins, employeeById, missionById, planStart, planEnd, warnings, nightWindows) {
+function normalizePins(pins, employeeById, missionById, planStart, planEnd, warnings, nightWindows, loggedBefore = -Infinity) {
   // --- Step 1: resolve every pin to its effective [start, end) coverage ---
   // Everything downstream (dedup, availability, conflicts, capacity) has to
   // reason about coverage, never the literal written range - a whole-mission
@@ -390,9 +390,14 @@ function normalizePins(pins, employeeById, missionById, planStart, planEnd, warn
     const sameMission = perMission.get(c.mission.id) || [];
     // Capacity is measured at every change inside the claim, not the roomiest
     // headcount or a count of intervals that merely overlap different parts.
+    //
+    // A claim wholly inside elapsed time is exempt (ADR 009). Today's `count`
+    // is not evidence about how many people stood a post that is already over,
+    // so applying it there deletes people who genuinely were on duty the moment
+    // somebody lowers the headcount. The record outranks the setting.
     const points = new Set([c.start, ...sameMission.flatMap((q) => [q.start, q.end]),
       ...nightWindows.flatMap((w) => [w.start, w.end])]);
-    const overflows = [...points].some((at) => at >= c.start && at < c.end
+    const overflows = c.end > loggedBefore && [...points].some((at) => at >= c.start && at < c.end
       && sameMission.filter((q) => q.start <= at && q.end > at).length
         >= countAt(c.mission, at, nightWindows));
     if (overflows) {
@@ -520,6 +525,12 @@ function planOnce({
   start, end, shiftMinutes, strategy: strategyName = DEFAULT_STRATEGY,
   employees = [], missions = [], pins = [], nightWindows = [], tags = [],
   repairHints = [],
+  // The instant before which time is a *log* rather than a schedule (ADR 009).
+  // An absolute ms epoch, resolved by the adapter exactly like `nightWindows`,
+  // because the engine has no clock of its own and must not grow one.
+  // `-Infinity` means "nothing has elapsed", which is what every caller written
+  // before this field meant and what keeps the golden fixtures byte-identical.
+  loggedBefore = -Infinity,
   onInvariantViolation = 'throw',
 }) {
   /* --- structural validation: these are bugs in the input, not planner findings --- */
@@ -548,7 +559,7 @@ function planOnce({
   for (const m of miss) {
     for (const r of m.requires) if (m.excludes.includes(r.tag)) warnings.push({ code: 'tag-required-and-excluded', missionId: m.id, tag: r.tag });
   }
-  const goodPins = normalizePins(pins, employeeById, missionById, start, end, warnings, nightWindows);
+  const goodPins = normalizePins(pins, employeeById, missionById, start, end, warnings, nightWindows, loggedBefore);
 
   for (const p of goodPins) {
     const m = missionById.get(p.missionId), e = employeeById.get(p.employeeId);
@@ -859,6 +870,17 @@ function planOnce({
       const covered = rows.filter(
         (r) => r.missionId === m.id && r.start <= seg.start && r.end >= seg.end,
       ).length;
+      // Elapsed time that already has a record is a record, not a slot to fill
+      // (ADR 009). Raising a mission's headcount today must not retroactively
+      // staff a shift that is already over with somebody who was never there:
+      // the freeze records *who* held a slot and has nowhere to record how many
+      // seats existed then, so today's `count` is not evidence about the past.
+      //
+      // Gated on `covered` deliberately. An elapsed segment nobody is recorded
+      // on has no history to protect, and the schedule it *would* have had is
+      // still the most useful thing to show - so it is planned as before. Only
+      // a segment with a record defers to it.
+      if (seg.end <= loggedBefore && covered > 0) continue;
       const need = countAt(m, seg.start, nightWindows) - covered;
       if (need > 0) {
         demands.push({
@@ -950,6 +972,10 @@ function planOnce({
   };
   const missing = new Map();
   for (const seg of result.timeline) {
+    // A qualification gap in elapsed time is a historical fact, not a finding.
+    // The engine no longer staffs that time (ADR 009), so reporting it would
+    // be an alert nobody can act on, arriving on every render.
+    if (seg.end <= loggedBefore) continue;
     for (const m of miss) {
       const running = m.type === 'daily' ? m.occurrences.some((w) => seg.start >= w.start && seg.start < w.end)
         : seg.start >= m.start && seg.start < m.end;
@@ -966,7 +992,7 @@ function planOnce({
   }
   warnings.push(...missing.values());
   warnings.push(...assessRest(shifts, emps, tags, nightWindows, start, end, sleepable));
-  return validateSchedule(result, { start, end, shiftMinutes, employees: emps, missions: miss, pins: goodPins, nightWindows }, onInvariantViolation);
+  return validateSchedule(result, { start, end, shiftMinutes, employees: emps, missions: miss, pins: goodPins, nightWindows, loggedBefore }, onInvariantViolation);
 }
 
 /**
