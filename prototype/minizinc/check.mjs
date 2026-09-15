@@ -46,7 +46,7 @@ for (let seed = first; seed < first + count; seed++) {
   // actually scores - a mismatch means the model computes something other than
   // what it claims, which no amount of agreeing on the total would reveal.
   const scored = score(inst, got.x);
-  const claimed = [got.unmetQualifications, got.unfilledSeats, got.imbalance];
+  const claimed = [got.unmetQualifications, got.unfilledSeats, got.slotChurn, got.imbalance];
   if (scored.join() !== claimed.join()) {
     console.error(`seed ${seed}: model reports ${claimed} but its assignment scores ${scored}`);
     console.error(JSON.stringify(inst));

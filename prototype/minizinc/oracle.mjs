@@ -42,7 +42,7 @@ export function violations(inst, x) {
   return bad;
 }
 
-/** The three objectives, in the order the ladder minimises them. */
+/** The objectives, in the order the ladder minimises them. */
 export function score(inst, x) {
   const { nE, nM, nS } = inst;
   let unmetQualifications = 0;
@@ -62,12 +62,22 @@ export function score(inst, x) {
       unfilledSeats += inst.want[m][s] - on;
     }
   }
+  let slotChurn = 0;
+  for (let e = 0; e < nE; e++) {
+    for (let m = 0; m < nM; m++) {
+      for (let s = 1; s < nS; s++) {
+        if (inst.want[m][s] <= 0 || inst.want[m][s - 1] <= 0) continue;
+        if (inst.slotOf[m][s] !== inst.slotOf[m][s - 1]) continue;
+        if (x[e][m][s] !== x[e][m][s - 1]) slotChurn++;
+      }
+    }
+  }
   const load = Array.from({ length: nE }, (_, e) => {
     let n = 0;
     for (let m = 0; m < nM; m++) for (let s = 0; s < nS; s++) if (x[e][m][s]) n++;
     return n;
   });
-  return [unmetQualifications, unfilledSeats, Math.max(...load) - Math.min(...load)];
+  return [unmetQualifications, unfilledSeats, slotChurn, Math.max(...load) - Math.min(...load)];
 }
 
 const lexLess = (a, b) => a.some((v, i) => v !== b[i] && v < b[i] && a.slice(0, i).every((u, j) => u === b[j]));
@@ -140,6 +150,18 @@ export function randomInstance(seed) {
   const inst = { nE, nM, nS };
   inst.want = Array.from({ length: nM }, () => (
     Array.from({ length: nS }, () => (r() < 0.2 ? 0 : 1 + pick(2)))));
+  // Segments grouped into slots, so some instances carry a slot torn in two and
+  // the churn term has something to say. A fresh slot number per segment, with
+  // an even chance of continuing the previous one.
+  inst.slotOf = Array.from({ length: nM }, () => {
+    const out = [];
+    let slot = 0;
+    for (let s = 0; s < nS; s++) {
+      if (s > 0 && r() < 0.5) slot++;
+      out.push(slot);
+    }
+    return out;
+  });
   inst.avail = Array.from({ length: nE }, () => (
     Array.from({ length: nS }, () => r() < 0.85)));
   inst.allowed = Array.from({ length: nE }, () => (

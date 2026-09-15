@@ -168,7 +168,7 @@ the app calls it; it exists so the criteria below can be measured rather than
 argued about. Its own README carries the how-to-run detail.
 
 **The model agrees with an exhaustive search.** 420 random instances (seeds
-1-420), every one matching the oracle on all three objectives, on the assignment
+1-420), every one matching the oracle on all four objectives, on the assignment
 being feasible, and - separately - on the model's *reported* objectives matching
 what its own assignment scores. That last check is the one worth having: a model
 can compute something other than what it claims, and a comparison of totals
@@ -198,6 +198,29 @@ the class #40 left open, and agrees with the engine on the other 97%.
 The second denominator is the one a person feels. Counted per plan rather than
 per warning, **11.8% of the plans that said "not enough people" had enough
 people**.
+
+### One objective the written order did not have
+
+The list above goes coverage, history, rest, imbalance, rotation. Building it
+surfaced a term missing from it: **crew changing hands inside one grid slot**.
+
+A segment is not a slot. An availability edge, a night edge or a pin bound tears
+a slot in two, and both halves still name the one slot they are inside - that
+stamp is what `mergeRows` rejoins on and what `ringKeys` counts a turn by. Left
+unsaid, the model swaps people between the halves of a single hour to shave the
+imbalance, and is right to: nothing told it that an hour is the unit somebody
+actually stands.
+
+It is **soft, not hard**, and that is the interesting part. A pin covering half
+a slot has to be able to hand over at its own edge - the engine splits segments
+on accepted pin bounds precisely so it can. A hard equality would make such a
+pin infeasible, or quietly extend it over the rest of the slot. So it sits at
+level 3, above imbalance and below coverage.
+
+This is the kind of thing writing the model is for. The objective was implicit
+in the engine's control flow - a local segment is filled once and not
+revisited - and only became a thing that had to be *stated* when the control
+flow went away.
 
 ### What the prototype does not model
 

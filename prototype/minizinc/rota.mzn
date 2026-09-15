@@ -23,6 +23,15 @@ set of int: M = 1..nM;
 set of int: S = 1..nS;
 
 array[M, S] of int: want;                    % seats wanted; 0 where not running
+% Which grid slot each segment belongs to, per mission. Two segments of one
+% mission sharing a slot number are two halves of one shift - an availability
+% edge, a night edge or a pin bound tore the slot in two. The engine stamps
+% every row with this for the same reason (`slotStart`/`slotEnd`): the slot, not
+% the segment, is the unit a turn is counted in and the unit `mergeRows` rejoins
+% on. Without it here the solver would happily rotate people through the halves
+% of a single hour to shave the imbalance, which is not a schedule anybody wants
+% to stand.
+array[M, S] of int: slotOf;
 array[E, S] of bool: avail;                  % free to work this segment
 array[E, M] of bool: allowed;                % not excluded, by tag or by name
 array[E, M, S] of bool: pinned;              % manual assignment: an input fact
@@ -75,7 +84,15 @@ var int: unfilledSeats = sum(m in M, s in S)(
   want[m, s] - sum(e in E)(bool2int(x[e, m, s]))
 );
 
-% 3. Workload imbalance: the gap between the busiest and the idlest.
+% 3. Crew changing hands inside one slot. Soft rather than hard, because a pin
+% covering half a slot *must* be able to hand over at its own edge - the engine
+% splits segments on accepted pin bounds precisely so it can. A hard equality
+% would make such a pin infeasible or silently swallow the rest of the slot.
+var int: slotChurn = sum(e in E, m in M, s in 2..nS where
+    want[m, s] > 0 /\ want[m, s - 1] > 0 /\ slotOf[m, s] == slotOf[m, s - 1]
+  )(bool2int(x[e, m, s] != x[e, m, s - 1]));
+
+% 4. Workload imbalance: the gap between the busiest and the idlest.
 array[E] of var 0..nS: load = [sum(m in M, s in S)(bool2int(x[e, m, s])) | e in E];
 var int: imbalance = max(load) - min(load);
 
@@ -88,16 +105,19 @@ var int: imbalance = max(load) - min(load);
 % above have exactly one definition, which is the whole reason to move this
 % into a model in the first place.
 
-int: level;                                  % 1 = coverage, 2 = seats, 3 = fairness
+int: level;                    % 1 qualifications, 2 seats, 3 churn, 4 imbalance
 int: capUnmet;
 int: capUnfilled;
+int: capChurn;
 
 constraint capUnmet    >= 0 -> unmetQualifications <= capUnmet;
 constraint capUnfilled >= 0 -> unfilledSeats       <= capUnfilled;
+constraint capChurn    >= 0 -> slotChurn           <= capChurn;
 
 var int: objective =
   if level == 1 then unmetQualifications
   elseif level == 2 then unfilledSeats
+  elseif level == 3 then slotChurn
   else imbalance endif;
 
 solve minimize objective;
@@ -106,6 +126,7 @@ output [
   "objective = ", show(objective), ";\n",
   "unmetQualifications = ", show(unmetQualifications), ";\n",
   "unfilledSeats = ", show(unfilledSeats), ";\n",
+  "slotChurn = ", show(slotChurn), ";\n",
   "imbalance = ", show(imbalance), ";\n",
   "x = ", show([bool2int(x[e, m, s]) | e in E, m in M, s in S]), ";\n",
 ];

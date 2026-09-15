@@ -50,6 +50,9 @@ function instantInstance(employees, live) {
     nM,
     nS: 1,
     want: live.map((m) => [m.count]),
+    // One segment, so every mission's single segment is its own slot and the
+    // churn term has nothing to say here by construction.
+    slotOf: live.map(() => [0]),
     avail: employees.map(() => [true]),
     allowed: employees.map((e) => live.map((m) => !(m.excludes ?? []).some((t) => e.tags.includes(t)))),
     pinned: employees.map(() => live.map(() => [false])),

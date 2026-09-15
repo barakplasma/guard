@@ -28,6 +28,7 @@ const bool = (b) => (b ? 'true' : 'false');
  * @property {number} nM
  * @property {number} nS
  * @property {number[][]} want      seats per [mission][segment], 0 = not running
+ * @property {number[][]} slotOf    grid slot id per [mission][segment]
  * @property {boolean[][]} avail    [employee][segment]
  * @property {boolean[][]} allowed  [employee][mission]
  * @property {boolean[][][]} pinned [employee][mission][segment]
@@ -35,7 +36,7 @@ const bool = (b) => (b ? 'true' : 'false');
  */
 
 /** MiniZinc data for an instance. Indices are 1-based on the model's side. */
-export function toDzn(inst, { level, capUnmet, capUnfilled }) {
+export function toDzn(inst, { level, capUnmet, capUnfilled, capChurn }) {
   const { nE, nM, nS } = inst;
   const flatPinned = [];
   for (let e = 0; e < nE; e++) {
@@ -49,6 +50,7 @@ export function toDzn(inst, { level, capUnmet, capUnfilled }) {
     `nM = ${nM};`,
     `nS = ${nS};`,
     `want = array2d(1..${nM}, 1..${nS}, [${inst.want.flat().join(', ')}]);`,
+    `slotOf = array2d(1..${nM}, 1..${nS}, [${inst.slotOf.flat().join(', ')}]);`,
     `avail = array2d(1..${nE}, 1..${nS}, [${inst.avail.flat().map(bool).join(', ')}]);`,
     `allowed = array2d(1..${nE}, 1..${nM}, [${inst.allowed.flat().map(bool).join(', ')}]);`,
     `pinned = array3d(1..${nE}, 1..${nM}, 1..${nS}, [${flatPinned.join(', ')}]);`,
@@ -63,6 +65,7 @@ export function toDzn(inst, { level, capUnmet, capUnfilled }) {
     `level = ${level};`,
     `capUnmet = ${capUnmet};`,
     `capUnfilled = ${capUnfilled};`,
+    `capChurn = ${capChurn};`,
     '',
   ].join('\n');
 }
@@ -90,6 +93,7 @@ function parseOutput(text, inst) {
     x,
     unmetQualifications: num('unmetQualifications'),
     unfilledSeats: num('unfilledSeats'),
+    slotChurn: num('slotChurn'),
     imbalance: num('imbalance'),
   };
 }
@@ -119,22 +123,24 @@ function runOnce(inst, level, caps, { solver, timeLimitMs, mzn }) {
 }
 
 /**
- * Climb the ladder. Returns the level-3 solution plus each level's optimum, or
+ * Climb the ladder. Returns the last level's solution plus each level's optimum, or
  * `null` if the hard constraints alone are unsatisfiable - which for this model
  * means contradictory pins, since every soft goal is a slack term.
  */
 export function solveRota(inst, opts = {}) {
   const cfg = { solver: 'chuffed', timeLimitMs: 0, mzn: MODEL, ...opts };
-  let caps = { capUnmet: -1, capUnfilled: -1 };
+  let caps = { capUnmet: -1, capUnfilled: -1, capChurn: -1 };
   let best = null;
   const levels = [];
-  for (const level of [1, 2, 3]) {
+  for (const level of [1, 2, 3, 4]) {
     const got = runOnce(inst, level, caps, cfg);
     if (!got) return null;
     best = got;
-    levels.push({ level, objective: [got.unmetQualifications, got.unfilledSeats, got.imbalance][level - 1], proved: got.proved });
+    const reached = [got.unmetQualifications, got.unfilledSeats, got.slotChurn, got.imbalance][level - 1];
+    levels.push({ level, objective: reached, proved: got.proved });
     if (level === 1) caps = { ...caps, capUnmet: got.unmetQualifications };
     if (level === 2) caps = { ...caps, capUnfilled: got.unfilledSeats };
+    if (level === 3) caps = { ...caps, capChurn: got.slotChurn };
   }
   return { ...best, levels };
 }

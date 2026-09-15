@@ -6,7 +6,7 @@ of the model is visible before anything replaces the hand-written engine.
 
 | file | what it is |
 | --- | --- |
-| `rota.mzn` | the model: one segment grid, hard rules, three named objectives |
+| `rota.mzn` | the model: one segment grid, hard rules, four named objectives |
 | `solve.mjs` | the lexicographic driver - three solves of one model, each capped by the last |
 | `oracle.mjs` | brute force over every feasible assignment, plus the random instances |
 | `check.mjs` | model vs. oracle on small random instances |
@@ -28,7 +28,7 @@ node prototype/minizinc/vsEngine.mjs 400     # find what the engine misses
 ## What has been measured
 
 **Against the oracle.** 420 random instances (seeds 1-420), every one agreeing
-with an exhaustive search on all three objectives, on the assignment being
+with an exhaustive search on all four objectives, on the assignment being
 feasible, and on the model's reported objectives matching what its own
 assignment scores. Each level is additionally required to have *proved*
 optimality rather than merely reported a bound - a capped round that stopped
@@ -54,6 +54,21 @@ alone.
 
 The second denominator is the one a person feels. 11.8% of the plans that said
 "not enough people" had enough people.
+
+## The objectives
+
+Minimised in order, each level capped by the last level's proven optimum:
+
+1. **unmet qualifications** - a required tag short at a running segment;
+2. **unfilled seats**;
+3. **slot churn** - crew changing hands between two segments of the *same* grid
+   slot. Soft rather than hard, because a pin covering half a slot must be able
+   to hand over at its own edge; the engine splits segments on accepted pin
+   bounds precisely so it can, and a hard equality would either make such a pin
+   infeasible or silently swallow the rest of the slot. Without this term at all
+   the solver rotates people through the halves of a torn hour to shave the
+   imbalance, which is not a schedule anybody wants to stand;
+4. **imbalance** - the gap between the busiest and the idlest.
 
 ## Scope, so nobody reads more into this than is here
 
