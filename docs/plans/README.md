@@ -72,7 +72,11 @@ Suggested order, updated now that 009's core rule has landed:
 2. ~~010's fragment move~~ (not needed - already in the fragment) and
    ~~014's first half~~ (**done** - per-person exclusions).
 3. **011** - the MiniZinc model, which closes the shortage class #40 narrowed
-   but did not eliminate, and which carries the `invariants.js` gap with it.
+   but did not eliminate. Its `invariants.js` prerequisite is **partly done**:
+   `UNREPORTED_SHORTFALL` and `PIN_DROPPED` now catch a schedule that is short
+   without saying so, or that quietly loses an accepted pin. Rest-score
+   correctness, fairness optimality and false UNSAT still need an oracle rather
+   than an invariant.
 
 ## Verification
 

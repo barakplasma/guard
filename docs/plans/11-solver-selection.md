@@ -103,14 +103,37 @@ until the model is written. **Time and memory limits must be measured, not
 assumed away**, and cancellation has to work.
 
 **`invariants.js` as a safety net.** It was used to argue that a solver
-returning something invalid would be caught. It checks well-formedness only -
-`DOUBLE_BOOKED`, `OVERSTAFFED`, `OUTSIDE_MISSION_WINDOW`, `OUTSIDE_AVAILABILITY`,
-`FALSE_QUALIFICATION`, `EXCLUDED_QUALIFICATION`, `REMOTE_NOT_WHOLE`,
-`DAILY_NOT_WHOLE`, `ROW_EXCEEDS_SLOT`, `TIMELINE_GAP`, `TIMELINE_MISMATCH`. It
-does **not** verify required-tag fulfilment, warning accuracy, complete pin
-retention, rest-score correctness, fairness optimality, or a false UNSAT, and
-**an empty schedule passes much of it**. It is a useful upper-bound check and
-not an independent correctness proof. Closing that gap is part of this work.
+returning something invalid would be caught. At the time it checked
+well-formedness only - `DOUBLE_BOOKED`, `OVERSTAFFED`, `OUTSIDE_MISSION_WINDOW`,
+`OUTSIDE_AVAILABILITY`, `FALSE_QUALIFICATION`, `EXCLUDED_QUALIFICATION`,
+`REMOTE_NOT_WHOLE`, `DAILY_NOT_WHOLE`, `ROW_EXCEEDS_SLOT`, `TIMELINE_GAP`,
+`TIMELINE_MISMATCH` - so it verified no required-tag fulfilment, no warning
+accuracy, no pin retention and no false UNSAT, and **an empty schedule passed
+much of it**.
+
+**Two of those are now closed**, and they are the two that matter most against a
+solver:
+
+- `UNREPORTED_SHORTFALL` - a mission under its headcount at any instant, in time
+  not yet elapsed, must be named by an `understaffed` warning covering that
+  stretch. Short is legal; silent is not. This is the check an empty schedule
+  cannot pass, and it is what would catch a model that returns fewer
+  assignments than it claims.
+- `PIN_DROPPED` - every pin the engine *accepted* must appear in the output.
+  Anything `normalizePins` rejected is already gone with a warning naming it, so
+  whatever survives into the input is an assignment a person made and the
+  schedule promised to keep. Dropping one silently is the worst failure this
+  module can catch, because the URL still shows the assignment and the agenda
+  does not.
+
+Both check coverage by **union** rather than containment, since the engine
+reports shortages per grid segment and emits a local pin as one row per segment.
+Getting that wrong was the first two attempts.
+
+**Still open:** rest-score correctness, fairness optimality, and false UNSAT.
+None of those is an invariant - each needs an oracle to compare against, which
+is the brute-force work in `scripts/completenessSearch.mjs` rather than
+something `checkSchedule` can decide from one result.
 
 **Node tests would prove the browser path.** They would not. The `minizinc`
 package's Node entry point spawns a native MiniZinc binary; the browser path is

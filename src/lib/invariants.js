@@ -1,4 +1,22 @@
 const assignmentKey = (s) => `${s.employeeId}|${s.missionId}`;
+
+/**
+ * Do `intervals` cover every instant of `[from, to)` between them?
+ *
+ * Union, not containment. Both callers below deal in stretches the engine
+ * reports or fills a piece at a time - a shortage is warned per grid segment,
+ * and a local pin is emitted as one row per segment - so asking any single
+ * interval to span the whole thing fails on correct output.
+ */
+function coversFully(intervals, from, to) {
+  let cursor = from;
+  for (const i of [...intervals].sort((a, b) => a.start - b.start)) {
+    if (i.start > cursor) break;
+    cursor = Math.max(cursor, i.end);
+    if (cursor >= to) return true;
+  }
+  return cursor >= to;
+}
 function stretches(input) {
   const nights = [];
   for (const w of [...(input.nightWindows ?? [])].sort((a, b) => a.start - b.start)) {
@@ -97,12 +115,68 @@ export function checkSchedule(result, input) {
       const logged = next <= (input.loggedBefore ?? -Infinity);
       if (!logged && count > capacity) report('OVERSTAFFED', { missionId: id, start: at, end: next });
     }
+    // Every mission that is *running* here, not just the ones with somebody on
+    // them. Checking `counts` alone is how an empty schedule slips through: a
+    // mission nobody was assigned to contributes no entry, so an under-staffed
+    // instant with zero people looks like no instant at all.
+    if (next > (input.loggedBefore ?? -Infinity)) {
+      const night = (input.nightWindows ?? []).some((w) => at >= w.start && at < w.end);
+      for (const m of input.missions) {
+        // The instant comes from the global edge list, so it can run past this
+        // mission's own end - an unrelated availability edge at 31 minutes
+        // against a mission ending at 30. Clamp to the mission's window before
+        // asking whether a warning covers it, or a correct `understaffed` over
+        // the mission's real extent reads as uncovered.
+        // A missing bound inherits the plan's, the same way it does everywhere
+        // else in the document. The engine normalizes these before we see them,
+        // but the unit fixtures do not, and `Math.max(at, undefined)` is NaN -
+        // which silently skips every comparison below rather than failing.
+        const windows = m.type === 'daily'
+          ? (m.occurrences ?? [])
+          : [{ start: m.start ?? input.start, end: m.end ?? input.end }];
+        for (const w of windows) {
+          const from = Math.max(at, w.start);
+          const to = Math.min(next, w.end);
+          if (to <= from) continue;
+          const want = m.type === 'local' && night ? m.nightCount ?? m.count : m.count;
+          const got = counts.get(m.id) ?? 0;
+          if (got >= want) continue;
+          // Short is legal - there may genuinely not be enough people. Silent
+          // is not. `understaffed` has to name this mission over this stretch,
+          // or the schedule is lying about what it delivered. This is the check
+          // an empty schedule cannot pass.
+          const reported = coversFully(
+            (result.warnings ?? []).filter((x) => x.code === 'understaffed' && x.missionId === m.id),
+            from, to,
+          );
+          if (!reported) report('UNREPORTED_SHORTFALL', { missionId: m.id, start: from, end: to, want, got });
+        }
+      }
+    }
+
     while (ti < result.timeline.length && result.timeline[ti].end <= at) ti++;
     const seg = result.timeline[ti];
     const actual = [...active].map(assignmentKey).sort();
     const listed = (seg?.onDuty ?? []).map(assignmentKey).sort();
     if (!seg || seg.start > at || seg.end < next || actual.length !== listed.length || actual.some((v, j) => v !== listed[j])) report('TIMELINE_MISMATCH', { start: at, end: next });
   }
+
+  // Every pin the engine *accepted* has to be in the output. `input.pins` here
+  // is the normalized set - whatever `normalizePins` rejected is already gone,
+  // with a warning naming it - so anything still in this list is an assignment
+  // a person made and the schedule promised to honour. Dropping one silently is
+  // the worst failure this module can catch, because the URL still shows the
+  // assignment and the agenda does not.
+  for (const pin of input.pins ?? []) {
+    const covering = result.shifts.filter((s) => s.missionId === pin.missionId
+      && s.employeeId === pin.employeeId && s.end > pin.start && s.start < pin.end);
+    if (!coversFully(covering, pin.start, pin.end)) {
+      report('PIN_DROPPED', {
+        missionId: pin.missionId, employeeId: pin.employeeId, start: pin.start, end: pin.end,
+      });
+    }
+  }
+
   return violations;
 }
 
