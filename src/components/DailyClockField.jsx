@@ -1,23 +1,50 @@
-import { useEffect, useState } from 'react';
-import { TextField } from '@mui/material';
+import { IconButton, InputAdornment, TextField } from '@mui/material';
+import CloseIcon from '@mui/icons-material/Close';
+import { fromClockInput, toClockInput } from '../lib/localInput.js';
+import { t } from '../strings.js';
 
-const clock = (value) => value == null ? '' : `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`;
-
-/** Always military time, even in browsers whose native time control uses AM/PM. */
-export default function DailyClockField({ value, onChange, label, testId }) {
-  const [draft, setDraft] = useState(clock(value));
-  useEffect(() => setDraft(clock(value)), [value]);
-  return <TextField label={label} value={draft} placeholder="08:00" sx={{ width: 180 }}
-    slotProps={{ inputLabel: { shrink: true }, htmlInput: { dir: 'ltr', inputMode: 'numeric', maxLength: 5, 'data-testid': testId } }}
-    onBlur={() => setDraft(clock(value))}
-    onChange={(e) => {
-      const raw = e.target.value;
-      setDraft(raw);
-      if (!raw) { onChange(null); return; }
-      const formatted = /^\d{4}$/.test(raw) ? `${raw.slice(0, 2)}:${raw.slice(2)}` : raw;
-      if (/^([01]\d|2[0-3]):[0-5]\d$/.test(formatted)) {
-        const [h, m] = formatted.split(':').map(Number);
-        onChange(h * 60 + m); setDraft(formatted);
-      }
-    }} />;
+/**
+ * A bare wall-clock time, as the platform's own field.
+ *
+ * Wall-clock minutes are independent of the arbitrary calendar date a picker
+ * would need, and a native `time` input's value is always 24-hour `HH:mm` -
+ * see `DateTimeField` for why that matters more than it sounds.
+ */
+export default function DailyClockField({
+  value, onChange, label, testId, nullable = true, sx,
+}) {
+  const clearable = nullable && value != null;
+  return (
+    <TextField
+      type="time"
+      size="small"
+      label={label}
+      value={toClockInput(value)}
+      onChange={(event) => {
+        const next = fromClockInput(event.target.value);
+        if (next != null) onChange(next);
+        else if (nullable && event.target.value === '') onChange(null);
+      }}
+      slotProps={{
+        inputLabel: { shrink: true },
+        htmlInput: { 'data-testid': testId, step: 60, dir: 'ltr' },
+        input: clearable ? {
+          endAdornment: (
+            <InputAdornment position="end">
+              <IconButton
+                size="small"
+                aria-label={t.clearValue}
+                onClick={() => onChange(null)}
+                data-testid={`${testId}-clear`}
+                sx={{ p: 0.25 }}
+              >
+                <CloseIcon fontSize="small" />
+              </IconButton>
+            </InputAdornment>
+          ),
+        } : undefined,
+      }}
+      sx={{ width: 180, maxWidth: '100%', ...sx }}
+    />
+  );
 }

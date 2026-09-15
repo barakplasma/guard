@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import {
-  Box, Button, Checkbox, Chip, FormControl, FormControlLabel, IconButton, InputLabel, MenuItem,
-  OutlinedInput, Paper, Select, Stack, TextField, ToggleButton,
+  Autocomplete, Box, Button, Checkbox, Chip, FormControlLabel, IconButton,
+  Paper, Stack, Switch, TextField, ToggleButton,
   ToggleButtonGroup, Tooltip, Typography,
 } from '@mui/material';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
+import ContentCopyIcon from '@mui/icons-material/ContentCopyOutlined';
 import AddIcon from '@mui/icons-material/Add';
 import DateTimeField from '../components/DateTimeField.jsx';
+import NumberField from '../components/NumberField.jsx';
 import DailyClockField from '../components/DailyClockField.jsx';
 import ConfirmDialog from '../components/ConfirmDialog.jsx';
 import { usePlan } from '../state/PlanContext.jsx';
@@ -15,21 +17,7 @@ import { nextTopOfHour } from '../lib/planSchema.js';
 import { t } from '../strings.js';
 import { MissionQualifications } from '../components/Qualifications.jsx';
 
-/**
- * What a shift-length box's new text means: `null` where it was cleared, so
- * the mission goes back to inheriting; the number where it is a usable one;
- * and `undefined` for anything else, which the caller drops rather than
- * writes. A number input emits on every keystroke and the document it lands in
- * is the user's only copy, so a value that is not yet a shift length must not
- * become one.
- */
-function readMinutes(raw) {
-  if (raw === '') return null;
-  const n = Number(raw);
-  return Number.isInteger(n) && n >= 5 && n <= 1440 ? n : undefined;
-}
-
-function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
+function MissionCard({ mission, doc, onChange, onRemove, onDuplicate, onAssign }) {
   // Anyone holding a pin on this mission is on its roster. A whole-mission
   // assignment does not stay whole: clearing or swapping a single shift cuts
   // it into ranges (see cutPin in pins.js), and listing only the untouched
@@ -88,17 +76,9 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
             </ToggleButton>
           </ToggleButtonGroup>
 
-          <TextField
-            label={mission.type === 'daily' ? t.headcountPerOccurrence : mission.type === 'remote' ? t.headcount : t.headcountDay}
-            type="number"
-            value={mission.count}
-            onChange={(e) => {
-              const n = Number(e.target.value);
-              if (Number.isInteger(n) && n >= 1) onChange({ count: n });
-            }}
-            slotProps={{ htmlInput: { min: 1, 'data-testid': `mission-count-${mission.id}` } }}
-            sx={{ width: 120 }}
-          />
+          <NumberField label={mission.type === 'daily' ? t.headcountPerOccurrence : mission.type === 'remote' ? t.headcount : t.headcountDay} value={mission.count}
+            testId={`mission-count-${mission.id}`}
+            onChange={(value) => onChange({ count: value })} />
 
           {/*
             Remote missions are held end to end by one set of people, so there is
@@ -108,31 +88,47 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
           */}
           {mission.type === 'local' && (
             <Tooltip title={t.headcountNightHelp}>
-              <TextField
-                label={t.headcountNight}
-                type="number"
-                value={mission.nightCount ?? ''}
-                placeholder={String(mission.count)}
-                onChange={(e) => {
-                  const raw = e.target.value;
-                  if (raw === '') { onChange({ nightCount: null }); return; }
-                  const n = Number(raw);
-                  if (Number.isInteger(n) && n >= 1) onChange({ nightCount: n });
-                }}
-                slotProps={{ htmlInput: { min: 1, 'data-testid': `mission-night-count-${mission.id}` } }}
-                sx={{ width: 120 }}
-              />
+              <NumberField label={t.headcountNight} value={mission.nightCount}
+                nullable fallbackValue={mission.count} testId={`mission-night-count-${mission.id}`}
+                onChange={(value) => onChange({ nightCount: value })} />
             </Tooltip>
           )}
 
-          <IconButton
-            aria-label={t.remove}
-            onClick={onRemove}
-            sx={{ marginInlineStart: 'auto', p: 1 }}
-            data-testid={`remove-mission-${mission.id}`}
-          >
-            <DeleteOutlineIcon />
-          </IconButton>
+          <Tooltip title={t.onCallHelp}>
+            <FormControlLabel
+              sx={{ flexShrink: 0 }}
+              control={(
+                <Switch
+                  size="small"
+                  checked={mission.onCall ?? false}
+                  onChange={(e) => onChange({ onCall: e.target.checked })}
+                  data-testid={`mission-oncall-${mission.id}`}
+                />
+              )}
+              label={t.onCall}
+            />
+          </Tooltip>
+
+          <Box sx={{ marginInlineStart: 'auto', display: 'flex', gap: 0.5 }}>
+            <Tooltip title={t.duplicateMission}>
+              <IconButton
+                aria-label={t.duplicateMission}
+                onClick={onDuplicate}
+                sx={{ p: 1 }}
+                data-testid={`duplicate-mission-${mission.id}`}
+              >
+                <ContentCopyIcon />
+              </IconButton>
+            </Tooltip>
+            <IconButton
+              aria-label={t.remove}
+              onClick={onRemove}
+              sx={{ p: 1 }}
+              data-testid={`remove-mission-${mission.id}`}
+            >
+              <DeleteOutlineIcon />
+            </IconButton>
+          </Box>
         </Stack>
 
         {/*
@@ -145,38 +141,14 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
         {mission.type === 'local' && (
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} useFlexGap sx={{ flexWrap: 'wrap', alignItems: { xs: 'stretch', sm: 'center' } }}>
             <Tooltip title={t.shiftLengthDayHelp}>
-              <TextField
-                label={t.shiftLengthDay}
-                type="number"
-                value={mission.shiftMinutes ?? ''}
-                placeholder={String(doc.shiftMinutes)}
-                onChange={(e) => {
-                  const v = readMinutes(e.target.value);
-                  if (v !== undefined) onChange({ shiftMinutes: v });
-                }}
-                slotProps={{
-                  inputLabel: { shrink: true },
-                  htmlInput: { min: 5, max: 1440, step: 5, 'data-testid': `mission-shift-${mission.id}` },
-                }}
-                sx={{ width: 200 }}
-              />
+              <NumberField label={t.shiftLengthDay} value={mission.shiftMinutes}
+                nullable min={5} max={1440} step={5} fallbackValue={doc.shiftMinutes} testId={`mission-shift-${mission.id}`}
+                onChange={(value) => onChange({ shiftMinutes: value })} />
             </Tooltip>
             <Tooltip title={t.shiftLengthNightHelp}>
-              <TextField
-                label={t.shiftLengthNight}
-                type="number"
-                value={mission.nightShiftMinutes ?? ''}
-                placeholder={String(mission.shiftMinutes ?? doc.shiftMinutes)}
-                onChange={(e) => {
-                  const v = readMinutes(e.target.value);
-                  if (v !== undefined) onChange({ nightShiftMinutes: v });
-                }}
-                slotProps={{
-                  inputLabel: { shrink: true },
-                  htmlInput: { min: 5, max: 1440, step: 5, 'data-testid': `mission-night-shift-${mission.id}` },
-                }}
-                sx={{ width: 200 }}
-              />
+              <NumberField label={t.shiftLengthNight} value={mission.nightShiftMinutes}
+                nullable min={5} max={1440} step={5} fallbackValue={mission.shiftMinutes ?? doc.shiftMinutes} testId={`mission-night-shift-${mission.id}`}
+                onChange={(value) => onChange({ nightShiftMinutes: value })} />
             </Tooltip>
           </Stack>
         )}
@@ -259,54 +231,43 @@ function MissionCard({ mission, doc, onChange, onRemove, onAssign }) {
           </Typography>
         )}
 
-        <FormControl fullWidth>
-          <InputLabel id={`assign-${mission.id}`}>
-            {`${t.assignedPeople} (${assigned.length}/${mission.count})`}
-          </InputLabel>
-          <Select
-            labelId={`assign-${mission.id}`}
-            multiple
-            value={assigned}
-            onChange={(e) => onAssign(
-              typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value,
-            )}
-            input={<OutlinedInput label={`${t.assignedPeople} (${assigned.length}/${mission.count})`} />}
-            renderValue={(ids) => (
-              <Stack direction="row" spacing={0.5} useFlexGap sx={{ flexWrap: 'wrap' }}>
-                {ids.map((id) => {
-                  const name = doc.employees.find((e) => e.id === id)?.name ?? id;
-                  return (
-                    <Chip
-                      key={id}
-                      size="small"
-                      color={unavailableFor(id) ? 'warning' : 'default'}
-                      label={partiallyAssigned(id) ? `${name} · ${t.assignedPartially}` : name}
-                    />
-                  );
-                })}
-              </Stack>
-            )}
-            data-testid={`assign-${mission.id}`}
-          >
-            {sortByHebrewName(doc.employees).map((e) => (
-              <MenuItem key={e.id} value={e.id} sx={unavailableFor(e.id) ? { color: 'warning.main' } : undefined}>
-                {e.name}
-                {unavailableFor(e.id) ? ` — ${t.unavailable}` : ''}
-                {partiallyAssigned(e.id) && assigned.includes(e.id) ? ` — ${t.assignedPartially}` : ''}
-              </MenuItem>
-            ))}
-          </Select>
-          <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
-            {t.assignedHelp}
-          </Typography>
-        </FormControl>
+        <Autocomplete
+          multiple disableCloseOnSelect
+          options={sortByHebrewName(doc.employees)}
+          value={doc.employees.filter((e) => assigned.includes(e.id))}
+          getOptionLabel={(e) => e.name}
+          getOptionKey={(e) => e.id}
+          isOptionEqualToValue={(a, b) => a.id === b.id}
+          noOptionsText={t.noMatchingEmployees}
+          onChange={(_, selected) => onAssign(selected.map((e) => e.id))}
+          renderOption={({ key, ...props }, employee, { selected }) => (
+            <li key={key} {...props}>
+              <Checkbox checked={selected} tabIndex={-1} disableRipple sx={{ mr: 1 }} />
+              {employee.name}
+              {unavailableFor(employee.id) ? ` — ${t.unavailable}` : ''}
+              {partiallyAssigned(employee.id) && assigned.includes(employee.id) ? ` — ${t.assignedPartially}` : ''}
+            </li>
+          )}
+          renderValue={(selected, getItemProps) => selected.map((employee, index) => {
+            const { key, ...itemProps } = getItemProps({ index });
+            return <Chip key={key} {...itemProps} size="small"
+              color={unavailableFor(employee.id) ? 'warning' : 'default'}
+              label={partiallyAssigned(employee.id) ? `${employee.name} · ${t.assignedPartially}` : employee.name} />;
+          })}
+          sx={{ minWidth: 0, '& .MuiChip-root': { maxWidth: '100%' } }}
+          renderInput={(params) => <TextField {...params}
+            label={`${t.assignedPeople} (${assigned.length}/${mission.count})`}
+            helperText={t.assignedHelp}
+            slotProps={{ ...params.slotProps, htmlInput: { ...params.slotProps.htmlInput, 'data-testid': `assign-${mission.id}` } }} />} />
       </Stack>
     </Paper>
   );
 }
 
 export default function MissionsPage() {
-  const { doc, addMission, updateMission, removeMission, setMissionAssignees } = usePlan();
+  const {
+    doc, addMission, updateMission, removeMission, duplicateMission, setMissionAssignees,
+  } = usePlan();
   const [pendingRemove, setPendingRemove] = useState(null);
 
   return (
@@ -332,6 +293,7 @@ export default function MissionsPage() {
             doc={doc}
             onChange={(patch) => updateMission(m.id, patch)}
             onRemove={() => setPendingRemove(m)}
+            onDuplicate={() => duplicateMission(m.id)}
             onAssign={(ids) => setMissionAssignees(m.id, ids)}
           />
         ))}

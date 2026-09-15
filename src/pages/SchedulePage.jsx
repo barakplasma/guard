@@ -8,6 +8,7 @@ import ScheduleFindings from '../components/ScheduleFindings.jsx';
 import ShareBar from '../components/ShareBar.jsx';
 import DebugSection from '../components/DebugSection.jsx';
 import ConfirmDialog from '../components/ConfirmDialog.jsx';
+import EmployeeSelect from '../components/EmployeeSelect.jsx';
 import { usePlan } from '../state/PlanContext.jsx';
 import { plan as runPlanner } from '../lib/planner.js';
 import { toPlannerInput } from '../lib/planSchema.js';
@@ -36,7 +37,7 @@ function useSchedule(doc) {
 
 const jumpToNow = () => document.getElementById('now-slot')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
-function SummaryTable({ result }) {
+function SummaryTable({ result, highlightId }) {
   return (
     <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2 }, mb: 2 }}>
       <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1 }}>{t.summary}</Typography>
@@ -57,7 +58,11 @@ function SummaryTable({ result }) {
           </TableHead>
           <TableBody>
             {result.stats.perEmployee.map((row) => (
-              <TableRow key={row.employeeId} data-testid={`summary-${row.employeeId}`}>
+              <TableRow
+                key={row.employeeId}
+                selected={row.employeeId === highlightId}
+                data-testid={`summary-${row.employeeId}`}
+              >
                 <TableCell sx={{ overflowWrap: 'break-word' }}>{row.name}</TableCell>
                 <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>{formatDuration(row.minutes)}</TableCell>
                 <TableCell align="right">{row.stints}</TableCell>
@@ -82,8 +87,19 @@ export default function SchedulePage() {
   } = usePlan();
   const { result, error } = useSchedule(doc);
 
-  const days = useMemo(() => (result ? groupAgenda(result) : []), [result]);
+  // View state, not plan data: it never reaches the document or the URL, so
+  // sharing a link never sends your filter along with it.
+  const [filterId, setFilterId] = useState(null);
+  // The agenda is filtered; `result` is not. Everything that has to reason
+  // about the whole rota - who is already on duty in this slot, what the
+  // engine warned about, the per-person totals being compared - still sees it.
+  const shown = useMemo(() => (result && filterId
+    ? { ...result, shifts: result.shifts.filter((s) => s.employeeId === filterId) }
+    : result), [result, filterId]);
+
+  const days = useMemo(() => (shown ? groupAgenda(shown) : []), [shown]);
   const sortedEmployees = useMemo(() => sortByHebrewName(doc.employees), [doc.employees]);
+  const filtered = sortedEmployees.find((e) => e.id === filterId) ?? null;
   const now = useNow();
   const nowSlot = useMemo(() => findNowSlot(days, now), [days, now]);
   const nowSlotKey = nowSlot ? `${nowSlot.start}|${nowSlot.end}` : null;
@@ -97,6 +113,16 @@ export default function SchedulePage() {
         <Typography variant="h6" sx={{ flex: 1, fontSize: { xs: '1.05rem', sm: '1.25rem' } }}>
           {t.schedule}
         </Typography>
+        {doc.employees.length > 0 && (
+          <EmployeeSelect
+            value={filterId}
+            onChange={setFilterId}
+            employees={sortedEmployees}
+            label={t.filterEmployee}
+            allLabel={t.allEmployees}
+            testId="filter-employee"
+          />
+        )}
         {nowSlotKey != null && (
           <Button size="small" onClick={jumpToNow} data-testid="jump-to-now">
             {t.jumpToNow}
@@ -125,12 +151,16 @@ export default function SchedulePage() {
 
       {error && <Alert severity="info" sx={{ mb: 2 }}>{error}</Alert>}
 
-      <Box sx={{ mb: { xs: 1, sm: 2 } }}><ShareBar doc={doc} result={result} /></Box>
+      <Box sx={{ mb: { xs: 1, sm: 2 } }}><ShareBar doc={doc} result={result} now={now} /></Box>
       {result && <ScheduleFindings warnings={result.warnings} />}
       {result && (
         <>
 
-          {days.length === 0 && <Alert severity="info">{t.emptySchedule}</Alert>}
+          {days.length === 0 && (
+            <Alert severity="info" data-testid="agenda-empty">
+              {filtered ? t.filterNoShifts(filtered.name) : t.emptySchedule}
+            </Alert>
+          )}
 
           {days.map((day) => (
             <AgendaDay
@@ -149,7 +179,7 @@ export default function SchedulePage() {
             />
           ))}
 
-          {result.shifts.length > 0 && <SummaryTable result={result} />}
+          {result.shifts.length > 0 && <SummaryTable result={result} highlightId={filterId} />}
 
           <DebugSection
             doc={doc}

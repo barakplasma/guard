@@ -77,21 +77,3 @@ export function formatDuration(minutes) {
   const m = total % 60;
   return `${sign}${h}:${String(m).padStart(2, '0')}`;
 }
-
-/* --- <input type="datetime-local"> bridging -------------------------- */
-
-const pad = (n) => String(n).padStart(2, '0');
-
-/** epoch ms -> "YYYY-MM-DDTHH:mm" in local time (what the input expects). */
-export function toLocalInput(ms) {
-  if (ms == null || !Number.isFinite(ms)) return '';
-  const d = new Date(ms);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-/** "YYYY-MM-DDTHH:mm" in local time -> epoch ms, or null if unparseable. */
-export function fromLocalInput(value) {
-  if (!value) return null;
-  const ms = new Date(value).getTime();
-  return Number.isFinite(ms) ? ms : null;
-}

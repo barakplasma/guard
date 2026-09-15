@@ -1,7 +1,7 @@
-import { useState } from 'react';
 import {
-  Alert, Box, Button, Collapse, Divider, Paper, Stack, Typography,
+  Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, Divider, Stack, Typography,
 } from '@mui/material';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import CodeIcon from '@mui/icons-material/Code';
 import { WARN } from '../lib/planner.js';
 import { planToReadableText } from '../lib/planText.js';
@@ -9,6 +9,8 @@ import { whatsappText } from '../lib/exportText.js';
 import useCopyToast from '../hooks/useCopyToast.jsx';
 import { t } from '../strings.js';
 import { ERROR_FINDINGS, findingText } from '../lib/findings.js';
+
+/* global __APP_VERSION__ */
 
 // Codes where a manual assignment was actually dropped, so "remove this pin" is
 // a real repair. PIN_AVAILABILITY_OVERRIDDEN is deliberately absent: that pin
@@ -92,22 +94,22 @@ const preSx = {
  * the first thing anyone sees.
  */
 export default function DebugSection({ doc, result, onClearPinByWarning, onClearStalePins }) {
-  const [open, setOpen] = useState(false);
   const { copy, toastNode } = useCopyToast();
 
   return (
-    <Paper variant="outlined" sx={{ p: { xs: 1, sm: 2 }, mt: 2 }}>
-      <Button
-        size="small"
-        variant="text"
-        startIcon={<CodeIcon />}
-        onClick={() => setOpen((v) => !v)}
-        data-testid="toggle-debug"
-      >
-        {t.debugToggle(result.warnings.length)}
-      </Button>
-      <Collapse in={open}>
+    <>
+    <Accordion variant="outlined" disableGutters sx={{ mt: 2 }}>
+      <AccordionSummary expandIcon={<ExpandMoreIcon />} id="debug-summary" aria-controls="debug-content" data-testid="toggle-debug">
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+          <CodeIcon fontSize="small" />
+          <Typography>{t.debugToggle(result.warnings.length)}</Typography>
+        </Stack>
+      </AccordionSummary>
+      <AccordionDetails>
         <Box sx={{ mt: 1 }}>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+            {t.debugVersion}: {__APP_VERSION__}
+          </Typography>
           <Typography variant="caption" color="text.secondary" fontWeight={700} sx={{ display: 'block', mb: 0.5 }}>
             {t.warningsTitle}
           </Typography>
@@ -159,8 +161,9 @@ export default function DebugSection({ doc, result, onClearPinByWarning, onClear
             {whatsappText(result, { title: doc.title })}
           </Box>
         </Box>
-      </Collapse>
-      {toastNode}
-    </Paper>
+      </AccordionDetails>
+    </Accordion>
+    {toastNode}
+    </>
   );
 }

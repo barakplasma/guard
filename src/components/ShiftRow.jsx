@@ -1,12 +1,22 @@
-import { Box, Chip, IconButton, MenuItem, Select, Tooltip } from '@mui/material';
+import { useState } from 'react';
+import { Box, ButtonBase, Chip, IconButton, Tooltip, Typography } from '@mui/material';
 import PushPinIcon from '@mui/icons-material/PushPin';
 import LockIcon from '@mui/icons-material/Lock';
 import CloseIcon from '@mui/icons-material/Close';
+import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
+import AssignDialog from './AssignDialog.jsx';
 import { t } from '../strings.js';
 
 /**
- * One person in one shift, rendered as a dropdown so swapping who covers a role
- * is a single click.
+ * One person in one shift: their name, in full, with an edit affordance that
+ * opens the roster picker.
+ *
+ * The name used to live inside an inline dropdown, and that is what made the
+ * agenda unreadable on a phone - the input is only as wide as its column, so a
+ * three-syllable Hebrew name rendered as "ש..." and the rota stopped saying who
+ * was on duty. Text wraps; an input does not. The picker moved into a dialog
+ * (`AssignDialog`), which is the only surface wide enough to show a whole
+ * roster of whole names.
  *
  * Choosing someone else writes a pin over this exact range rather than editing
  * the generated output - so the displaced person is freed and automatically
@@ -18,6 +28,9 @@ import { t } from '../strings.js';
  * overlap the row underneath on a phone.
  */
 export default function ShiftRow({ shift, employees, busyElsewhere, onSwap, onClearPin }) {
+  const [picking, setPicking] = useState(false);
+  const name = employees.find((e) => e.id === shift.employeeId)?.name || '—';
+
   return (
     <Box
       sx={{
@@ -29,10 +42,9 @@ export default function ShiftRow({ shift, employees, busyElsewhere, onSwap, onCl
         // Always the full row width on a phone: a two-column packing (each
         // person given only a ~6rem share) reads fine for a two-person
         // mission, but a mission with a large headcount turns into a wall of
-        // cramped, hard-to-read dropdowns. One assignment per line costs more
+        // cramped, hard-to-read names. One assignment per line costs more
         // vertical space but stays legible regardless of headcount. On a wide
-        // screen the column is roomy already, and a name-wide control beats a
-        // stretched one.
+        // screen the column is roomy already.
         flex: { xs: '1 1 100%', sm: '0 0 auto' },
         maxWidth: '100%',
         minWidth: 0,
@@ -41,30 +53,39 @@ export default function ShiftRow({ shift, employees, busyElsewhere, onSwap, onCl
         }),
       }}
     >
-      <Select
-        value={shift.employeeId}
-        onChange={(e) => onSwap(e.target.value)}
-        size="small"
+      <ButtonBase
+        onClick={() => setPicking(true)}
+        aria-label={`${t.replaceEmployee}: ${name}`}
+        data-testid={`shift-select-${shift.missionId}-${shift.start}-${shift.employeeId}`}
         sx={{
           flex: '1 1 auto',
-          minWidth: { xs: 0, sm: 150 },
-          maxWidth: '100%',
-          // A denser control on phones: 24 of these stacked is most of the page.
-          '& .MuiSelect-select': { py: { xs: 0.75, sm: 1 } },
+          minWidth: 0,
+          // Capped on a wide screen so a long name wraps inside its own
+          // control instead of stretching the table column past the viewport -
+          // the failure `tests/mobile-viewports.mjs` checks for.
+          maxWidth: { xs: '100%', sm: 260 },
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 0.5,
+          px: 1,
+          py: 0.5,
+          borderRadius: 1,
+          border: '1px solid',
+          borderColor: 'divider',
+          textAlign: 'start',
+          // Comfortably tappable without the height of a full text field.
+          minHeight: 36,
         }}
-        data-testid={`shift-select-${shift.missionId}-${shift.start}-${shift.employeeId}`}
       >
-        {employees.map((e) => {
-          const unavailable = (e.start ?? -Infinity) > shift.start || (e.end ?? Infinity) < shift.end;
-          const taken = busyElsewhere.has(e.id) && e.id !== shift.employeeId;
-          return (
-            <MenuItem key={e.id} value={e.id} disabled={unavailable}>
-              {e.name}
-              {unavailable ? ` — ${t.unavailable}` : taken ? ` — ${t.onDuty}` : ''}
-            </MenuItem>
-          );
-        })}
-      </Select>
+        <Typography
+          variant="body2"
+          sx={{ minWidth: 0, overflowWrap: 'anywhere', textAlign: 'start', lineHeight: 1.3 }}
+        >
+          {name}
+        </Typography>
+        <EditOutlinedIcon fontSize="small" sx={{ flex: '0 0 auto', color: 'text.secondary' }} />
+      </ButtonBase>
 
       {shift.pinned && (
         // Badge and its clear button stay one unit so they never wrap apart.
@@ -103,6 +124,15 @@ export default function ShiftRow({ shift, employees, busyElsewhere, onSwap, onCl
           </IconButton>
         </Box>
       )}
+
+      <AssignDialog
+        open={picking}
+        shift={shift}
+        employees={employees}
+        busyElsewhere={busyElsewhere}
+        onSelect={(employeeId) => { setPicking(false); onSwap(employeeId); }}
+        onClose={() => setPicking(false)}
+      />
     </Box>
   );
 }

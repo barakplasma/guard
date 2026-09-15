@@ -32,6 +32,7 @@ try {
     await page.getByTestId(testId).fill(name);
     await page.getByRole('option', { name, exact: true }).click();
     await page.keyboard.press('Escape');
+    await page.locator('.MuiAutocomplete-root').filter({ has: page.getByTestId(testId) }).getByText(name, { exact: true }).waitFor();
   };
   await pick('employee-tags-e0', 'נהג');
   await pick('employee-tags-e0', 'מפקד');

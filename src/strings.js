@@ -1,5 +1,10 @@
 /** All user-facing copy. Hebrew only - the app is RTL throughout. */
 export const t = {
+  noMatchingEmployees: 'לא נמצאו עובדים',
+  replaceEmployee: 'חיפוש עובד להחלפה',
+  clearValue: 'ניקוי',
+  decreaseNumber: (label) => `הקטנת ${label}`,
+  increaseNumber: (label) => `הגדלת ${label}`,
   missingQualification: (mission, tag, n) => `${mission}: נדרשים ${n} בעלי הסמכת ${tag}; הכיסוי אינו מלא.`,
   restShortfall: (person, needed, got) => `${person}: מנוחת לילה רצופה ${got} דקות במקום ${needed}. המשימות אוישו למרות החריגה.`,
   restIncomplete: (person) => `${person}: הלילה מכוסה חלקית בתקופה או בזמינות; אי אפשר לאשר מנוחה מלאה.`,
@@ -22,11 +27,13 @@ export const t = {
   qualityLongRun: (name, n) => `${name}: רצף של ${n} תורנויות ללא הפסקה`,
   typeDaily: 'יומית',
   typeDailyHelp: 'אותם אנשים לכל התורנות. שעות זהות מציינות יום ולילה מלאים, עד למחרת.',
-  dailyFrom: 'תחילת תורנות (24 שעות)',
-  dailyTo: 'סיום תורנות (24 שעות)',
+  dailyFrom: 'תחילת תורנות',
+  dailyTo: 'סיום תורנות',
   dailyNextDay: 'הסיום למחרת',
   dailyIncomplete: 'יש למלא שעת התחלה ושעת סיום',
   headcountPerOccurrence: 'אנשים לתורנות',
+  onCall: 'יכול לישון',
+  onCallHelp: 'אפשר לישון בזמן המשימה: הזמן בה נחשב מנוחה, ולא עבודה שמפסיקה אותה.',
 
   appTitle: 'מתכנן משמרות',
 
@@ -90,6 +97,10 @@ export const t = {
   missions: 'משימות',
   missionName: 'שם המשימה',
   addMission: 'הוסף משימה',
+  duplicateMission: 'שכפול משימה',
+  // A copy keeps every setting but not the roster - two missions with the same
+  // name are unreadable in the agenda, so the copy says what it is.
+  missionCopyName: (name) => `${name} (עותק)`,
   missionType: 'סוג',
   typeRemote: 'מרוחקת',
   typeLocal: 'מקומית',
@@ -146,6 +157,12 @@ export const t = {
   now: 'כעת',
   today: 'היום',
   jumpToNow: 'קפוץ לעכשיו',
+  // Filtering the agenda to one person. The summary table deliberately stays
+  // whole underneath it: the question this answers is "why does this person
+  // have more time on duty than the others", and that needs the others.
+  filterEmployee: 'סינון לפי אדם',
+  allEmployees: 'כולם',
+  filterNoShifts: (name) => `${name} לא משובץ לאף משמרת בסידור.`,
 
   // summary
   summary: 'סיכום',
@@ -156,11 +173,24 @@ export const t = {
 
   // sharing
   shareSection: 'שיתוף וייצוא',
+  // The share window. Deliberately says which actions it touches: the link and
+  // the CSV deliberately carry the whole plan, and a range control that looked
+  // like it applied to all four would read as a bug the first time someone
+  // opened a "trimmed" link and found the whole rota in it.
+  shareWindow: 'טווח לשיתוף',
+  shareWindowFrom: 'החל מ־',
+  shareWindowHelp: 'ההודעה לוואטסאפ וקובצי היומן כוללים עד 24 שעות מהמועד הזה. ברירת המחדל היא שלוש שעות אחורה — אין צורך לשלוח את מה שכבר עבר.',
+  shareWindowRange: (range) => `נשלח: ${range}`,
+  shareWindowCount: (n) => (n === 0 ? 'אין משמרות בטווח הזה.'
+    : n === 1 ? 'משמרת אחת בטווח.' : `${n} משמרות בטווח.`),
   copyLink: 'העתק קישור',
   copied: 'הועתק!',
   copyFailed: 'ההעתקה נכשלה',
   downloadCsv: 'הורד CSV',
   copyWhatsapp: 'העתק לוואטסאפ',
+  shareLinkNative: 'שתף קישור',
+  shareWhatsappNative: 'שתף הודעה',
+  shareFailed: 'השיתוף נכשל',
   longUrlWarning: 'הקישור ארוך מאוד. חלק מהאפליקציות עלולות לקצר אותו.',
   calendarSection: 'ייצוא ליומן (iCal)',
   downloadIcsOverview: 'יומן כלל הצוות',
@@ -199,6 +229,7 @@ export const t = {
   // default, and the only path to `removeBadPin` is inside it, so the label has
   // to advertise that there is something in there to fix.
   debugToggle: (n) => (n === 0 ? 'מידע לניפוי שגיאות' : `מידע לניפוי שגיאות — ${n} אזהרות`),
+  debugVersion: 'גרסה',
   warningsTitle: 'אזהרות',
   noWarnings: 'אין אזהרות.',
   copyPlanData: 'העתק טקסט',

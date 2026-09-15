@@ -74,7 +74,8 @@ export function planToReadableText(doc) {
     const daily = m.type !== 'daily' ? '' : m.dayStart == null || m.dayEnd == null
       ? `, ${t.dailyIncomplete}`
       : `, ${clock(m.dayStart)}–${clock(m.dayEnd)}${m.dayEnd <= m.dayStart ? ` ${t.dailyNextDay}` : ''}`;
-    lines.push(`- ${m.name || t.missionName} (${kind}${daily}, ${heads}${shift}): ${window}`);
+    const onCall = m.onCall ? `, ${t.onCall}` : '';
+    lines.push(`- ${m.name || t.missionName} (${kind}${daily}${onCall}, ${heads}${shift}): ${window}`);
     if (m.requires?.length) lines.push(`  ${t.requiredQualifications}: ${m.requires.map((r) => `${tagName(r.tag)} × ${r.count}`).join(', ')}`);
     if (m.excludes?.length) lines.push(`  ${t.excludedQualifications}: ${m.excludes.map(tagName).join(', ')}`);
   }

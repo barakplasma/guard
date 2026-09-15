@@ -10,6 +10,9 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+    # An explicit timeout on every job: the default is 360 minutes, so one hung
+    # step would hold the concurrency group - and every later run - for hours.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -31,3 +34,63 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  # The browser suites, on every pull request rather than only after merge.
+  # They are the only cover for whole classes of bug the unit tests cannot see
+  # - MUI dropping a test id, a zod schema rejecting a freshly added mission, a
+  # date field whose hour arithmetic depends on the device's clock format. That
+  # last one shipped red: release.yml ran these after the merge, which is too
+  # late to keep main green.
+  e2e-browser:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Install Playwright
+        run: npm i --no-save playwright && npx playwright install --with-deps chromium
+
+      - name: Serve built app
+        run: npx vite preview --port 4173 --strictPort &
+
+      - name: Wait for server
+        run: npx --yes wait-on@8 -t 30000 http://localhost:4173
+
+      # Every suite README.md tells a contributor to run, in that order. Kept in
+      # step with release.yml's list, which was missing two of them.
+      - name: Run browser e2e tests
+        run: |
+          node tests/e2e.mjs
+          node tests/features.e2e.mjs
+          node tests/number-inputs.e2e.mjs
+          node tests/mui-controls.e2e.mjs
+          node tests/mui-pickers.e2e.mjs
+          node tests/mobile-viewports.mjs
+        env:
+          BASE: http://localhost:4173
+          SHOT_DIR: /tmp/guard-shots
+
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-screenshots
+          path: /tmp/guard-shots/
+          if-no-files-found: ignore
