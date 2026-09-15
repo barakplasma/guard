@@ -144,6 +144,54 @@ solver with a large maintainer base** - that option does not exist, so the
 choice is between small teams. And MiniZinc is MPL-2.0, which is file-level
 copyleft: fine for shipping in a bundle, worth knowing rather than discovering.
 
+### Why not compile OR-Tools to WebAssembly ourselves
+
+Asked directly, and worth recording because it looks like the obvious move.
+
+**Two ports already exist.** [`Axelwickm/or-tools-wasm`](https://github.com/Axelwickm/or-tools-wasm)
+vendors upstream, patches it and builds with Emscripten; it exposes CP-SAT,
+routing, MPSolver, MathOpt, PDLP and network flow, and is the one published to
+npm. [`kjartanm/wasm-or-tools`](https://github.com/kjartanm/wasm-or-tools) is a
+direct fork of google/or-tools with 9 stars and no visible recent activity.
+Neither has a team.
+
+**Upstream does not support this.** From the OR-Tools maintainers on
+or-tools-discuss, 5 May 2025: *"emscripten is currently a low priority with
+zero human ressource allocated to it"*, *"currently disabling most third party
+solvers so only cp-sat and glop are available"*, and *"Had to disable all tests
+since EXPECT_DEATH is not available"*. There is an experimental workflow and
+Docker config, but a build with its test suite switched off is not a foundation
+for rostering real guard duty.
+
+**A port we build has zero maintainers**, which is strictly worse than the one
+maintainer we were already treating as a risk. It is the most extreme form of
+the hand-written code this project is trying to move away from: an Emscripten
+build of a C++ tree with Abseil, Protobuf, SCIP and CBC underneath it, redone
+on every upstream release, owned by nobody.
+
+**And this deployment cannot use the main benefit anyway.** `or-tools-wasm`
+needs `Cross-Origin-Opener-Policy` and `Cross-Origin-Embedder-Policy` for
+WebAssembly threads. The self-hosted Caddy channel can send those; GitHub Pages
+cannot set response headers at all, and `release.yml` publishes there. Whether
+it degrades to single-threaded or fails outright on that channel is worth
+testing before committing to it either way.
+
+### The model is the investment, not the solver
+
+This is what makes MiniZinc the low-regret choice rather than merely the
+better-maintained one. MiniZinc is a modelling language with a FlatZinc
+interface, and **OR-Tools CP-SAT is one of its supported backends**
+(`com.google.ortools.sat`). So the rota model is written once and is not tied
+to the solver underneath it: run Chuffed in the browser today, and if a
+trustworthy OR-Tools WebAssembly build appears, point the same model at CP-SAT
+without rewriting it.
+
+Choosing `or-tools-wasm` now is choosing a solver. Choosing MiniZinc is
+choosing a language that already speaks to that solver, among others. The
+expensive, irreversible part of this work is expressing the rota - coverage,
+exclusions, night rest, fairness - correctly. That part should not be spent on
+a binding one person published four months ago.
+
 Seed it and pin the version. Not for reproducibility's own sake, but because a
 seeded solver keeps the option of storing only deviations rather than the whole
 past: on a seven-day rota with three hand-edits that is 3 pins and 404
@@ -213,6 +261,9 @@ the real price here. It buys a rota that remembers what actually happened.
   makes the headcount defect worse by giving the past more reasons to move.
 - **`or-tools-wasm`.** Better-known solver, unmaintainable binding: one person,
   six releases, nothing shipped in three months. See the table above.
+- **Compiling OR-Tools to WebAssembly ourselves.** Zero maintainers, on top of
+  an upstream Emscripten build whose own tests are disabled, redone every
+  release. See the section above.
 - **A hand-written per-segment matcher.** Smaller diff, wrong direction. It adds
   bespoke optimisation code to an engine whose bespoke optimisation code is
   where the defects came from.
@@ -231,4 +282,6 @@ the real price here. It buys a rota that remembers what actually happened.
 from `encodePlan` over a seventeen-guard, ten-seat, seven-day rota. Package
 facts, maintainer counts and release histories from the npm registry for
 `minizinc`, `or-tools-wasm`, `dexie`, `@automerge/automerge`, `munkres-js`,
-`logic-solver` and `kiwi.js`, read on 2026-09-15.
+`logic-solver` and `kiwi.js`, read on 2026-09-15. Upstream's Emscripten
+position quoted from or-tools-discuss, 5 May 2025. MiniZinc's OR-Tools backend
+per the MiniZinc handbook's solver-backends chapter.
