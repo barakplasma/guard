@@ -1,6 +1,7 @@
 # ADR 013: The operating model is continuous re-planning, not planning
 
-- Status: Proposed. Re-rates ADR 008's defect 3 and makes ADR 011 urgent.
+- Status: Proposed. Re-rates ADR 008's defect 3. #40 has since fixed the acute
+  form of that defect; the class it belongs to is still ADR 011's to close.
 - Date: 2026-09-15
 
 ## Context
@@ -21,7 +22,7 @@ duty as the fairness input.
 
 ## Consequences
 
-### ADR 008's defect 3 is not rare; it is the main path
+### ADR 008's defect 3 was mis-rated as rare
 
 An earlier revision of ADR 008 rated the staffing pass's incompleteness as real
 but not urgent, because it never fired on realistic rota shapes. That
@@ -40,10 +41,15 @@ as a tiebreak within the same instant. Anything inserted off the grid is
 considered *after* the ordinary posts covering that time have already taken the
 scarce people, and nothing ever reconsiders a placement.
 
-**This makes ADR 011 urgent rather than optional.** It is also beyond what the
-per-segment matcher rejected in ADR 011 could fix: the trade needed crosses both
-missions and segment boundaries, because the driver has to come off a post whose
-hour began before the callout existed.
+**#40 has since fixed the reported shape**, adding `offGridPriority` so every
+offset in that script now passes. `scripts/offGridFuzz.mjs` shows it closed the
+shape rather than the class: 2.8% of shortage instants over random off-grid
+instances remain provably false, some with no off-grid mission involved.
+
+So ADR 011 is still the fix, for the class rather than for a live outage. It is
+also beyond what the per-segment matcher rejected there could do: the trade
+crosses both missions and segment boundaries, because the driver has to come off
+a post whose hour began before the callout existed.
 
 ### Re-planning must be free to move generated assignments
 
@@ -69,26 +75,31 @@ is an input on every solve, not a property of one planning run. ADR 009 already
 requires the log to feed the engine read-only; this is the reason it matters
 operationally rather than only for correctness.
 
-### Speed is a requirement, and is already met
+### Speed is a requirement, and is met by the engine as it stands
 
 A decision needed in twenty minutes has to be computed in seconds. The current
-engine takes 47 ms on a four-day, seventeen-guard rota, and ADR 012's 72-hour
-horizon is 648 assignments. Neither the present engine nor a solver at that size
-is anywhere near a problem. Speed is recorded here as satisfied so that nobody
-optimises for it at the expense of the correctness that is actually missing.
+engine takes 47 ms on a four-day, seventeen-guard rota, so speed is satisfied
+*for the present engine* - recorded so that nobody optimises for it at the
+expense of the correctness that is actually missing.
+
+This says nothing about a solver's timings. Those depend on the model rather
+than on the assignment count, and ADR 011 requires them measured on real
+hardware.
 
 ## Decision
 
 Treat continuous re-planning as the primary use case. Concretely:
 
-1. **ADR 011 moves from "worth considering" to "the fix for a bug that fires
-   daily."** It is still last in sequence, because ADR 009 must come first, but
-   it is no longer optional.
+1. **ADR 011 is the fix for the class, not a nice-to-have.** #40 removed the
+   acute symptom, so it is not an outage; 2.8% of shortage instants remain
+   provably false, and each ordering key so far has closed the instance in front
+   of it. It stays last in sequence, because ADR 009 must come first.
 2. **Re-planning may move any generated assignment in the future**, and must be
    able to, or it cannot absorb the change it exists to absorb.
-3. **A shortage report must be trustworthy.** Today `חסרים אנשים` fires when the
-   engine merely failed to rearrange, which trains a person to ignore it - the
-   worst possible outcome for a warning that is sometimes real.
+3. **A shortage report must be trustworthy.** `חסרים אנשים` can still fire when
+   the engine merely failed to rearrange - less often since #40, but measurably
+   - which trains a person to ignore it, the worst possible outcome for a
+   warning that is sometimes real.
 
 ## Alternatives rejected
 
@@ -104,5 +115,7 @@ Treat continuous re-planning as the primary use case. Concretely:
 
 ## Evidence
 
-`scripts/midScheduleCallout.mjs`. The demand ordering is in `planner.js`
-phase 3; timings from a seventeen-guard, three-post, four-day rota.
+`scripts/midScheduleCallout.mjs` (the reported case, now a #40 regression
+fixture) and `scripts/offGridFuzz.mjs` (what #40 left open). The demand ordering
+is in `planner.js` phase 3; timings from a seventeen-guard, three-post, four-day
+rota.

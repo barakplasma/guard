@@ -13,9 +13,27 @@
  * driver, and the constrained mission that starts twenty minutes later cannot
  * get them back. The engine never reconsiders a placement.
  *
- * Which is why the sweep below is the interesting part: on the hour it works,
- * and twenty or thirty minutes past it does not. A real callout never starts
- * neatly on the hour.
+ * Which is why the sweep below is the interesting part: before #40, on the hour
+ * it worked and twenty or thirty minutes past it did not, and a real callout
+ * never starts neatly on the hour.
+ *
+ * **#40 fixed every offset this script tests** by lifting a constrained demand
+ * ahead of the earlier, less-constrained one it overlaps (`offGridPriority` in
+ * planner.js phase 3). All rows below now read `ok`, and the script is kept as
+ * the regression fixture for that.
+ *
+ * Two limits on what it proves, worth stating because it is easy to over-read:
+ *
+ *   - It builds **independent plans with `pins: []`**, so it is not an
+ *     end-to-end test of editing a running schedule with history present. That
+ *     path goes through `setDoc`, freezing and pin normalization, none of which
+ *     is exercised here.
+ *   - It reports a shortage **anywhere in the horizon** as the callout's
+ *     failure, which was true for these fixtures and is not true in general.
+ *
+ * `offGridFuzz.mjs` is the companion that asks whether #40 closed the class
+ * rather than the shape. It did not: 2.8% of shortage instants over random
+ * off-grid instances remain provably false.
  *
  * Run it with `node scripts/midScheduleCallout.mjs`. A measurement, not a test.
  */
@@ -72,9 +90,8 @@ for (const offset of [0, 20, 30, 45, 60, 90, 120]) {
   console.log(`  +${String(offset).padStart(3)} minutes    ${crew.join(', ').padEnd(27)} ${short ? 'SHORT A DRIVER' : 'ok'}`);
 }
 
-console.log('\nOn the hour it works. Twenty or thirty minutes past, it does not.');
-console.log('Seven seats are needed at that moment and there are eight guards, so a');
-console.log('full staffing exists: both drivers on the callout, six others across the');
-console.log('other two posts, one spare. The engine reports a missing qualification');
-console.log('because it will not move a driver off an unconstrained post it already');
-console.log('filled.');
+console.log('\nBefore #40 every off-the-hour offset here reported a missing driver, while');
+console.log('seven seats were needed against eight guards and a full staffing existed.');
+console.log('#40 fixed all of these offsets. This is now the regression fixture for');
+console.log('that, not a live defect - see offGridFuzz.mjs for whether the class is');
+console.log('closed, which it is not.');

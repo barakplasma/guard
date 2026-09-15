@@ -64,11 +64,14 @@ period. This record only re-rates its urgency.
 
 ### The scheduling problem is small
 
-648 assignments over 72 hours is a small constraint problem. Whichever engine
-solves it - the current greedy walk at 47 ms, or Pumpkin under ADR 011 - there
-is no need for time limits, decomposition, or incremental solving on a phone.
-That removes the last practical worry about putting a solver in the browser, and
-makes the varying-solution behaviour ADR 011 accepts even cheaper.
+648 assignments over 72 hours is a small *assignment* count, and the present
+engine handles it in 47 ms.
+
+It does **not** follow that a solver needs no time or memory limits. The
+assignment count is not the model size: variables, domain sizes, reified
+constraints and the fairness objectives drive that, and none of it exists until
+the model is written. ADR 011 requires those limits to be measured on real
+hardware rather than assumed away, and requires cancellation to work.
 
 ## The open question: retention across rolls
 

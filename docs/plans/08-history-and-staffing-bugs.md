@@ -133,14 +133,33 @@ unconstrained post is filled first, takes a scarce driver, and the constrained
 mission twenty minutes later cannot get them back. The engine never reconsiders
 a placement.
 
-A real callout never starts neatly on the hour, so in practice this fires
+A real callout never starts neatly on the hour, so in practice this fired
 almost every time.
 
-**Fix:** ADR 011. A solver closes this class by construction, because it assigns
-globally rather than committing one demand at a time. The alternative -
-hand-writing a per-segment matcher - is rejected there, and would in any case
-not be enough here: the trade needed crosses missions *and* segment boundaries,
-since the driver has to be moved off a post whose hour started earlier.
+### Partly fixed on main by #40
+
+PR #40 added `offGridPriority`, which lifts a constrained demand ahead of an
+earlier, less-constrained one it overlaps. **Every offset in the table above now
+passes**, and `midScheduleCallout.mjs` is kept as the regression fixture for
+that rather than as a live defect.
+
+It closed the shape, not the class. `node scripts/offGridFuzz.mjs` runs random
+off-grid instances against the current engine and brute-forces each reported
+shortage:
+
+```
+shortage instants checked : 19806
+provably false shortages  : 560  (2.8%)
+```
+
+Some survivors involve no off-grid mission at all, so this is not a residue of
+the off-grid case specifically.
+
+**Fix:** ADR 011. Assigning globally closes the class; another ordering key
+closes whichever instance is in front of it, which is what happened in ADR 005
+and again in #40. A hand-written per-segment matcher would not have fixed the
+reported callout either, since the trade crosses missions *and* segment
+boundaries.
 
 ## Consequences
 
@@ -149,12 +168,14 @@ actually stood post. They should be fixed first and do not need any dependency,
 any storage change, or any solver. Under ADR 012's 72-hour rolling horizon both
 fire on the normal path.
 
-Defect 3 was initially rated as rare. It is not: under ADR 013's churn workflow
-it fires on nearly every mid-schedule insertion, which is the normal operation.
-It is the strongest argument for ADR 011 and it should be read as urgent.
+Defect 3 was initially rated as rare, which was wrong, and #40 has since fixed
+the reported shape. The class remains open at 2.8% of shortage instants on
+random off-grid instances, so the argument for ADR 011 stands - but the acute
+version of the bug is no longer in production.
 
 ## Evidence
 
 `scripts/historyDriftCheck.mjs` (defects 1 and 2),
-`scripts/completenessSearch.mjs` (defect 3, measured rate) and
-`scripts/midScheduleCallout.mjs` (defect 3, the reported case).
+`scripts/completenessSearch.mjs` (defect 3, measured rate),
+`scripts/midScheduleCallout.mjs` (defect 3, the reported case, now a #40
+regression fixture) and `scripts/offGridFuzz.mjs` (what #40 left open).

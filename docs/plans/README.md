@@ -17,7 +17,7 @@ pending implementation plans.
 | [008](08-history-and-staffing-bugs.md) | Three defects to fix regardless of any refactor. *(Proposed)* |
 | [009](09-timeline-split.md) | Log the past, schedule only the future. *(Proposed)* |
 | [010](10-plan-storage.md) | Keep the plan in the URL, in the fragment. *(Proposed)* |
-| [011](11-solver-selection.md) | If a solver, then Pumpkin. *(Proposed)* |
+| [011](11-solver-selection.md) | MiniZinc with Chuffed as the one engine. *(Accepted)* |
 | [012](12-planning-horizon.md) | Plan 72 hours at a time, rolled forward. *(Proposed)* |
 | [013](13-replanning-under-churn.md) | Continuous re-planning is the operating model. *(Proposed)* |
 | [014](14-exclusions-and-flexibility.md) | Exclude individuals; keep scarce people free. *(Proposed)* |
@@ -25,19 +25,23 @@ pending implementation plans.
 Each record states the context, decision, consequences, rejected alternatives,
 and implementation or test evidence. Acceptance dates record this design, not a
 claim about deployment. Superseding decisions should identify the affected ADR.
-ADRs 001-007 are implemented. **008-011 are proposed**, and are split so each
-can be taken or left on its own:
+ADRs 001-007 are implemented. **011 is decided; 008-010 and 012-014 are
+proposed**, and are split so each can be taken or left on its own:
 
 - **008** is the bug list, and stands alone. A headcount edit rewrites history,
   history outside the period becomes unreachable, and the staffing pass reports
-  shortages that are not real. Worth fixing whether or not 009-011 happen.
+  shortages that are not real. The third was partly fixed by #40; the first two
+  are open. Worth fixing whether or not 009-014 happen.
 - **009** fixes the first two structurally by never scheduling elapsed time.
   No dependency, no storage change, no solver. **This is the one to do first.**
 - **010** is where the growing log is kept. It concludes the plan should stay in
   the URL, moved from the query string to the fragment, with local-first held in
   reserve.
-- **011** is the solver question that started all of this. It closes 008's third
-  defect and depends on 009.
+- **011** is the solver question that started all of this. **Decided: MiniZinc
+  with Chuffed**, selected explicitly, as the single production engine - chosen
+  on ownership and failure surface rather than solving technology. It carries
+  the model's lexicographic objective order and the acceptance criteria a
+  prototype must meet before replacing anything.
 - **012** records the 72-hour horizon and what it does to the others: it settles
   010 (the fragment is enough, local-first is not needed), sizes 011 at 648
   assignments, and raises 008's second defect to the main path because rolling
@@ -45,8 +49,8 @@ can be taken or left on its own:
   whether history is retained across rolls - **which should be answered before
   009 is implemented.**
 - **013** records that the rota is re-solved continuously against a moving
-  present, not planned once. That re-rates 008's third defect from rare to
-  daily and makes **011 urgent rather than optional**.
+  present, not planned once. That re-rated 008's third defect from rare to the
+  main path, which #40 then addressed for the reported shape.
 - **014** adds per-person exclusions, which the document cannot express at all
   today, and the softer rule that scarce qualifications should be kept
   uncommitted so they can answer a callout. The first half needs no solver; the
@@ -54,14 +58,15 @@ can be taken or left on its own:
 
 Suggested order: **009** first (fixes the history corruption, no dependencies),
 then **010** and the first half of **014** (both small and independent), then
-**011**, which closes the shortage bug that fires daily.
+**011**, which closes the shortage class #40 narrowed but did not eliminate.
 
 ## Verification
 
 Run `npm run lint`, `npm test`, and `npm run build`. ADR 008's defects are
 reproduced with `node scripts/historyDriftCheck.mjs` (defects 1 and 2) and
-`node scripts/completenessSearch.mjs` (defect 3); both are measurements rather
-than tests and are deliberately outside `npm test`. Browser acceptance uses
+`node scripts/completenessSearch.mjs` and `node scripts/offGridFuzz.mjs`
+(defect 3, before and after #40); all are measurements rather than tests and are
+deliberately outside `npm test`. Browser acceptance uses
 `tests/e2e.mjs`, `tests/mobile-viewports.mjs`, and `tests/features.e2e.mjs`
 against a local built preview. Set `CHROME` to a headless Chromium binary and
 `SHOT_DIR` outside the repository.
