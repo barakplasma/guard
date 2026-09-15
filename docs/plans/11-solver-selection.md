@@ -1,19 +1,27 @@
 # ADR 011: MiniZinc with Chuffed, as the one production scheduling engine
 
-- Status: **Accepted (decision)**, implementation not started. Depends on
-  ADR 009. Addresses ADR 008's defect 3. Sized by ADR 012, made urgent by
-  ADR 013.
+- Status: **Proposed.** Awaiting a decision from the project owner. Depends on
+  ADR 009. Addresses ADR 008's defect 3. Sized by ADR 012, re-rated by ADR 013.
 - Date: 2026-09-15
 
-## Decision
+## Provenance
+
+The recommendation below came from an **automated review on PR #39** (Codex),
+not from the project owner. It is recorded because its argument is good and its
+factual corrections were independently verified against primary sources - the
+npm registry, `src/lib/invariants.js`, and running the fixtures against current
+`main`. It is **not** an accepted decision, and this record should not be read
+as one until the owner says so.
+
+An earlier revision of this record recommended Pumpkin. That recommendation is
+superseded *as a recommendation*; both are set out below so the trade can be
+judged rather than inherited.
+
+## Recommendation
 
 **MiniZinc's JavaScript API with Chuffed, selected explicitly, as the single
 production scheduling engine.** Not Pumpkin, and not a production solver plus a
 separate oracle or fallback.
-
-An earlier revision of this record recommended Pumpkin. That recommendation is
-superseded, and the reasoning that overturned it is recorded below rather than
-edited away.
 
 ### Priority order
 
@@ -48,6 +56,25 @@ JS/browser package comparable to MiniZinc's, so the integration would be ours.
 
 A declarative `.mzn` model is also easier to review against the requirements
 than model-construction code in Rust, which matters directly under priority 1.
+
+### The tension this leaves unresolved
+
+Two stated preferences pull against each other here, and the recommendation
+resolves one at the other's expense. That resolution is the owner's to confirm.
+
+- *"I prefer libraries I can trust... strong libraries with many maintainers."*
+  Points at MiniZinc: an official browser adapter, seven years of releases, and
+  an integration surface that is upstream's rather than ours.
+- *"I only want one solver, don't need more."* Points at Pumpkin. MiniZinc's
+  WebAssembly build is a model compiler plus gecode, cbc, chuffed and highs.
+  Selecting Chuffed explicitly and treating the bundle as one engine is a fair
+  reading of the intent, but it is not literally one solver.
+
+On the evidence the ownership argument is the stronger of the two: an
+integration Guard does not maintain is worth more than three solvers it does not
+invoke, and a defect in the `wasm-bindgen` bridge would be ours to diagnose on a
+phone under time pressure. But the preference was stated plainly enough that the
+call should be explicit rather than inferred.
 
 ## Corrections to earlier claims in this branch
 

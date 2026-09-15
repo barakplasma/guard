@@ -17,7 +17,7 @@ pending implementation plans.
 | [008](08-history-and-staffing-bugs.md) | Three defects to fix regardless of any refactor. *(Proposed)* |
 | [009](09-timeline-split.md) | Log the past, schedule only the future. *(Proposed)* |
 | [010](10-plan-storage.md) | Keep the plan in the URL, in the fragment. *(Proposed)* |
-| [011](11-solver-selection.md) | MiniZinc with Chuffed as the one engine. *(Accepted)* |
+| [011](11-solver-selection.md) | MiniZinc with Chuffed as the one engine. *(Proposed)* |
 | [012](12-planning-horizon.md) | Plan 72 hours at a time, rolled forward. *(Proposed)* |
 | [013](13-replanning-under-churn.md) | Continuous re-planning is the operating model. *(Proposed)* |
 | [014](14-exclusions-and-flexibility.md) | Exclude individuals; keep scarce people free. *(Proposed)* |
@@ -25,8 +25,8 @@ pending implementation plans.
 Each record states the context, decision, consequences, rejected alternatives,
 and implementation or test evidence. Acceptance dates record this design, not a
 claim about deployment. Superseding decisions should identify the affected ADR.
-ADRs 001-007 are implemented. **011 is decided; 008-010 and 012-014 are
-proposed**, and are split so each can be taken or left on its own:
+ADRs 001-007 are implemented. **008-014 are proposed**, and are split so each
+can be taken or left on its own:
 
 - **008** is the bug list, and stands alone. A headcount edit rewrites history,
   history outside the period becomes unreachable, and the staffing pass reports
@@ -37,11 +37,13 @@ proposed**, and are split so each can be taken or left on its own:
 - **010** is where the growing log is kept. It concludes the plan should stay in
   the URL, moved from the query string to the fragment, with local-first held in
   reserve.
-- **011** is the solver question that started all of this. **Decided: MiniZinc
-  with Chuffed**, selected explicitly, as the single production engine - chosen
-  on ownership and failure surface rather than solving technology. It carries
-  the model's lexicographic objective order and the acceptance criteria a
-  prototype must meet before replacing anything.
+- **011** is the solver question that started all of this. It now recommends
+  **MiniZinc with Chuffed**, selected explicitly, as the single production
+  engine - on ownership and failure surface rather than solving technology. That
+  recommendation came from an automated review on PR #39 and is **not yet an
+  owner decision**; the record says so and names the preference tension it
+  resolves. It carries the model's lexicographic objective order and the
+  acceptance criteria a prototype must meet before replacing anything.
 - **012** records the 72-hour horizon and what it does to the others: it settles
   010 (the fragment is enough, local-first is not needed), sizes 011 at 648
   assignments, and raises 008's second defect to the main path because rolling
