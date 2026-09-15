@@ -1,6 +1,7 @@
 # ADR 012: The planning horizon is 72 hours, rolled forward
 
-- Status: Proposed. Constrains ADRs 008-011; changes ADR 010's conclusion and
+- Status: Proposed, except for the retention question below, which the owner has
+  **decided: export**. Constrains ADRs 008-011; settles ADR 010's conclusion and
   raises the priority of ADR 008's second defect.
 - Date: 2026-09-15
 
@@ -73,27 +74,36 @@ constraints and the fairness objectives drive that, and none of it exists until
 the model is written. ADR 011 requires those limits to be measured on real
 hardware rather than assumed away, and requires cancellation to work.
 
-## The open question: retention across rolls
+## Retention across rolls: export
 
-This record does not settle what happens to the previous window when the horizon
-rolls forward, because it was not asked. Three readings, and the choice matters:
+**Decided by the project owner: the rolled-past window is exported, not kept in
+the live document and not silently dropped.**
 
-1. **Drop it.** History older than the window is gone. The document stays
-   bounded forever and the URL never grows. Simplest, and it means "correcting
-   the record" only ever applies within the current 72 hours.
-2. **Keep it.** The log accumulates across rolls and the fragment ceiling
-   returns at roughly a month of hourly history. ADR 010's local-first reserve
-   becomes relevant again.
-3. **Export it.** Rolling forward drops the window from the live document, but
-   a record is exported first. The CSV export already exists and is already
-   exempt from window-scoped sharing.
+Rolling the horizon forward carries the window that just ended out of the plan
+and into an export, so the live document stays bounded at one 72-hour window
+while the record of who actually stood post survives outside it. A rota that
+remembers nothing cannot answer "who was on the gate last Tuesday"; a rota that
+remembers everything grows without limit. Exporting is the answer to both.
 
-Reading 1 is the cheapest and matches "72 hours at a time" most literally.
-Reading 3 is probably what a person wants in practice, because a rota that
-remembers nothing cannot answer "who was on the gate last Tuesday". **This needs
-a decision before ADR 009 is implemented**, because it determines whether the log
-is bounded or unbounded, and that is the difference between ADR 010 being a
-one-line change and a real storage question.
+Three consequences follow, and they simplify the other records rather than
+complicating them:
+
+- **The log is bounded.** It never exceeds one window, so the URL never exceeds
+  the sizes in the table above. ADR 010's local-first reserve is not merely
+  deferred - under this decision nothing can reach the fragment ceiling.
+- **The export is now load-bearing.** It stops being a convenience and becomes
+  the only durable record. That raises the bar on it: the format has to carry
+  everything a person would need to answer a question months later - who, which
+  mission, which window, and whether the assignment was manual, corrected
+  history, or generated - and the roll must not complete until the export has
+  actually been produced. Losing a window to a failed export is data loss.
+- **Correcting the record applies inside the current window.** Once a window has
+  rolled and been exported, correcting it means correcting the export, not the
+  plan. That is a deliberate boundary and should be visible in the interface.
+
+The CSV export already exists and is already exempt from window-scoped sharing,
+so it is the natural carrier; whether it needs extra columns is an implementation
+question for ADR 009.
 
 ## Evidence
 

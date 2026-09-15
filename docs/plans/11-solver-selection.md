@@ -1,23 +1,25 @@
 # ADR 011: MiniZinc with Chuffed, as the one production scheduling engine
 
-- Status: **Proposed.** Awaiting a decision from the project owner. Depends on
+- Status: **Accepted, provisionally** - the owner's words were "go with MiniZinc
+  for now", so this is a working choice rather than a closed one. Depends on
   ADR 009. Addresses ADR 008's defect 3. Sized by ADR 012, re-rated by ADR 013.
 - Date: 2026-09-15
 
 ## Provenance
 
-The recommendation below came from an **automated review on PR #39** (Codex),
-not from the project owner. It is recorded because its argument is good and its
-factual corrections were independently verified against primary sources - the
-npm registry, `src/lib/invariants.js`, and running the fixtures against current
-`main`. It is **not** an accepted decision, and this record should not be read
-as one until the owner says so.
+The argument below came from an **automated review on PR #39** (Codex), not from
+the project owner. Its factual corrections were independently verified against
+primary sources before being applied - the npm registry, `src/lib/invariants.js`
+read directly, and the fixtures re-run against current `main`.
 
-An earlier revision of this record recommended Pumpkin. That recommendation is
-superseded *as a recommendation*; both are set out below so the trade can be
-judged rather than inherited.
+The owner has since accepted it, **"for now"**. That qualifier is kept in the
+status rather than tidied away: the tension below is real, and this is the
+choice that lets work start, not a proof that the other is wrong.
 
-## Recommendation
+An earlier revision of this record recommended Pumpkin. Both are set out below
+so the trade can be judged rather than inherited.
+
+## Decision
 
 **MiniZinc's JavaScript API with Chuffed, selected explicitly, as the single
 production scheduling engine.** Not Pumpkin, and not a production solver plus a
@@ -57,10 +59,10 @@ JS/browser package comparable to MiniZinc's, so the integration would be ours.
 A declarative `.mzn` model is also easier to review against the requirements
 than model-construction code in Rust, which matters directly under priority 1.
 
-### The tension this leaves unresolved
+### The tension this resolves, and what would reopen it
 
-Two stated preferences pull against each other here, and the recommendation
-resolves one at the other's expense. That resolution is the owner's to confirm.
+Two stated preferences pull against each other here, and this decision resolves
+one at the other's expense.
 
 - *"I prefer libraries I can trust... strong libraries with many maintainers."*
   Points at MiniZinc: an official browser adapter, seven years of releases, and
@@ -73,8 +75,16 @@ resolves one at the other's expense. That resolution is the owner's to confirm.
 On the evidence the ownership argument is the stronger of the two: an
 integration Guard does not maintain is worth more than three solvers it does not
 invoke, and a defect in the `wasm-bindgen` bridge would be ours to diagnose on a
-phone under time pressure. But the preference was stated plainly enough that the
-call should be explicit rather than inferred.
+phone under time pressure.
+
+Given "for now", the things that would justify revisiting are worth naming so
+the decision can be reviewed on evidence rather than on fatigue: MiniZinc
+failing the Pixel-class acceptance criteria below, particularly first load and
+peak memory with one worker; the wasm assets proving awkward to cache in the
+service worker; or Pumpkin publishing an upstream browser package, which removes
+the entire ownership argument at a stroke. The model is the expensive artifact
+either way, and a lexicographic model of this problem is portable in substance
+even where it is not portable in syntax.
 
 ## Corrections to earlier claims in this branch
 

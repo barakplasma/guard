@@ -73,8 +73,10 @@ fifty guards on twenty-four seats, is 15,429 characters against a conservative
 64,000 ceiling.
 
 So under a bounded horizon local-first is **not needed at all**, rather than
-deferred. The reserve below applies only if history is retained across rolls,
-which ADR 012 leaves open.
+deferred. ADR 012 has since decided that a rolled-past window is **exported**
+rather than retained, which settles it: the live document never holds more than
+one 72-hour window, so nothing can reach the fragment ceiling and the reserve
+below is genuinely dormant rather than pending.
 
 Worth knowing meanwhile: the current shape encodes to 6,744 characters, about
 84% of the query-string budget. It works, which is why nothing has broken yet,
@@ -90,11 +92,11 @@ two maintainers, shipping this month, about 8.3 million downloads a month. The
 alternative `idb` is thinner and single-maintainer, and schema migration is the
 part worth not writing.
 
-The trigger to revisit is concrete rather than aesthetic: retaining history
-across rolls for more than about a month at hourly granularity, or wanting
-history to outlive a link that gets lost. Under ADR 012's bounded horizon
-neither applies unless retention is chosen, so local-first is a large change -
-a link stops being the document - bought for headroom that is not needed.
+The trigger to revisit is concrete rather than aesthetic: abandoning ADR 012's
+export decision in favour of retaining history in the live document, or wanting
+history to outlive a link that gets lost. Neither applies today, so local-first
+is a large change - a link stops being the document - bought for headroom that
+is not needed.
 
 `@automerge/automerge` was surveyed and is the only library here with a real
 team (six maintainers, Ink & Switch), and an append-only change history is close
