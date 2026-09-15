@@ -1,5 +1,5 @@
 /**
- * Evidence for the MiniZinc evaluation (docs/plans/08-minizinc-js-evaluation.md):
+ * Evidence for ADR 008 defect 3 (docs/plans/08-history-and-staffing-bugs.md):
  * is the staffing pass *complete*?
  *
  * The engine fills one (mission, segment) demand at a time and never
@@ -26,8 +26,7 @@
  * ponytail: brute force is exponential in headcount, which is why regime 1 is
  * capped at ten employees and three missions. It is an oracle for small
  * instances, not a scheduler. The upgrade path, if this ever needs to run over
- * a realistic roster, is min-cost bipartite matching over the whole segment -
- * which is also the fix the ADR recommends for the engine itself.
+ * a realistic roster, is the solver in ADR 011.
  */
 
 import { plan } from '../src/lib/planner.js';
