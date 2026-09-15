@@ -23,28 +23,29 @@ and what the scheduler is asked to solve. Rolling the window forward is the
 
 ## Consequences
 
-### The URL holds it comfortably - and is closer to its limit than it looks
+### The URL holds it comfortably
 
 72 hours, whole window elapsed and logged:
 
-| shape | log entries | URL chars | as query (8k) | as fragment |
-|---|---|---|---|---|
-| 8 guards, 4 seats, 2 posts, hourly | 288 | 3,287 | ok | ok |
-| **17 guards, 10 seats, 3 posts, hourly** | **648** | **6,744** | **ok** | ok |
-| 30 guards, 16 seats, 4 posts, hourly | 1,152 | 10,987 | breaks | ok |
-| 50 guards, 24 seats, 4 posts, hourly | 1,728 | 15,429 | breaks | ok |
-| 17 guards, 10 seats, 3 posts, 2-hour | 324 | 3,778 | ok | ok |
-| 30 guards, 16 seats, 4 posts, 2-hour | 576 | 6,148 | ok | ok |
+| shape | log entries | URL chars |
+|---|---|---|
+| 8 guards, 4 seats, 2 posts, hourly | 288 | 3,287 |
+| **17 guards, 10 seats, 3 posts, hourly** | **648** | **6,744** |
+| 30 guards, 16 seats, 4 posts, hourly | 1,152 | 10,987 |
+| 50 guards, 24 seats, 4 posts, hourly | 1,728 | 15,429 |
+| 17 guards, 10 seats, 3 posts, 2-hour | 324 | 3,778 |
+| 30 guards, 16 seats, 4 posts, 2-hour | 576 | 6,148 |
 
-**The current shape sits at about 84% of the query-string budget.** It works
-today, which is why no wall has been hit, but a fourth post or a larger roster
-crosses 8,000 characters and sharing starts failing with no warning beforehand.
+An earlier revision compared these against an ~8 KB request-line ceiling and
+concluded the current shape sat at 84% of its budget. **That ceiling does not
+apply**: the app uses `HashRouter`, so the plan is in the URL fragment and is
+never sent to a server. See ADR 010's correction.
 
-Every shape here fits in a fragment with room to spare. So ADR 010's
-recommendation stands and gets simpler: **move the plan from the query string to
-the fragment, and local-first is not needed at all** - not merely deferred. A
-72-hour window at hourly granularity cannot reach the fragment ceiling for any
-plausible roster.
+Against the limit that does apply - the browser's own URL handling, tens of
+thousands of characters before anything becomes unreliable - every shape here
+has room to spare. So ADR 010 stands with nothing to build: **the plan is
+already where it should be, and local-first is not needed at all**, not merely
+deferred.
 
 Shift length is the strongest lever if it ever gets close: a two-hour grid
 roughly halves the log.

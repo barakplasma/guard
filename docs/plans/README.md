@@ -16,7 +16,7 @@ pending implementation plans.
 | [007](07-on-call-missions.md) | Count on-call missions toward night rest. |
 | [008](08-history-and-staffing-bugs.md) | Three defects to fix regardless of any refactor. *(Proposed)* |
 | [009](09-timeline-split.md) | Log the past, schedule only the future. *(Partly implemented)* |
-| [010](10-plan-storage.md) | Keep the plan in the URL, in the fragment. *(Proposed)* |
+| [010](10-plan-storage.md) | The plan stays in the URL, where it already is. *(Accepted)* |
 | [011](11-solver-selection.md) | MiniZinc with Chuffed as the one engine. *(Accepted, provisionally)* |
 | [012](12-planning-horizon.md) | Plan 72 hours at a time, rolled forward. *(Proposed)* |
 | [013](13-replanning-under-churn.md) | Continuous re-planning is the operating model. *(Proposed)* |
@@ -37,9 +37,11 @@ be taken or left on its own:
   is **implemented**: the clock enters at the adapter as an absolute instant,
   an elapsed segment carrying a record defers to it, and the headcount cap stops
   applying there. The log as its own structure, and 012's export, remain.
-- **010** is where the growing log is kept. It concludes the plan should stay in
-  the URL, moved from the query string to the fragment, with local-first held in
-  reserve.
+- **010** is where the growing log is kept. An earlier revision claimed the plan
+  was a query parameter and had to move to the fragment; it was already there,
+  because the app uses `HashRouter`. **Nothing to build.** The correction is in
+  the record, along with what the real ceiling is and why local-first stays
+  dormant.
 - **011** is the solver question that started all of this. **MiniZinc with
   Chuffed**, selected explicitly, as the single production engine - accepted
   "for now", on ownership and failure surface rather than solving technology.
@@ -66,8 +68,9 @@ Suggested order, updated now that 009's core rule has landed:
    removes recorded duty automatically, and the out-of-period button exports
    before it clears. What remains is showing elapsed assignments outside the
    period read-only, which is no longer urgent.
-2. **010's fragment move** and the **first half of 014** (per-person
-   exclusions) - both small, independent, and needing no solver.
+2. ~~010's fragment move~~ - **not needed**, the plan is already in the
+   fragment. Next is the **first half of 014** (per-person exclusions), which is
+   small, independent, and needs no solver.
 3. **011** - the MiniZinc model, which closes the shortage class #40 narrowed
    but did not eliminate, and which carries the `invariants.js` gap with it.
 

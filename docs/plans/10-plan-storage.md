@@ -1,139 +1,119 @@
-# ADR 010: Move the plan to the URL fragment; keep local-first in reserve
+# ADR 010: The plan stays in the URL, where it already is
 
-- Status: Proposed. Depends on ADR 009 only in that the log is what grows.
-  Independent of ADR 011 - the solver does not change any of this.
-  **Constrained by ADR 012**: the horizon is 72 hours, which strengthens this
-  record's conclusion - see "At a 72-hour horizon" below.
+- Status: **Accepted (no change required).** An earlier revision of this record
+  recommended moving the plan from the query string to the URL fragment. That
+  recommendation was wrong: the app uses `HashRouter`, so the plan has been in
+  the fragment since it was written. Constrained by ADR 012.
 - Date: 2026-09-15
 
-## Context
+## The correction
 
-ADR 009 makes the past a log, and a log only grows. So the question is where it
-is kept, and whether "the plan lives in the URL" survives.
+An earlier revision of this record said:
 
-An earlier draft of this evaluation said it does not, and recommended moving
-the store local-first to IndexedDB. Asked whether that was really necessary, the
-measurement says **no**, and the earlier draft had missed a much cheaper fix.
+> `PlanContext` reads `new URLSearchParams(location.search).get(PARAM)` [...] The
+> compressed document is therefore a **query parameter**, which means it travels
+> to the server in the HTTP request line on every single page load.
 
-### The plan is in the query string, not the fragment
+**That is false.** `src/App.jsx` wraps the app in `HashRouter`, and says so:
 
-`PlanContext` reads `new URLSearchParams(location.search).get(PARAM)` and writes
-with `params.set(PARAM, encoded)`. The compressed document is therefore a
-**query parameter**, which means it travels to the server in the HTTP request
-line on every single page load.
+```js
+// HashRouter keeps everything - route and plan blob - after the "#", so the
+// app needs no server rewrite rules and works from a file:// path too.
+```
 
-That is where the practical ceiling comes from. Servers cap the request line and
-headers - around 8 KB is typical, and both deploy channels are affected.
+So a real URL is `https://host/guard/#/schedule?p=<blob>`. The `?p=` sits
+*inside* the fragment. `location.search` under `HashRouter` is the search
+portion of the hash, not of the document URL, and `tests/e2e.mjs` navigates to
+exactly that shape. **A fragment is never sent to a server**, so:
 
-A **fragment** (`#p=...`) is never sent to a server at all. The limit becomes
-the browser's own, which is far more generous.
+- The ~8 KB request-line ceiling **never applied**. Neither GitHub Pages nor
+  Caddy has ever seen the plan.
+- Guard names have **never** appeared in server access logs. The privacy
+  improvement an earlier revision claimed was already true, and was not a
+  benefit of any change.
+- The "current shape sits at about 84% of the query-string budget" framing was
+  measuring against a limit that does not apply to this app.
 
-### Measured
-
-Seventeen guards, ten seats, hourly, whole period elapsed and logged:
-
-| days | log entries | URL chars | as query (8k) | as fragment (64k) |
-|---|---|---|---|---|
-| 1 | 240 | 2,745 | ok | ok |
-| 3 | 720 | 7,064 | ok | ok |
-| 7 | 1,680 | 15,605 | **breaks** | ok |
-| 14 | 3,360 | 30,462 | **breaks** | ok |
-| 30 | 7,200 | 65,481 | **breaks** | Chrome only |
-| 60 | 14,400 | 132,012 | **breaks** | Chrome only |
-| 90 | 21,600 | 197,854 | **breaks** | Chrome only |
-
-As a query string, a week of fully-logged hourly history does not fit. As a
-fragment, a month does.
+The mistake was reading `location.search` as a document-level query string
+without checking which router was mounted. The numbers below are unchanged and
+were measured correctly; only the ceiling they were compared against was wrong.
 
 ## Decision
 
-**Move the plan from the query string to the URL fragment.**
+**Keep the plan in the URL. Nothing to move.**
 
-It is a small change - `location.search` to `location.hash` in `PlanContext`,
-and wherever the share bar and exports build a link - and it buys roughly four
-times the usable history while keeping the property that makes this app what it
-is: **a link is the document.**
+The conclusion an earlier revision reached - that local-first storage is not
+needed - survives, and is now better supported than the argument made for it.
 
-Two things fall out for free:
+## What the real ceiling is
 
-- **Guard names stop appearing in server access logs.** Today the compressed
-  document, names included, is in the request line of every page load, so it is
-  logged by Caddy and by GitHub Pages. A fragment never leaves the browser. For
-  a Hebrew rota naming real people this is a small but genuine improvement.
-- Long links stop being a server-side failure mode. The existing WhatsApp and
-  iCal exports already share a 24-hour window rather than the whole rota
-  (`src/lib/shareWindow.js`), so the very long link is a personal bookmark, not
-  something anybody pastes into a chat.
+Not the request line, but the browser's own URL handling, which is far more
+generous and varies: Chrome accepts roughly 2 MB, Firefox and Safari become
+unreliable somewhere in the tens of thousands of characters. Below those, the
+practical limit is whatever a person pastes the link into - messaging apps
+handle a few thousand characters comfortably and degrade past that.
 
-### At a 72-hour horizon
+Measured, seventeen guards, ten seats, hourly, whole period elapsed and logged:
 
-ADR 012 fixes the working window at 72 hours, rolled forward. Every plausible
-roster shape then fits in a fragment with room to spare - the largest measured,
-fifty guards on twenty-four seats, is 15,429 characters against a conservative
-64,000 ceiling.
+| days | log entries | URL chars |
+|---|---|---|
+| 1 | 240 | 2,745 |
+| 3 | 720 | 7,064 |
+| 7 | 1,680 | 15,605 |
+| 14 | 3,360 | 30,462 |
+| 30 | 7,200 | 65,481 |
 
-So under a bounded horizon local-first is **not needed at all**, rather than
-deferred. ADR 012 has since decided that a rolled-past window is **exported**
-rather than retained, which settles it: the live document never holds more than
-one 72-hour window, so nothing can reach the fragment ceiling and the reserve
-below is genuinely dormant rather than pending.
+ADR 012 bounds this. The horizon is 72 hours and a rolled-past window is
+exported rather than retained, so the live document never exceeds one window -
+6,744 characters for the current roster shape, and 15,429 for the largest
+plausible one. Nothing here approaches a browser limit.
 
-Worth knowing meanwhile: the current shape encodes to 6,744 characters, about
-84% of the query-string budget. It works, which is why nothing has broken yet,
-but a fourth post or a bigger roster crosses 8,000 and sharing fails with no
-warning. That is the concrete reason to make the fragment change now rather than
-when it bites.
+Shift length is the strongest lever if it ever gets close: a two-hour grid
+roughly halves the log.
 
-### Local-first stays in reserve
+## Local-first stays in reserve, and is now genuinely dormant
 
-IndexedDB via `dexie` remains the answer if and when the fragment ceiling is
-actually reached. `dexie` is the right library for it: 189 releases since 2014,
-two maintainers, shipping this month, about 8.3 million downloads a month. The
-alternative `idb` is thinner and single-maintainer, and schema migration is the
-part worth not writing.
+IndexedDB via `dexie` remains the answer if the URL is ever outgrown. It is the
+right library for it: 189 releases since 2014, two maintainers, shipping this
+month, about 8.3 million downloads a month. `idb` is thinner and more widely
+installed but is a single-maintainer wrapper, and schema migration is the part
+worth not writing.
 
-The trigger to revisit is concrete rather than aesthetic: abandoning ADR 012's
-export decision in favour of retaining history in the live document, or wanting
-history to outlive a link that gets lost. Neither applies today, so local-first
-is a large change - a link stops being the document - bought for headroom that
-is not needed.
+The trigger to revisit is concrete: abandoning ADR 012's export decision in
+favour of retaining history in the live document, or wanting history to outlive
+a link that gets lost. Neither applies, so this is a large change - a link stops
+being the document - bought for headroom nobody needs.
 
 `@automerge/automerge` was surveyed and is the only library here with a real
 team (six maintainers, Ink & Switch), and an append-only change history is close
-to what ADR 009 describes. It is not recommended, because it is built for
-multi-device merge and this is one editor on one device.
+to what ADR 009 describes. Not recommended: it is built for multi-device merge,
+and this is one editor on one device.
 
 ## Consequences
 
-The elegant property survives, which is the point. The fragment change is
-reversible and small enough to do alongside ADR 009.
+The property that makes this app what it is - **a link is the document** -
+survives untouched, and needed no defending.
 
-The ceiling is moved rather than removed, and the tables above say exactly where
-it now sits. Under ADR 012's 72-hour horizon no plausible roster reaches it;
-retaining history across rolls for more than about a month at hourly granularity
-would, and the reserve plan is what to reach for then.
-
-Shorter shifts make history bigger, linearly: a two-hour grid halves the log.
-That is a genuine lever if the ceiling ever gets close.
+`HashRouter` is load-bearing for more than routing. Switching to `BrowserRouter`
+would move the plan into the real query string and make every claim in the
+earlier revision of this record true at once: a server-side length ceiling, and
+every guard's name in the access log of whatever serves the site. It is worth a
+note in `App.jsx` beyond the rewrite-rules reason already there.
 
 ## Alternatives rejected
 
-- **Local-first now.** Over-engineered for the need. It costs "a link is the
-  document" to buy headroom beyond a month that nobody has asked for.
-- **Staying in the query string.** The current shape already sits at about 84%
-  of that budget, and a fourth post or a larger roster crosses it with no
-  warning. It also keeps guard names in every server access log.
-- **A compact custom encoding for the log** (run-length or delta encoding the
-  contiguous hourly runs). Would likely shrink it a lot, but it is bespoke
-  format code on the one path where a bug loses the user's only copy of their
-  data, and the fragment gets the needed headroom without it.
-- **A backend.** Not needed. Local persistence is offline persistence, and a
-  backend would only buy cross-device sync, which is not wanted.
+- **Moving the plan to the fragment.** Already there.
+- **Local-first now.** Over-engineered. Costs "a link is the document" to buy
+  headroom that ADR 012's bounded horizon means nobody needs.
+- **A compact custom encoding for the log.** Bespoke format code on the one path
+  where a bug loses the user's only copy of their data, for headroom that is not
+  needed.
+- **A backend.** Local persistence is offline persistence, and a backend would
+  only buy cross-device sync, which is not wanted.
 
 ## Evidence
 
-Measurements from `encodePlan` over a seventeen-guard, ten-seat, seven-day rota
-at increasing elapsed durations. Query-parameter usage in
-`src/state/PlanContext.jsx`; the codec in `src/lib/urlState.js`; the existing
-window-scoped sharing in `src/lib/shareWindow.js`. Library facts from the npm
-registry, read 2026-09-15.
+`HashRouter` in `src/App.jsx`; the URL shape in `tests/e2e.mjs`, which navigates
+to `${BASE}/#/schedule?p=...`. Length measurements from `encodePlan` over a
+seventeen-guard, ten-seat rota at increasing elapsed durations. Library facts
+from the npm registry, read 2026-09-15.
