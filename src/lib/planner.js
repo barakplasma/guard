@@ -868,8 +868,12 @@ function planOnce({
     }
   }
 
-  // Chronological, then most-constrained-first so two concurrent local missions
-  // cannot starve each other. Pool size counts who could ever work the segment
+  // Chronological, then most-constrained-first so concurrent local missions
+  // cannot starve each other. A constrained mission beginning inside an
+  // already-running ordinary segment is the one exception: place its first
+  // segment before the earlier demand, or the earlier post can consume the
+  // scarce qualified staff before a real-world off-grid callout is considered.
+  // Pool size counts who could ever work the segment
   // (availability and qualification restrictions, ignoring current bookings) so it is a fixed property of
   // the demand rather than something that shifts as assignments are made.
   for (const d of demands) {
@@ -877,8 +881,14 @@ function planOnce({
       && !d.mission.excludes.some((tag) => st.tags.includes(tag)));
     d.pool = scarcity(d.mission, eligible, d.start, d.end);
   }
+  for (const d of demands) {
+    d.offGridPriority = d.mission.requires.length > 0 && demands.some((other) => (
+      other !== d && other.start < d.start && other.end > d.start && other.pool > d.pool
+    ));
+  }
   demands.sort((a, b) => (
-    a.start - b.start
+    Number(b.offGridPriority) - Number(a.offGridPriority)
+    || a.start - b.start
     || a.pool - b.pool
     || (a.mission.id < b.mission.id ? -1 : a.mission.id > b.mission.id ? 1 : 0)
   ));

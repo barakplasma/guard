@@ -153,7 +153,7 @@ export default function SchedulePage() {
 
       <Box sx={{ mb: { xs: 1, sm: 2 } }}><ShareBar doc={doc} result={result} now={now} /></Box>
       {result && <ScheduleFindings warnings={result.warnings} proposals={result.proposals}
-        onApplyCorrection={applyCorrection} />}
+        onApplyCorrection={applyCorrection} result={result} panel />}
       {result && (
         <>
 
