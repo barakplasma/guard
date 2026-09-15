@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { plan } from '../src/lib/planner.js';
 import { toPlannerInput, planSchema, prunePins } from '../src/lib/planSchema.js';
-import { freezeElapsedBeforeEdit, pruneStalePins } from '../src/lib/pins.js';
+import { freezeElapsedBeforeEdit } from '../src/lib/pins.js';
 
 /**
  * ADR 009: elapsed time that already has a record is a record, not a slot to
@@ -32,7 +32,7 @@ const doc = () => planSchema.parse({
 
 /** Exactly what PlanContext.setDoc does, with the clock held still. */
 const setDoc = (previous, next) => planSchema.parse(
-  prunePins(pruneStalePins(previous, freezeElapsedBeforeEdit(previous, next, NOW))),
+  prunePins(freezeElapsedBeforeEdit(previous, next, NOW)),
 );
 
 /** Elapsed slot -> the set of people recorded on it. */

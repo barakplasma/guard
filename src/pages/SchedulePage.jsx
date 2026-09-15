@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   Alert, Box, Button, Paper, Stack, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, Typography,
@@ -12,6 +12,8 @@ import EmployeeSelect from '../components/EmployeeSelect.jsx';
 import { usePlan } from '../state/PlanContext.jsx';
 import { plan as runPlanner } from '../lib/planner.js';
 import { toPlannerInput } from '../lib/planSchema.js';
+import { outOfPeriodLog, logFilename } from '../lib/logExport.js';
+import { shiftsToCsv, downloadCsv } from '../lib/exportCsv.js';
 import { findNowSlot, groupAgenda } from '../lib/agenda.js';
 import { formatDuration } from '../lib/format.js';
 import { sortByHebrewName } from '../lib/sort.js';
@@ -90,6 +92,23 @@ export default function SchedulePage() {
     doc, pinShift, clearPin, clearAllPins, clearPinByWarning, clearStalePins, applyCorrection, decodeFailed,
   } = usePlan();
   const { result, error } = useSchedule(doc);
+
+  /**
+   * ADR 012: a window the plan has rolled past is *exported*, not dropped. So
+   * the out-of-period button downloads the record before removing it, and
+   * removes nothing if the download could not be produced - losing a window to
+   * a failed export is the data loss this exists to prevent.
+   */
+  const exportAndClearStalePins = useCallback(() => {
+    const rows = outOfPeriodLog(doc);
+    if (rows.length === 0) return;
+    try {
+      downloadCsv(shiftsToCsv({ shifts: rows }, doc), logFilename(doc, rows));
+    } catch {
+      return;
+    }
+    clearStalePins();
+  }, [doc, clearStalePins]);
 
   // View state, not plan data: it never reaches the document or the URL, so
   // sharing a link never sends your filter along with it.
@@ -190,7 +209,7 @@ export default function SchedulePage() {
             doc={doc}
             result={result}
             onClearPinByWarning={clearPinByWarning}
-            onClearStalePins={clearStalePins}
+            onClearStalePins={exportAndClearStalePins}
           />
         </>
       )}

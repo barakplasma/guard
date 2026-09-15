@@ -287,33 +287,24 @@ export function countStalePins(doc) {
 }
 
 /**
- * The automatic half of the same cleanup, deliberately timid on two counts.
+ * There is no automatic cleanup any more, and that is the point.
  *
- * It refuses to act when the edit moves the period, because the period fields
- * fire an edit on every intermediate value that parses - typing a year in the
- * end-date box walks through several - and a momentarily wild window would
- * take real history with it, unrecoverably. So the window has to be standing
- * still for this to run at all.
+ * `pruneStalePins` used to run inside `setDoc` and drop assignments that had
+ * finished before the period start. It was deliberately timid - it declined to
+ * act on the edit that *moved* the window, because the date fields emit an edit
+ * on every intermediate value that parses - and under the old model it was
+ * right: out-of-period pins were residue, and its own comment said that
+ * collecting them after a deliberate roll "is the point".
  *
- * And it only ever drops pins that finished *before* the period starts. A pin
- * beyond the end is far more likely to be wanted: extending the end to cover
- * it is the documented workflow, so treating it as residue would delete the
- * assignment a moment before the user reaches for it. Those are left to the
- * explicit button, where someone has said out loud that they want them gone.
+ * ADR 012 inverts that. A rolled-past window is **exported**, which makes those
+ * same pins the only durable record of who actually stood post. The timidity
+ * was what hid the damage: rolling the window looked safe, and the deletion
+ * landed on the *next* edit, when the window was standing still again.
+ * `scripts/rollForwardLoss.mjs` measured it at 288 assignments destroyed by
+ * adding an employee.
  *
- * The guard only holds for the edit that moves the window, which leaves one
- * accepted gap: land a nonsense period and then edit something else before
- * correcting it, and that edit collects real history. Closing it would need a
- * notion of a *settled* window, which this app has no way to form - the engine
- * has no clock, and there is no undo to fall back on. Note that rolling the
- * period forward deliberately and then editing anything is not that gap: the
- * history really is residue by then, and collecting it is the point.
+ * So nothing removes recorded duty on its own. Every pin the prune could have
+ * taken had already elapsed, so there is no narrower version of it left to
+ * keep. Removal is now explicit, goes through `outOfPeriodLog` first, and is
+ * the user's decision - see `clearStalePins` above.
  */
-export function pruneStalePins(prev, next) {
-  if (prev.start !== next.start || prev.end !== next.end) return next;
-  const pins = next.pins.filter((p) => {
-    if (!isStale(next, p)) return true;
-    return (p.end ?? next.end) > next.start;
-  });
-  return pins.length === next.pins.length ? next : { ...next, pins };
-}

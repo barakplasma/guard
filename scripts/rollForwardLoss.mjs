@@ -2,30 +2,30 @@
  * ADR 012 decided that a rolled-past window is **exported**. Nothing exports it
  * yet. So what happens to that history today?
  *
- * It is deleted, silently, by the next ordinary edit.
+ * It *was* deleted, silently, by the next ordinary edit - 288 assignments from
+ * an edit that only added an employee.
  *
- * `pruneStalePins` has always done this, and until ADR 012 it was correct:
- * assignments outside the plan period were residue, and CLAUDE.md says so.
- * The export decision inverts that. The same pins are now the only durable
- * record of who actually stood post, and the only code that touches them
- * throws them away.
+ * `pruneStalePins` had always done that, and until ADR 012 it was correct:
+ * assignments outside the plan period were residue, and CLAUDE.md said so. The
+ * export decision inverted it. The same pins became the only durable record of
+ * who actually stood post, and the only code that touched them threw them away.
  *
- * Note the two-step shape, which is why this is easy to miss. `pruneStalePins`
- * is deliberately timid and declines to act on the edit that *moves* the
- * period - the date fields emit an edit on every intermediate value that
- * parses, and a half-typed year would take real history with it. So rolling the
- * window looks safe. The deletion happens on the *next* edit, when the window
- * is standing still again and the pins are already outside it.
+ * The two-step shape is why it was easy to miss. The prune was deliberately
+ * timid and declined to act on the edit that *moved* the period, because the
+ * date fields emit an edit on every intermediate value that parses. So rolling
+ * the window looked safe; the deletion landed on the *next* edit.
  *
- * `clearStalePins` is the explicit half and has the same problem: it is the
- * button offered alongside the `PIN_OUT_OF_PERIOD` warning, and it deletes
- * rather than exports.
+ * **Fixed.** Nothing removes recorded duty automatically any more - the prune
+ * is gone, not narrowed, because every pin it could take had already elapsed.
+ * The last row below now matches the one above it. Removal is explicit, and the
+ * button beside the `PIN_OUT_OF_PERIOD` warning exports the record through
+ * `outOfPeriodLog` before clearing it. This is the regression fixture.
  *
  * Run it with `node scripts/rollForwardLoss.mjs`. A measurement, not a test.
  */
 
 import { planSchema, prunePins } from '../src/lib/planSchema.js';
-import { freezeElapsedBeforeEdit, pruneStalePins, countStalePins } from '../src/lib/pins.js';
+import { freezeElapsedBeforeEdit, countStalePins } from '../src/lib/pins.js';
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
@@ -44,7 +44,7 @@ const doc = planSchema.parse({
 
 /** Exactly what PlanContext.setDoc does, with the clock held still. */
 const setDoc = (prev, next) => planSchema.parse(
-  prunePins(pruneStalePins(prev, freezeElapsedBeforeEdit(prev, next, NOW))),
+  prunePins(freezeElapsedBeforeEdit(prev, next, NOW)),
 );
 
 const step = (label, value) => console.log(`  ${label.padEnd(44)} ${String(value).padStart(4)}`);
@@ -67,7 +67,7 @@ const afterEdit = setDoc(rolled, {
 step('after one unrelated edit (adding a person)', afterEdit.pins.length);
 
 const lost = rolled.pins.length - afterEdit.pins.length;
-console.log(`\n${lost} assignments were deleted by an edit that had nothing to do with them.`);
-console.log('Nothing exported them first. Under ADR 012 that is data loss on the');
-console.log('normal path, and it is why the export blocks rather than follows the');
-console.log('rest of ADR 009.');
+console.log(`\nassignments deleted by an edit that had nothing to do with them: ${lost}`);
+console.log(lost === 0
+  ? 'None. Recorded duty now survives until somebody exports and clears it.'
+  : 'DATA LOSS: history left the document without being exported first.');

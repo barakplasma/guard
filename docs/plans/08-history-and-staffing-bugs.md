@@ -1,8 +1,8 @@
 # ADR 008: Three defects to fix regardless of any refactor
 
-- Status: Defect 1 **fixed** (ADR 009's core rule). Defect 2 **open and now
-  blocking** - ADR 012's export decision turns the existing cleanup into silent
-  data loss. Defect 3 partly fixed on `main` by #40 and re-rated by ADR 013.
+- Status: Defect 1 **fixed** (ADR 009's core rule). Defect 2's data loss
+  **fixed**; its visibility half is open. Defect 3 partly fixed on `main` by
+  #40 and re-rated by ADR 013.
 - Date: 2026-09-15
 
 ## Context
@@ -93,14 +93,24 @@ Nothing here is newly broken. This is the behaviour CLAUDE.md describes and
 defends, and it was right while out-of-period pins were residue. ADR 012's
 decision is what inverts it.
 
-**Fix:** the export has to exist before either cleanup path can be trusted, and
-until it does, neither `pruneStalePins` nor `clearStalePins` should be removing
-logged assignments. The agenda should also be able to show elapsed assignments
-outside the current period read-only, so a rolled window stops looking like data
-loss. ADR 009 makes both natural by separating the log from the plan period.
+**The data loss is fixed.** `pruneStalePins` is gone rather than narrowed:
+every pin it could take had already elapsed, so there was no safer version of
+it left. Nothing removes recorded duty automatically now, and the last row of
+`rollForwardLoss.mjs` matches the one above it.
 
-**This now blocks rather than follows.** It is the one open item where the
-current behaviour actively destroys what a decision says must survive.
+Removal is explicit and goes through the export first. `src/lib/logExport.js`
+builds the out-of-period assignments into rows the existing CSV export renders
+unchanged, using the same `isOutOfPeriod` predicate the cleanup removes on and
+`plan()` counts for `PIN_OUT_OF_PERIOD` - so what the warning reports, what the
+export carries and what the button removes are one set, asserted in
+`tests/logExport.test.js`. The button beside that warning now reads
+"ייצא ונקה שיבוצים ישנים" and clears nothing if the download could not be
+produced.
+
+**Still open:** the agenda cannot yet *show* elapsed assignments outside the
+period. They survive and can be exported, but a rolled window still looks empty
+until someone opens the CSV. That is the remainder of this defect, and it is no
+longer urgent now that nothing is being destroyed.
 
 ## Defect 3: the staffing pass is incomplete
 

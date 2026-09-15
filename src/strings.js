@@ -241,7 +241,7 @@ export const t = {
   warnPinOutOfPeriod: (count) => (count === 1
     ? 'שיבוץ ידני אחד נמצא מחוץ לתקופת הסידור ולכן לא נלקח בחשבון.'
     : `${count} שיבוצים ידניים נמצאים מחוץ לתקופת הסידור ולכן לא נלקחו בחשבון.`),
-  removeStalePins: 'נקה שיבוצים ישנים',
+  removeStalePins: 'ייצא ונקה שיבוצים ישנים',
 
   // assignment badges: a manual assignment is a locked decision, an
   // automatically preserved elapsed one is history - the two must never read

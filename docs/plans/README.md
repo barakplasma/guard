@@ -30,9 +30,9 @@ retention question is decided; the rest are proposed**, and are split so each ca
 be taken or left on its own:
 
 - **008** is the bug list, and stands alone. A headcount edit rewrote history
-  (**fixed**), history outside the period becomes unreachable and is then
-  silently deleted (**open, and now the blocking item**), and the staffing pass
-  reports shortages that are not real (partly fixed by #40).
+  (**fixed**), history outside the period was silently deleted (**fixed**) and
+  is still not displayable (open), and the staffing pass reports shortages that
+  are not real (partly fixed by #40).
 - **009** fixes the first two by never re-deciding elapsed time. Its core rule
   is **implemented**: the clock enters at the adapter as an absolute instant,
   an elapsed segment carrying a record defers to it, and the headcount cap stops
@@ -62,8 +62,10 @@ be taken or left on its own:
 
 Suggested order, updated now that 009's core rule has landed:
 
-1. **012's export plus 008's defect 2** - one piece of work, and the only one
-   where today's behaviour destroys what a decision says must survive.
+1. ~~012's export plus 008's defect 2~~ - **the data loss is closed.** Nothing
+   removes recorded duty automatically, and the out-of-period button exports
+   before it clears. What remains is showing elapsed assignments outside the
+   period read-only, which is no longer urgent.
 2. **010's fragment move** and the **first half of 014** (per-person
    exclusions) - both small, independent, and needing no solver.
 3. **011** - the MiniZinc model, which closes the shortage class #40 narrowed

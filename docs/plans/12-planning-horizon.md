@@ -98,13 +98,15 @@ complicating them:
   history, or generated - and the roll must not complete until the export has
   actually been produced. Losing a window to a failed export is data loss.
 
-  **And the gap is live, not theoretical.** `scripts/rollForwardLoss.mjs` shows
-  288 logged assignments deleted by one unrelated edit after a roll, with
-  nothing having exported them. `pruneStalePins` does it automatically and
-  `clearStalePins` offers it as a button. Neither is newly broken - both were
-  correct while out-of-period pins were residue - but this decision is what
-  makes them destructive, so the export has to land before either can be
-  trusted. See ADR 008 defect 2.
+  **The gap was live, and the first half is now closed.**
+  `scripts/rollForwardLoss.mjs` measured 288 logged assignments deleted by one
+  unrelated edit after a roll, with nothing having exported them.
+  `pruneStalePins` did it automatically; it is now removed rather than narrowed,
+  because every pin it could take had already elapsed. `clearStalePins` still
+  exists but the button that calls it exports first, through
+  `src/lib/logExport.js`, and clears nothing if the download fails. Neither was
+  newly broken - both were correct while out-of-period pins were residue - but
+  this decision is what made them destructive. See ADR 008 defect 2.
 - **Correcting the record applies inside the current window.** Once a window has
   rolled and been exported, correcting it means correcting the export, not the
   plan. That is a deliberate boundary and should be visible in the interface.
