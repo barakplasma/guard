@@ -1,7 +1,7 @@
 # ADR 011: If a solver, then Pumpkin
 
 - Status: Proposed. Depends on ADR 009. Closes ADR 008's defect 3.
-  Independent of ADR 010.
+  Independent of ADR 010. Sized by ADR 012.
 - Date: 2026-09-15
 
 ## Context
@@ -19,6 +19,14 @@ re-derived, because both were measured correctly and both were beside the point:
 
 What *is* a constraint: prefer maintained libraries over hand-written
 algorithms, and ship one solver rather than a toolchain of them.
+
+## How big the problem is
+
+ADR 012 fixes the horizon at 72 hours, which is 648 assignments for the current
+roster shape. That is a small constraint problem. No time limit, no
+decomposition and no incremental solving are needed, on a phone or anywhere
+else, which removes the last practical objection to running a solver in the
+browser.
 
 ## What a solver would buy
 

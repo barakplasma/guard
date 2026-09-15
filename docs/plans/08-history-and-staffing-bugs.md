@@ -61,10 +61,15 @@ a malfunction - but the consequence is that a person cannot see or correct
 history that has rolled out of the window, and `clearStalePins` offers only to
 delete it.
 
+**ADR 012 re-rates this.** With a 72-hour horizon, rolling the window forward is
+how the app is normally used, not an occasional action - so this fires on the
+main path and is co-equal with defect 1 rather than below it.
+
 **Minimal fix:** the agenda should be able to display elapsed assignments
 outside the current period read-only, so rolling the window forward stops
 looking like data loss. ADR 009 makes this natural by separating the log from
-the plan period.
+the plan period. What should happen to a window that has rolled past - kept,
+dropped, or exported - is the open question ADR 012 records.
 
 ## Defect 3: the staffing pass is incomplete
 
@@ -109,7 +114,8 @@ nothing to do with diff size.
 
 Defects 1 and 2 are the ones that hurt: they corrupt or hide a record of who
 actually stood post. They should be fixed first and do not need any dependency,
-any storage change, or any solver.
+any storage change, or any solver. Under ADR 012's 72-hour rolling horizon both
+fire on the normal path.
 
 Defect 3 is a correctness gap that realistic rotas do not currently hit. It is
 recorded so that it is not rediscovered, and so that the claim "the engine said

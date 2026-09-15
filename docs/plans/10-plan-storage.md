@@ -2,6 +2,8 @@
 
 - Status: Proposed. Depends on ADR 009 only in that the log is what grows.
   Independent of ADR 011 - the solver does not change any of this.
+  **Constrained by ADR 012**: the horizon is 72 hours, which strengthens this
+  record's conclusion - see "At a 72-hour horizon" below.
 - Date: 2026-09-15
 
 ## Context
@@ -63,6 +65,23 @@ Two things fall out for free:
   (`src/lib/shareWindow.js`), so the very long link is a personal bookmark, not
   something anybody pastes into a chat.
 
+### At a 72-hour horizon
+
+ADR 012 fixes the working window at 72 hours, rolled forward. Every plausible
+roster shape then fits in a fragment with room to spare - the largest measured,
+fifty guards on twenty-four seats, is 15,429 characters against a conservative
+64,000 ceiling.
+
+So under a bounded horizon local-first is **not needed at all**, rather than
+deferred. The reserve below applies only if history is retained across rolls,
+which ADR 012 leaves open.
+
+Worth knowing meanwhile: the current shape encodes to 6,744 characters, about
+84% of the query-string budget. It works, which is why nothing has broken yet,
+but a fourth post or a bigger roster crosses 8,000 and sharing fails with no
+warning. That is the concrete reason to make the fragment change now rather than
+when it bites.
+
 ### Local-first stays in reserve
 
 IndexedDB via `dexie` remains the answer if and when the fragment ceiling is
@@ -71,10 +90,11 @@ two maintainers, shipping this month, about 8.3 million downloads a month. The
 alternative `idb` is thinner and single-maintainer, and schema migration is the
 part worth not writing.
 
-The trigger to revisit is concrete rather than aesthetic: history beyond about a
-month at hourly granularity, or wanting history to outlive a link that gets lost.
-Until one of those bites, local-first is a large change - a link stops being the
-document - bought for headroom that is not needed.
+The trigger to revisit is concrete rather than aesthetic: retaining history
+across rolls for more than about a month at hourly granularity, or wanting
+history to outlive a link that gets lost. Under ADR 012's bounded horizon
+neither applies unless retention is chosen, so local-first is a large change -
+a link stops being the document - bought for headroom that is not needed.
 
 `@automerge/automerge` was surveyed and is the only library here with a real
 team (six maintainers, Ink & Switch), and an append-only change history is close
@@ -86,9 +106,10 @@ multi-device merge and this is one editor on one device.
 The elegant property survives, which is the point. The fragment change is
 reversible and small enough to do alongside ADR 009.
 
-The ceiling is moved rather than removed, and the table above says exactly where
-it now sits. Anybody who runs an hourly rota for more than a month will hit it,
-and ADR 010's reserve plan is what they should reach for.
+The ceiling is moved rather than removed, and the tables above say exactly where
+it now sits. Under ADR 012's 72-hour horizon no plausible roster reaches it;
+retaining history across rolls for more than about a month at hourly granularity
+would, and the reserve plan is what to reach for then.
 
 Shorter shifts make history bigger, linearly: a two-hour grid halves the log.
 That is a genuine lever if the ceiling ever gets close.
@@ -97,8 +118,9 @@ That is a genuine lever if the ceiling ever gets close.
 
 - **Local-first now.** Over-engineered for the need. It costs "a link is the
   document" to buy headroom beyond a month that nobody has asked for.
-- **Staying in the query string.** Breaks at seven days of logged history, which
-  ADR 009 makes the normal case rather than the exceptional one.
+- **Staying in the query string.** The current shape already sits at about 84%
+  of that budget, and a fourth post or a larger roster crosses it with no
+  warning. It also keeps guard names in every server access log.
 - **A compact custom encoding for the log** (run-length or delta encoding the
   contiguous hourly runs). Would likely shrink it a lot, but it is bespoke
   format code on the one path where a bug loses the user's only copy of their

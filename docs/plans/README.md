@@ -18,6 +18,7 @@ pending implementation plans.
 | [009](09-timeline-split.md) | Log the past, schedule only the future. *(Proposed)* |
 | [010](10-plan-storage.md) | Keep the plan in the URL, in the fragment. *(Proposed)* |
 | [011](11-solver-selection.md) | If a solver, then Pumpkin. *(Proposed)* |
+| [012](12-planning-horizon.md) | Plan 72 hours at a time, rolled forward. *(Proposed)* |
 
 Each record states the context, decision, consequences, rejected alternatives,
 and implementation or test evidence. Acceptance dates record this design, not a
@@ -35,6 +36,12 @@ can be taken or left on its own:
   reserve.
 - **011** is the solver question that started all of this. It closes 008's third
   defect and depends on 009.
+- **012** records the 72-hour horizon and what it does to the others: it settles
+  010 (the fragment is enough, local-first is not needed), sizes 011 at 648
+  assignments, and raises 008's second defect to the main path because rolling
+  the window forward is the normal operation. It leaves one question open -
+  whether history is retained across rolls - **which should be answered before
+  009 is implemented.**
 
 ## Verification
 
