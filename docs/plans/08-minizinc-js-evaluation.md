@@ -57,7 +57,7 @@ rota. The three files must also be served and reachable at runtime, which the
 "no network at runtime" rule tolerates only because they would be precached
 too - paid for in cache budget instead of requests.
 
-### 3. It addresses roughly two of the twelve defects this project actually had
+### 3. It addresses two of the thirteen defects this project actually had
 
 Read back over the history, the defects cluster somewhere a solver does not
 reach. A solver decides *who works when*. Almost everything that went wrong
@@ -70,7 +70,7 @@ is displayed.
 | Scarcity ordering stranding a required seat (ADR 005) | **Yes** - and it is still not fully fixed; see below |
 | A whole-mission pin emitted as one 163-hour row (ADR 001) | No - "the engine's decision was right all along; only the shape it reports them in has changed" |
 | The agenda's duplicated 22:00 time gutter (#27) | No - rendering |
-| Warning avalanche, three separate times (#21, #24, ADR 005) | No - pin normalization and report aggregation |
+| Warning avalanche, three separate defects (#21, #24, ADR 005) | No - pin normalization and report aggregation |
 | Stepping a date back over noon jumping forward nine hours (#35) | No - a 12-hour picker's hour arithmetic |
 | Minimum-gap stat masked by on-call sleep (#31) | No - statistics |
 | A frozen pin reshuffled by a later availability edit (#21) | No - pin semantics |
