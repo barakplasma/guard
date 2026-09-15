@@ -541,6 +541,158 @@ function occupy(st, mission, start, end, slotStart, counter) {
  *   proposals: object[],
  * }}
  */
+/**
+ * The segment grid every mission rotates on, as a pure function of the
+ * normalized input.
+ *
+ * Lifted out of `planOnce` so it keeps exactly one definition - the reason the
+ * comment below insists pinned rows and the demand walk cannot disagree about
+ * where a segment starts. Nothing here was ever state-dependent: it reads the
+ * plan window, the employees' availability edges, the night edges and each
+ * mission's own fields, and none of the phases that follow touch any of those.
+ *
+ * Exposed through `segmentGrid` below, which is how anything outside the engine
+ * asks the same question without building a second, subtly different answer.
+ */
+function makeGrid({ start, end, shiftMinutes, emps, miss, goodPins, nightWindows }) {
+  /* --- the segment grid local missions rotate on --- */
+  // Two things make a segment, and only one of them is the rotation grid.
+  //
+  // These are the other one: edges every mission is cut on whatever it rotates
+  // on. The plan's own bounds; every employee's availability edge, shared
+  // across all missions since an employee's window genuinely affects whether
+  // *any* mission can be staffed across it. A night edge only cuts missions
+  // whose headcount changes there. Each mission's own start/end is added to its
+  // own segmentation, so it gets a properly clamped partial segment at its own
+  // edges without leaking into an unrelated mission's grid (a remote or local
+  // mission ending off-grid must not fragment some other local mission's
+  // otherwise-clean hourly slots).
+  const sharedEdges = [start, end];
+  // Rest is a preference for choosing crew, never a reason to shorten a shift.
+  for (const m of miss) if (m.type === 'daily') for (const w of m.occurrences) sharedEdges.push(w.start, w.end);
+  for (const e of emps) { sharedEdges.push(e.start, e.end); }
+
+  /** Grid points from `from`, stepping `minutes`, up to but not including `to`. */
+  const stepInto = (into, from, to, minutes) => {
+    for (let t = from; t < to; t += minutes * MINUTE) into.add(t);
+  };
+
+  /** A set of grid points as the ascending slot bounds of the whole plan window. */
+  const boundsOf = (points) => [...new Set([...points, end])].sort((a, b) => a - b);
+
+  // The house grid: the plan's `shiftMinutes`, stepped from its start. A
+  // mission that overrides neither length rotates on exactly this - the same
+  // points, produced by the same loop that always produced them - which is
+  // what makes an already-shared link segment the way it always did, whatever
+  // its neighbours on the page now ask for. tests/planner.golden.test.js is
+  // the standing proof.
+  const housePoints = new Set();
+  stepInto(housePoints, start, end, shiftMinutes);
+  const houseBounds = boundsOf(housePoints);
+
+  const { nights, days } = stretches(nightWindows, start, end);
+
+  // Keyed on the normalized mission object so each mission owns its grid cache.
+  const boundsCache = new Map();
+  /**
+   * The rotation grid this mission turns on, as ascending slot bounds spanning
+   * the plan window.
+   *
+   * With equal day and night lengths the grid is anchored once, at the plan's
+   * start. With different ones each stretch is anchored at its own beginning
+   * (or at the plan's start, where the plan opens mid-stretch), which is what
+   * "two hours by day, one by night" actually means: night starts a fresh
+   * hourly grid at 22:00 rather than inheriting whatever phase the two-hour
+   * grid happened to be in. A stretch whose length is not a whole number of
+   * slots leaves one partial slot at its end, the same way the plan's own end
+   * has always left one.
+   */
+  const slotBoundsFor = (mission) => {
+    const dayMinutes = mission.shiftMinutes ?? shiftMinutes;
+    const nightMinutes = mission.nightShiftMinutes ?? dayMinutes;
+    if (dayMinutes === shiftMinutes && nightMinutes === shiftMinutes) return houseBounds;
+
+    const hit = boundsCache.get(mission);
+    if (hit) return hit;
+    const points = new Set([start]);
+    if (dayMinutes === nightMinutes) {
+      stepInto(points, start, end, dayMinutes);
+    } else {
+      for (const w of nights) stepInto(points, w.start, w.end, nightMinutes);
+      for (const w of days) stepInto(points, w.start, w.end, dayMinutes);
+    }
+    const bounds = boundsOf(points);
+    boundsCache.set(mission, bounds);
+    return bounds;
+  };
+
+  // Built lazily but before anything is placed, because phase 1 needs it too: a
+  // pin on a local mission is emitted one row per segment. A grid depends only
+  // on the plan window, the employees' availability edges, the night edges and
+  // the mission's own fields, none of which the phases below touch, so when it
+  // is computed cannot change what it produces - and one shared `segmentsOf`
+  // means the pinned rows and the demand walk can never disagree about where a
+  // segment starts.
+  //
+  // The slot a segment belongs to is the *grid's* slot, not the segment's own
+  // extent: an availability edge tearing a slot in two leaves both halves
+  // reporting the one slot they are both inside, which is what lets `mergeRows`
+  // put them back together and the ring charge them as one turn. It is also
+  // deliberately not clamped to the mission's window, so two missions cutting
+  // the same grid slot at different points still name the same slot.
+  const segmentCache = new Map();
+  const segmentsOf = (mission) => {
+    const hit = segmentCache.get(mission);
+    if (hit) return hit;
+    const bounds = slotBoundsFor(mission);
+    const pinEdges = goodPins.filter((p) => p.missionId === mission.id).flatMap((p) => [p.start, p.end]);
+    const nightEdges = mission.count === mission.nightCount ? [] : nightWindows.flatMap((w) => [w.start, w.end]);
+    const edges = [...new Set([...bounds, ...sharedEdges, ...pinEdges, ...nightEdges, mission.start, mission.end])]
+      .filter((t) => t >= mission.start && t <= mission.end)
+      .sort((a, b) => a - b);
+    const segments = [];
+    let slot = 0;
+    for (let i = 1; i < edges.length; i++) {
+      if (!(edges[i] > edges[i - 1])) continue;
+      const segStart = edges[i - 1];
+      while (slot + 2 < bounds.length && bounds[slot + 1] <= segStart) slot++;
+      segments.push({
+        start: segStart,
+        end: edges[i],
+        slot: { start: bounds[slot], end: bounds[slot + 1] },
+      });
+    }
+    segmentCache.set(mission, segments);
+    return segments;
+  };
+  return { segmentsOf, slotBoundsFor };
+}
+
+/**
+ * The segment grid for a plan input, as plain data.
+ *
+ * The one supported way to ask "where does this plan's grid cut" from outside
+ * `plan()`. A caller that rebuilds it - ADR 011's solver adapter is the case in
+ * hand - and gets it even slightly wrong produces a schedule that disagrees
+ * with the engine about what a shift *is*, which is a defect nobody would find
+ * by reading either side on its own.
+ *
+ * Warnings raised while normalizing are discarded: this answers a structural
+ * question, and `plan()` is where findings belong.
+ */
+export function segmentGrid({
+  start, end, shiftMinutes, employees = [], missions = [], pins = [], nightWindows = [],
+}) {
+  const warnings = [];
+  const emps = normalizeEmployees(employees, start, end, warnings);
+  const miss = normalizeMissions(missions, start, end, warnings);
+  const employeeById = new Map(emps.map((e) => [e.id, e]));
+  const missionById = new Map(miss.map((m) => [m.id, m]));
+  const goodPins = normalizePins(pins, employeeById, missionById, start, end, warnings, nightWindows);
+  const { segmentsOf } = makeGrid({ start, end, shiftMinutes, emps, miss, goodPins, nightWindows });
+  return miss.map((mission) => ({ mission, segments: segmentsOf(mission) }));
+}
+
 function planOnce({
   start, end, shiftMinutes, strategy: strategyName = DEFAULT_STRATEGY,
   employees = [], missions = [], pins = [], nightWindows = [], tags = [],
@@ -660,115 +812,9 @@ function planOnce({
   };
 
   /* --- the segment grid local missions rotate on --- */
-  // Two things make a segment, and only one of them is the rotation grid.
-  //
-  // These are the other one: edges every mission is cut on whatever it rotates
-  // on. The plan's own bounds; every employee's availability edge, shared
-  // across all missions since an employee's window genuinely affects whether
-  // *any* mission can be staffed across it. A night edge only cuts missions
-  // whose headcount changes there. Each mission's own start/end is added to its
-  // own segmentation, so it gets a properly clamped partial segment at its own
-  // edges without leaking into an unrelated mission's grid (a remote or local
-  // mission ending off-grid must not fragment some other local mission's
-  // otherwise-clean hourly slots).
-  const sharedEdges = [start, end];
-  // Rest is a preference for choosing crew, never a reason to shorten a shift.
-  for (const m of miss) if (m.type === 'daily') for (const w of m.occurrences) sharedEdges.push(w.start, w.end);
-  for (const e of emps) { sharedEdges.push(e.start, e.end); }
-
-  /** Grid points from `from`, stepping `minutes`, up to but not including `to`. */
-  const stepInto = (into, from, to, minutes) => {
-    for (let t = from; t < to; t += minutes * MINUTE) into.add(t);
-  };
-
-  /** A set of grid points as the ascending slot bounds of the whole plan window. */
-  const boundsOf = (points) => [...new Set([...points, end])].sort((a, b) => a - b);
-
-  // The house grid: the plan's `shiftMinutes`, stepped from its start. A
-  // mission that overrides neither length rotates on exactly this - the same
-  // points, produced by the same loop that always produced them - which is
-  // what makes an already-shared link segment the way it always did, whatever
-  // its neighbours on the page now ask for. tests/planner.golden.test.js is
-  // the standing proof.
-  const housePoints = new Set();
-  stepInto(housePoints, start, end, shiftMinutes);
-  const houseBounds = boundsOf(housePoints);
-
-  const { nights, days } = stretches(nightWindows, start, end);
-
-  // Keyed on the normalized mission object so each mission owns its grid cache.
-  const boundsCache = new Map();
-  /**
-   * The rotation grid this mission turns on, as ascending slot bounds spanning
-   * the plan window.
-   *
-   * With equal day and night lengths the grid is anchored once, at the plan's
-   * start. With different ones each stretch is anchored at its own beginning
-   * (or at the plan's start, where the plan opens mid-stretch), which is what
-   * "two hours by day, one by night" actually means: night starts a fresh
-   * hourly grid at 22:00 rather than inheriting whatever phase the two-hour
-   * grid happened to be in. A stretch whose length is not a whole number of
-   * slots leaves one partial slot at its end, the same way the plan's own end
-   * has always left one.
-   */
-  const slotBoundsFor = (mission) => {
-    const dayMinutes = mission.shiftMinutes ?? shiftMinutes;
-    const nightMinutes = mission.nightShiftMinutes ?? dayMinutes;
-    if (dayMinutes === shiftMinutes && nightMinutes === shiftMinutes) return houseBounds;
-
-    const hit = boundsCache.get(mission);
-    if (hit) return hit;
-    const points = new Set([start]);
-    if (dayMinutes === nightMinutes) {
-      stepInto(points, start, end, dayMinutes);
-    } else {
-      for (const w of nights) stepInto(points, w.start, w.end, nightMinutes);
-      for (const w of days) stepInto(points, w.start, w.end, dayMinutes);
-    }
-    const bounds = boundsOf(points);
-    boundsCache.set(mission, bounds);
-    return bounds;
-  };
-
-  // Built lazily but before anything is placed, because phase 1 needs it too: a
-  // pin on a local mission is emitted one row per segment. A grid depends only
-  // on the plan window, the employees' availability edges, the night edges and
-  // the mission's own fields, none of which the phases below touch, so when it
-  // is computed cannot change what it produces - and one shared `segmentsOf`
-  // means the pinned rows and the demand walk can never disagree about where a
-  // segment starts.
-  //
-  // The slot a segment belongs to is the *grid's* slot, not the segment's own
-  // extent: an availability edge tearing a slot in two leaves both halves
-  // reporting the one slot they are both inside, which is what lets `mergeRows`
-  // put them back together and the ring charge them as one turn. It is also
-  // deliberately not clamped to the mission's window, so two missions cutting
-  // the same grid slot at different points still name the same slot.
-  const segmentCache = new Map();
-  const segmentsOf = (mission) => {
-    const hit = segmentCache.get(mission);
-    if (hit) return hit;
-    const bounds = slotBoundsFor(mission);
-    const pinEdges = goodPins.filter((p) => p.missionId === mission.id).flatMap((p) => [p.start, p.end]);
-    const nightEdges = mission.count === mission.nightCount ? [] : nightWindows.flatMap((w) => [w.start, w.end]);
-    const edges = [...new Set([...bounds, ...sharedEdges, ...pinEdges, ...nightEdges, mission.start, mission.end])]
-      .filter((t) => t >= mission.start && t <= mission.end)
-      .sort((a, b) => a - b);
-    const segments = [];
-    let slot = 0;
-    for (let i = 1; i < edges.length; i++) {
-      if (!(edges[i] > edges[i - 1])) continue;
-      const segStart = edges[i - 1];
-      while (slot + 2 < bounds.length && bounds[slot + 1] <= segStart) slot++;
-      segments.push({
-        start: segStart,
-        end: edges[i],
-        slot: { start: bounds[slot], end: bounds[slot + 1] },
-      });
-    }
-    segmentCache.set(mission, segments);
-    return segments;
-  };
+  // Built before anything is placed, because phase 1 needs it too: a pin on a
+  // local mission is emitted one row per segment. See `makeGrid`.
+  const { segmentsOf } = makeGrid({ start, end, shiftMinutes, emps, miss, goodPins, nightWindows });
 
   /* --- 1. pins are immovable: place them before anything else competes --- */
   // A pin on a remote mission stays one row over the whole mission: that is
