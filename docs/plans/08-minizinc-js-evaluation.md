@@ -144,6 +144,87 @@ solver with a large maintainer base** - that option does not exist, so the
 choice is between small teams. And MiniZinc is MPL-2.0, which is file-level
 copyleft: fine for shipping in a bundle, worth knowing rather than discovering.
 
+### What Chuffed is, and the one-solver objection
+
+Chuffed is a **lazy clause generation** constraint solver: a hybrid that runs
+finite-domain propagation and a SAT engine together, where each propagator
+explains its inferences as clauses so the SAT side can learn nogoods from them
+and prune the search. It was written by Geoffrey Chu, Peter Stuckey, Andreas
+Schutt and others at Data61 (CSIRO) and the University of Melbourne, is MIT
+licensed, and is the backend MiniZinc reaches for on scheduling problems.
+
+The objection to MiniZinc is fair, though: its WebAssembly build is a
+*toolchain*, a model compiler plus gecode, cbc, chuffed and highs. Only one of
+those is wanted, and stripping the others means building MiniZinc ourselves,
+which is the zero-maintainer trap again.
+
+[Pumpkin](https://github.com/consol-lab/pumpkin) is the same technology, rebuilt
+in Rust by ConSol Lab at TU Delft - lazy clause generation, cumulative,
+disjunctive, element, all-different, table, linear and boolean constraints, with
+optimisation. Apache-2.0 or MIT.
+
+**It compiles to WebAssembly cleanly**, which was checked rather than assumed:
+
+| | |
+|---|---|
+| target | `wasm32-unknown-unknown`, stable rustc 1.98.1 |
+| toolchain | `cargo build`, no Emscripten, no C toolchain, no patches |
+| build time | 25 seconds from a cold registry |
+| output | **768 KB wasm, 236 KB gzipped** |
+
+The top-level `pumpkin-solver` crate does *not* build for wasm: it pulls in
+`signal-hook`, `clap` and a `cc` build step. Those are the command-line
+wrapper's concerns. Depending on `pumpkin-core`, `pumpkin-constraints`,
+`pumpkin-propagators` and `pumpkin-conflict-resolvers` instead avoids all of
+them, and `pumpkin-core` already carries `web-time` and a `wasm-bindgen-test`
+dev-dependency, so the authors clearly build for the browser deliberately.
+
+Modelled directly against it, the solver returns a correct full staffing for
+the instance `scripts/completenessSearch.mjs` finds the engine reporting short:
+
+```
+  m1: e2            (commander covered)
+  m2: e1, e3        (e3 covers driver and commander)
+  m3: e4            (driver covered)
+```
+
+So the size comparison, with the caveat that size was explicitly declared
+irrelevant and is reported here only because "one solver" was the actual ask:
+
+| | uncompressed | gzipped |
+|---|---|---|
+| MiniZinc (compiler + 4 solvers) | 19.1 MB | ~5.4 MB |
+| Pumpkin (one solver, no compiler) | 768 KB | 236 KB |
+| the app itself today | 875 KiB | 274 KB |
+
+### Choosing between them
+
+These two preferences genuinely conflict and the conflict should not be
+papered over.
+
+**MiniZinc is the conservative choice.** Seven years, 409 releases, the
+project's own organisation, and the model is a declarative `.mzn` file that
+stays portable across solvers - including to OR-Tools CP-SAT later.
+
+**Pumpkin is the choice that matches what was asked for.** One solver, Rust,
+768 KB, standard toolchain. The cost is that it is version 0.5.0 and its own
+authors call it "a research vehicle for the lab" with no API stability
+guarantee, the team is roughly three people, and the project started in October
+2024. The model would be written in Rust against its API rather than in a
+modelling language, and the wasm bindings would be ours to keep working.
+
+On balance, **Pumpkin**, because the 0.x risk is smaller than it looks here.
+Solver API churn fails at compile time, which is loud and safe, not silently
+wrong. The version is pinned. And `invariants.js` already validates every
+schedule the engine produces independently, so a solver that returns something
+invalid is caught before it reaches anybody's agenda - which is precisely the
+argument for keeping that module and why it matters more under a solver, not
+less.
+
+Take MiniZinc instead if the wasm bindings and a Rust model crate feel like
+more ownership than the problem is worth. That is a defensible reading and the
+same timeline split has to happen either way.
+
 ### Why not compile OR-Tools to WebAssembly ourselves
 
 Asked directly, and worth recording because it looks like the obvious move.
@@ -282,6 +363,9 @@ the real price here. It buys a rota that remembers what actually happened.
 from `encodePlan` over a seventeen-guard, ten-seat, seven-day rota. Package
 facts, maintainer counts and release histories from the npm registry for
 `minizinc`, `or-tools-wasm`, `dexie`, `@automerge/automerge`, `munkres-js`,
-`logic-solver` and `kiwi.js`, read on 2026-09-15. Upstream's Emscripten
+`logic-solver`, `kiwi.js`, and crates.io for `pumpkin-solver` and its component
+crates, read on 2026-09-15. The Pumpkin WebAssembly build and the solved
+counterexample were produced locally against `wasm32-unknown-unknown` with
+stable rustc 1.98.1 and are reproducible from a four-dependency `Cargo.toml`. Upstream's Emscripten
 position quoted from or-tools-discuss, 5 May 2025. MiniZinc's OR-Tools backend
 per the MiniZinc handbook's solver-backends chapter.
