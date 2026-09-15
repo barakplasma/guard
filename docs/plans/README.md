@@ -30,8 +30,9 @@ retention question is decided; the rest are proposed**, and are split so each ca
 be taken or left on its own:
 
 - **008** is the bug list, and stands alone. A headcount edit rewrote history
-  (**fixed**), history outside the period becomes unreachable (open), and the
-  staffing pass reports shortages that are not real (partly fixed by #40).
+  (**fixed**), history outside the period becomes unreachable and is then
+  silently deleted (**open, and now the blocking item**), and the staffing pass
+  reports shortages that are not real (partly fixed by #40).
 - **009** fixes the first two by never re-deciding elapsed time. Its core rule
   is **implemented**: the clock enters at the adapter as an absolute instant,
   an elapsed segment carrying a record defers to it, and the headcount cap stops
@@ -59,15 +60,21 @@ be taken or left on its own:
   uncommitted so they can answer a callout. The first half needs no solver; the
   second is an objective term and waits for 011.
 
-Suggested order: **009** first (fixes the history corruption, no dependencies),
-then **010** and the first half of **014** (both small and independent), then
-**011**, which closes the shortage class #40 narrowed but did not eliminate.
+Suggested order, updated now that 009's core rule has landed:
+
+1. **012's export plus 008's defect 2** - one piece of work, and the only one
+   where today's behaviour destroys what a decision says must survive.
+2. **010's fragment move** and the **first half of 014** (per-person
+   exclusions) - both small, independent, and needing no solver.
+3. **011** - the MiniZinc model, which closes the shortage class #40 narrowed
+   but did not eliminate, and which carries the `invariants.js` gap with it.
 
 ## Verification
 
 Run `npm run lint`, `npm test`, and `npm run build`. ADR 008's defects are
 reproduced with `node scripts/historyDriftCheck.mjs` (defects 1 and 2) and
-`node scripts/completenessSearch.mjs` and `node scripts/offGridFuzz.mjs`
+`node scripts/rollForwardLoss.mjs` (defect 2 under ADR 012's export decision),
+and `node scripts/completenessSearch.mjs` with `node scripts/offGridFuzz.mjs`
 (defect 3, before and after #40); all are measurements rather than tests and are
 deliberately outside `npm test`. Browser acceptance uses
 `tests/e2e.mjs`, `tests/mobile-viewports.mjs`, and `tests/features.e2e.mjs`

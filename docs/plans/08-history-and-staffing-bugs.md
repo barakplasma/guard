@@ -1,7 +1,8 @@
 # ADR 008: Three defects to fix regardless of any refactor
 
-- Status: Defect 1 **fixed** (ADR 009's core rule). Defect 2 open. Defect 3
-  partly fixed on `main` by #40 and re-rated by ADR 013.
+- Status: Defect 1 **fixed** (ADR 009's core rule). Defect 2 **open and now
+  blocking** - ADR 012's export decision turns the existing cleanup into silent
+  data loss. Defect 3 partly fixed on `main` by #40 and re-rated by ADR 013.
 - Date: 2026-09-15
 
 ## Context
@@ -63,15 +64,43 @@ a malfunction - but the consequence is that a person cannot see or correct
 history that has rolled out of the window, and `clearStalePins` offers only to
 delete it.
 
-**ADR 012 re-rates this.** With a 72-hour horizon, rolling the window forward is
-how the app is normally used, not an occasional action - so this fires on the
-main path and is co-equal with defect 1 rather than below it.
+**ADR 012 re-rates this twice over.** With a 72-hour horizon, rolling the window
+forward is how the app is normally used, so this fires on the main path. And
+once a rolled-past window is meant to be *exported*, the same pins stop being
+residue and become the only durable record - which turns the existing cleanup
+into deletion of the thing that is supposed to survive.
 
-**Minimal fix:** the agenda should be able to display elapsed assignments
-outside the current period read-only, so rolling the window forward stops
-looking like data loss. ADR 009 makes this natural by separating the log from
-the plan period. What should happen to a window that has rolled past - kept,
-dropped, or exported - is the open question ADR 012 records.
+`node scripts/rollForwardLoss.mjs` shows it:
+
+```
+  step                                          logged
+  after the freeze records elapsed shifts       288
+  after rolling the window forward              288
+    ...of which now outside the period          288
+  after one unrelated edit (adding a person)      0
+```
+
+**288 logged assignments deleted by an edit that had nothing to do with them**,
+and nothing exported them first. The two-step shape is why it is easy to miss:
+`pruneStalePins` is deliberately timid and declines to act on the edit that
+*moves* the period, because the date fields emit an edit on every intermediate
+value that parses. So rolling the window looks safe. The deletion lands on the
+next edit, when the window is standing still and the pins are already outside
+it. `clearStalePins` - the button offered beside the `PIN_OUT_OF_PERIOD`
+warning - has the same problem explicitly.
+
+Nothing here is newly broken. This is the behaviour CLAUDE.md describes and
+defends, and it was right while out-of-period pins were residue. ADR 012's
+decision is what inverts it.
+
+**Fix:** the export has to exist before either cleanup path can be trusted, and
+until it does, neither `pruneStalePins` nor `clearStalePins` should be removing
+logged assignments. The agenda should also be able to show elapsed assignments
+outside the current period read-only, so a rolled window stops looking like data
+loss. ADR 009 makes both natural by separating the log from the plan period.
+
+**This now blocks rather than follows.** It is the one open item where the
+current behaviour actively destroys what a decision says must survive.
 
 ## Defect 3: the staffing pass is incomplete
 
@@ -178,5 +207,6 @@ version of the bug is no longer in production.
 
 `scripts/historyDriftCheck.mjs` (defects 1 and 2),
 `scripts/completenessSearch.mjs` (defect 3, measured rate),
+`scripts/rollForwardLoss.mjs` (defect 2 under ADR 012),
 `scripts/midScheduleCallout.mjs` (defect 3, the reported case, now a #40
 regression fixture) and `scripts/offGridFuzz.mjs` (what #40 left open).
