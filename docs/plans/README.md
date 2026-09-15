@@ -1,8 +1,9 @@
 # Architecture decision records
 
-These accepted ADRs describe the implemented scheduling design. The historical
-`docs/plans` directory and filenames remain stable for existing references;
-these documents are decision records, not pending implementation plans.
+These ADRs describe the implemented scheduling design, plus the alternatives
+considered and turned down. The historical `docs/plans` directory and filenames
+remain stable for existing references; these documents are decision records, not
+pending implementation plans.
 
 | ADR | Decision |
 |-----|----------|
@@ -13,14 +14,19 @@ these documents are decision records, not pending implementation plans.
 | [005](05-qualifications-and-tags.md) | Select qualified crews with preferred night rest. |
 | [006](06-approved-continuation.md) | Extend shared plan URLs without reordering existing fields. |
 | [007](07-on-call-missions.md) | Count on-call missions toward night rest. |
+| [008](08-minizinc-js-evaluation.md) | Keep the hand-written engine; do not ship a solver. *(Rejected)* |
 
 Each record states the context, decision, consequences, rejected alternatives,
 and implementation or test evidence. Acceptance dates record this design, not a
 claim about deployment. Superseding decisions should identify the affected ADR.
+ADR 008 records a rejection rather than an implemented decision, and names one
+open defect - the staffing pass is not complete - with the fix it recommends.
 
 ## Verification
 
-Run `npm run lint`, `npm test`, and `npm run build`. Browser acceptance uses
+Run `npm run lint`, `npm test`, and `npm run build`. ADR 008's measurements are
+reproduced with `node scripts/completenessSearch.mjs`, which is a measurement
+rather than a test and is deliberately outside `npm test`. Browser acceptance uses
 `tests/e2e.mjs`, `tests/mobile-viewports.mjs`, and `tests/features.e2e.mjs`
 against a local built preview. Set `CHROME` to a headless Chromium binary and
 `SHOT_DIR` outside the repository.
