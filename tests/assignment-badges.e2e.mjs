@@ -9,7 +9,7 @@ import { encodePlan, decodePlan } from '../src/lib/urlState.js';
 const BASE = process.env.BASE || 'http://127.0.0.1:4173';
 const SHOT_DIR = process.env.SHOT_DIR || '/tmp/guard-shots';
 await mkdir(SHOT_DIR, { recursive: true });
-const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROME || '/usr/bin/chromium' });
+const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROME });
 try {
   const context = await browser.newContext({ viewport: { width: 360, height: 800 }, isMobile: true, hasTouch: true, locale: 'he-IL', timezoneId: 'Asia/Jerusalem' });
   const page = await context.newPage();
