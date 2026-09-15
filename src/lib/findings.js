@@ -9,7 +9,8 @@ export function findingText(w, doc) {
   switch (w.code) {
     case 'engine-bug': return `${t.engineProblem} (${w.rule})`;
     case 'missing-required-tag': return t.missingQualification(mission, tag, w.needed);
-    case 'rest-unsatisfied': return t.restShortfall(person, w.needed, Math.floor(w.got), w.longestMinutes == null ? null : Math.floor(w.longestMinutes));
+    case 'rest-unsatisfied': return t.restShortfall(person, w.needed, Math.floor(w.got),
+      w.longestMinutes == null ? null : Math.floor(w.longestMinutes));
     case 'rest-incomplete': return t.restIncomplete(person);
     case 'pin-excluded-tag': return t.pinExcluded(person, mission);
     case 'tag-required-and-excluded': return t.contradictoryTag(mission, tag);

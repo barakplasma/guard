@@ -6,7 +6,12 @@ export const t = {
   decreaseNumber: (label) => `הקטנת ${label}`,
   increaseNumber: (label) => `הגדלת ${label}`,
   missingQualification: (mission, tag, n) => `${mission}: נדרשים ${n} בעלי הסמכת ${tag}; הכיסוי אינו מלא.`,
-  restShortfall: (person, needed, got, longest) => `${person}: סך מנוחת הלילה ${got} דקות במקום ${needed}.${longest == null ? '' : ` הרצף הארוך ביותר: ${longest} דקות.`} המשימות אוישו למרות החריגה.`,
+  // The shortfall is against the *total* night rest; the longest continuous
+  // block is quoted alongside it so a split night never reads as a failure of
+  // the total, and a genuinely broken night still shows its worst stretch.
+  restShortfall: (person, needed, got, longest) => `${person}: מנוחת לילה כוללת ${got} דקות במקום ${needed}`
+    + (longest != null && longest < needed ? ` (הרצף הארוך ביותר: ${longest} דקות)` : '')
+    + '. המשימות אוישו למרות החריגה.',
   restIncomplete: (person) => `${person}: הלילה מכוסה חלקית בתקופה או בזמינות; אי אפשר לאשר מנוחה מלאה.`,
   pinExcluded: (person, mission) => `${person} שובץ ידנית ל${mission} למרות פטור לפי הסמכה.`,
   contradictoryTag: (mission, tag) => `${mission}: הסמכת ${tag} גם נדרשת וגם פטורה מהמשימה.`,
@@ -16,13 +21,13 @@ export const t = {
   addQualification: 'הוספת הסמכה',
   removeQualification: 'מחיקת הסמכה',
   removeQualificationBody: (name, people, missions) => `למחוק את ${name}? ההסמכה תוסר מ־${people} אנשים ומ־${missions} משימות.`,
-  nightRestMinutes: 'סך מנוחת לילה (דקות)',
+  nightRestMinutes: 'מנוחת לילה כוללת (דקות)',
   restUnitsHelp: '6 שעות = 360 דקות · 3 שעות = 180 דקות',
   restUseHours: (hours) => `התכוונת ל־${hours} שעות? הגדרה ל־${hours * 60} דקות`,
   requiredQualifications: 'הסמכות נדרשות בכל משמרת',
   excludedQualifications: 'פטורים מהמשימה לפי הסמכה',
   combinedQualificationsHelp: 'עדיפות לאנשים שונים לכל תפקיד. כשצריך, אדם אחד יכול למלא כמה תפקידים.',
-  restHelp: 'סך המנוחה בלילה קודם לרצף המנוחה. אם אין מספיק אנשים, המשימות יאוישו ותוצג חריגת המנוחה.',
+  restHelp: 'עדיפות למנוחת לילה כוללת באורך הזה — היא יכולה להתפצל. מועדף לא להעסיק בלילה מי שנדרשת לו מנוחה כשאפשר להחליף. אם אין מספיק אנשים, המשימות יאוישו ותוצג חריגת המנוחה.',
   engineProblem: 'זוהתה שגיאה בחישוב הסידור. יש לבדוק את הפרטים לפני שימוש; אפשר לשמור ולשתף את הקישור.',
   qualityNoRest: (name, n) => `${name}: ${n} מעברים בין משמרות ללא הפסקה`,
   qualitySameMission: (name, n) => `${name}: ${n} משמרות רצופות באותה משימה`,
@@ -237,6 +242,22 @@ export const t = {
     ? 'שיבוץ ידני אחד נמצא מחוץ לתקופת הסידור ולכן לא נלקח בחשבון.'
     : `${count} שיבוצים ידניים נמצאים מחוץ לתקופת הסידור ולכן לא נלקחו בחשבון.`),
   removeStalePins: 'נקה שיבוצים ישנים',
+
+  // assignment badges: a manual assignment is a locked decision, an
+  // automatically preserved elapsed one is history - the two must never read
+  // as the same kind of lock.
+  pinnedLocked: 'שיבוץ ידני נעול',
+  frozenHistory: 'שיבוץ עבר שנשמר אוטומטית',
+  releaseFrozen: 'שחרור שיבוץ עבר שנשמר',
+
+  // corrections for a missing required qualification
+  correctionProposal: (mission, driver) => `${mission}: הצעה — לשבץ את ${driver} לטווח החסר ולשחרר את שיבוצי העבר השמורים שלו:`,
+  correctionRelease: (mission, substitute) => (substitute
+    ? `${mission} — במקומו: ${substitute}`
+    : `${mission} — יוחזר לשיבוץ אוטומטי`),
+  correctionRestImpact: (before, after, needed) => `השפעה על מנוחת הלילה: ${before} דקות כוללות לפני, ${after} אחרי (נדרש ${needed}).`,
+  correctionApply: 'החלת התיקון',
+  correctionBlocked: (mission, driver) => `${mission}: התיקון היה לשבץ את ${driver}, אך הוא משובץ ידנית (נעול) למשימה אחרת בטווח זה. שיבוץ ידני אינו מוחלף אוטומטית.`,
 
   // debug section
   // The warning count rides in the toggle label: the section is collapsed by

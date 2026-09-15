@@ -83,7 +83,7 @@ function SummaryTable({ result, highlightId }) {
 
 export default function SchedulePage() {
   const {
-    doc, pinShift, clearPin, clearAllPins, clearPinByWarning, clearStalePins, decodeFailed,
+    doc, pinShift, clearPin, clearAllPins, clearPinByWarning, clearStalePins, applyCorrection, decodeFailed,
   } = usePlan();
   const { result, error } = useSchedule(doc);
 
@@ -152,7 +152,8 @@ export default function SchedulePage() {
       {error && <Alert severity="info" sx={{ mb: 2 }}>{error}</Alert>}
 
       <Box sx={{ mb: { xs: 1, sm: 2 } }}><ShareBar doc={doc} result={result} now={now} /></Box>
-      {result && <ScheduleFindings warnings={result.warnings} result={result} panel />}
+      {result && <ScheduleFindings warnings={result.warnings} proposals={result.proposals}
+        onApplyCorrection={applyCorrection} result={result} panel />}
       {result && (
         <>
 

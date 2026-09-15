@@ -6,7 +6,7 @@ import { decodePlan, encodePlan, PARAM } from '../lib/urlState.js';
 import { emptyPlan, makeId, planSchema, prunePins } from '../lib/planSchema.js';
 import {
   applyClearPin, applyClearPinsForMission, applyMissionAssignees, applySwap,
-  clearStalePins, freezeElapsedBeforeEdit, pruneStalePins,
+  applyCorrection, clearStalePins, freezeElapsedBeforeEdit, pruneStalePins,
 } from '../lib/pins.js';
 import { addUniqueEmployees } from '../lib/employees.js';
 import { t } from '../strings.js';
@@ -183,6 +183,14 @@ export function PlanProvider({ children }) {
     ),
 
     clearAllPins: () => update((d) => ({ ...d, pins: [] })),
+
+    /**
+     * Record an accepted correction proposal (lib/corrections.js): the named
+     * driver moves onto the short mission, the released preserved-history
+     * assignments get their named substitutes, and everything travels in the
+     * URL - a reload shows the accepted correction, not the proposal again.
+     */
+    applyCorrection: (proposal) => update((d) => applyCorrection(d, proposal)),
 
     /**
      * Drop assignments left behind outside the plan period. Offered as a

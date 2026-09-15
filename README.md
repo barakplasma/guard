@@ -90,6 +90,7 @@ BASE=http://127.0.0.1:4173 node tests/number-inputs.e2e.mjs
 BASE=http://127.0.0.1:4173 node tests/mui-controls.e2e.mjs
 BASE=http://127.0.0.1:4173 node tests/mui-pickers.e2e.mjs
 BASE=http://127.0.0.1:4173 node tests/short-shifts.e2e.mjs
+BASE=http://127.0.0.1:4173 node tests/assignment-badges.e2e.mjs
 ```
 
 Set `CHROME=/usr/bin/chromium` to use an installed browser instead. The suites

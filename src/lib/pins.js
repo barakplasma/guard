@@ -186,6 +186,36 @@ export function freezeElapsedBeforeEdit(prev, next, now = Date.now()) {
 }
 
 /**
+ * Record an accepted correction proposal (see lib/corrections.js).
+ *
+ * Every released assignment is a frozen (machine-preserved) pin: with a named
+ * substitute it is recorded as a swap - the substitute's pin is explicit,
+ * because a person accepted this - and without one the old pin is simply cut,
+ * handing the duty back to automatic staffing. The driver's new assignment on
+ * the short mission is written as its own pin. All of it travels in the URL
+ * like any other edit, so a reload shows the accepted correction, not the
+ * proposal again.
+ *
+ * Matching is by coverage and scoped to the released employee, exactly like
+ * the schedule screen's swap: a frozen pin covering more than the released
+ * window keeps its remainder, still frozen.
+ */
+export function applyCorrection(doc, proposal) {
+  let next = doc;
+  for (const r of proposal.release) {
+    next = r.substituteId != null
+      ? applySwap(next, {
+        missionId: r.missionId, employeeId: r.substituteId, start: r.start, end: r.end, replacingEmployeeId: proposal.driverId,
+      })
+      : applyClearPin(next, { missionId: r.missionId, employeeId: proposal.driverId, start: r.start, end: r.end });
+  }
+  return {
+    ...next,
+    pins: [...next.pins, { missionId: proposal.missionId, employeeId: proposal.driverId, start: proposal.start, end: proposal.end }],
+  };
+}
+
+/**
  * Set a mission's roster from the Missions page.
  *
  * The picker lists everyone holding *any* pin on the mission, because a
