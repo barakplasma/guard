@@ -18,7 +18,9 @@ import { GOLDEN_DOCS, project } from './goldenDocs.js';
  *
  * If one of these fails, the answer is essentially never to regenerate it.
  * `scripts/writeGoldens.mjs` exists for the one case where the engine is
- * *meant* to reschedule old plans, which has not happened yet.
+ * *meant* to reschedule old plans. September 2026: mixed-remote-local was
+ * updated because unchanged night staffing must not split Yard's 90-minute
+ * shifts. The other three legacy snapshots remain unchanged.
  */
 
 const dir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');

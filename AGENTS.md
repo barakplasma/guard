@@ -14,6 +14,11 @@
   preserved and clearly report actual rest shortfalls.
 - Resolve daily wall-clock times in the viewer's timezone, matching night windows.
 - Continue scheduling work on the branch used by PR #28.
+- Rest preferences must never create shift boundaries. Changes to segmentation
+  require a regression for the reported input and a check that every partial
+  shift has a real scheduling constraint; include off-grid rest and night times.
+- Rest values in shared links are minutes. Never silently reinterpret small
+  values as hours; offer an explicit, touch-tested correction.
 
 - Prioritize current Android Chrome on Pixel 10 for input UX. Native number spinners and desktop viewport screenshots do not prove usable phone controls; use explicit touch buttons and verify taps.
 

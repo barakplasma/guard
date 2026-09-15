@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { plan } from '../src/lib/planner.js';
+import { assessRest } from '../src/lib/rest.js';
 const H = 3600000;
 function input(n = 4) {
   return { start: 0, end: 8 * H, shiftMinutes: 60, nightWindows: [{ start: 0, end: 8 * H }],
@@ -21,6 +22,40 @@ test('staff duties anyway when rest cannot coexist with coverage', () => {
   assert.equal(r.shifts.length, 8);
   assert.ok(!r.warnings.some((w) => w.code === 'understaffed'));
   assert.ok(r.warnings.some((w) => w.code === 'rest-unsatisfied' && w.got === 0));
+});
+test('split night rest satisfies the total minimum', () => {
+  const d = input(1);
+  const shifts = [{ employeeId: 'e0', missionId: 'g', start: 3 * H, end: 5 * H }];
+  assert.deepEqual(assessRest(shifts, d.employees, d.tags, d.nightWindows, d.start, d.end), []);
+});
+test('rest shortfalls report total and continuous minutes separately', () => {
+  const d = input(1);
+  const shifts = [{ employeeId: 'e0', missionId: 'g', start: 2 * H, end: 5 * H }];
+  const [warning] = assessRest(shifts, d.employees, d.tags, d.nightWindows, d.start, d.end);
+  assert.equal(warning.got, 300);
+  assert.equal(warning.longestMinutes, 180);
+});
+test('generated crews preserve required driver coverage despite rest preferences', () => {
+  const d = input(3);
+  d.missions[0].requires = [{ tag: 'd', count: 1 }];
+  const r = plan(d);
+  assert.ok(r.shifts.every((s) => s.employeeId === 'e0'));
+  assert.ok(!r.warnings.some((w) => w.code === 'missing-required-tag'));
+  assert.ok(r.warnings.some((w) => w.code === 'rest-unsatisfied' && w.got === 0));
+});
+test('total rest takes priority over preserving another continuous rest block', () => {
+  const d = input(2);
+  d.employees[1].tags = ['d'];
+  d.missions = [
+    { id: 'split', name: 'Split', type: 'remote', count: 1, start: H, end: 4 * H },
+    { id: 'early', name: 'Early', type: 'remote', count: 1, start: 0, end: H },
+    { id: 'g', name: 'Guard', type: 'local', count: 1, start: 6 * H, end: 7 * H, requires: [{ tag: 'd', count: 1 }] },
+  ];
+  d.pins = [{ missionId: 'split', employeeId: 'e0' }, { missionId: 'early', employeeId: 'e1' }];
+  const r = plan(d);
+  assert.equal(r.shifts.find((s) => s.missionId === 'g').employeeId, 'e1');
+  assert.equal(r.warnings.find((w) => w.code === 'rest-unsatisfied').got, 300);
+  assert.ok(r.shifts.filter((s) => s.missionId !== 'g').every((s) => s.pinned));
 });
 test('two drivers cannot cover eight hours and each sleep six; report actual deficit', () => {
   const d = input(2); d.employees[1].tags = ['d'];
@@ -82,12 +117,18 @@ for (const strategy of ['balanced', 'rotation']) {
       for (let i = 1; i < shifts.length; i++) assert.ok(shifts[i - 1].end <= shifts[i].start, 'on-call still blocks overlapping assignments');
     }
     d.missions[0].onCall = false;
-    assert.ok(plan(d).warnings.some((w) => w.code === 'rest-unsatisfied' && w.employeeId === 'e0'));
+    const awake = plan(d);
+    assert.ok(!awake.warnings.some((w) => w.code === 'rest-unsatisfied' && w.employeeId === 'e0'), 'split rest still meets six total hours');
+    const measured = assessRest(awake.shifts, d.employees, [{ ...d.tags[0], minNightRestMinutes: 480 }], d.nightWindows, d.start, d.end);
+    const worked = awake.shifts.filter((s) => s.employeeId === 'e0').reduce((n, s) => n + (s.end - s.start) / 60000, 0);
+    assert.equal(measured[0].got, 480 - worked, 'ordinary duty is deducted from total rest');
+    assert.equal(measured[0].longestMinutes, 300, 'only five hours are uninterrupted');
   });
 }
 
 test('ordinary duty still interrupts rest between pinned on-call duties', () => {
   const d = input(1);
+  d.tags[0].minNightRestMinutes = 480;
   d.missions = [
     { id: 'before', name: 'Before', type: 'remote', count: 1, onCall: true, start: 0, end: 3 * H },
     { id: 'awake', name: 'Awake', type: 'local', count: 1, start: 3 * H, end: 4 * H },
@@ -96,8 +137,9 @@ test('ordinary duty still interrupts rest between pinned on-call duties', () => 
   d.pins = d.missions.map((m) => ({ missionId: m.id, employeeId: 'e0' }));
   const r = plan(d);
   const warning = r.warnings.find((w) => w.code === 'rest-unsatisfied');
-  assert.equal(warning.got, 240, 'rest cannot bridge the ordinary hour');
-  assert.equal(warning.needed, 360);
+  assert.equal(warning.got, 420, 'seven total rest hours exclude the ordinary hour');
+  assert.equal(warning.longestMinutes, 240, 'continuous rest cannot bridge the ordinary hour');
+  assert.equal(warning.needed, 480);
   assert.equal(r.stats.perEmployee[0].minutes, 480);
   assert.ok(r.shifts.every((s) => s.pinned));
 });

@@ -55,3 +55,26 @@ test('a forged slot stamp cannot hide a row crossing a real grid boundary', () =
   const shifted = row({ start: H / 2, end: 1.5 * H, slotStart: H / 2, slotEnd: 1.5 * H, pinned: true });
   assert.ok(codes(result([shifted])).includes('ROW_EXCEEDS_SLOT'));
 });
+
+test('unexpected sub-slot edges are rejected even with correct slot stamps and timeline', () => {
+  const shifts = [row({ end: H / 10 }), row({ employeeId: 'b', start: H / 10 })];
+  const r = { shifts, warnings: [], timeline: [
+    { start: 0, end: H / 10, onDuty: [shifts[0]] },
+    { start: H / 10, end: H, onDuty: [shifts[1]] },
+    { start: H, end: 2 * H, onDuty: [] },
+  ] };
+  const i = { ...input, employees: [...input.employees, { id: 'b' }] };
+  assert.deepEqual([...new Set(codes(r, i))], ['UNEXPECTED_SHIFT_BOUNDARY']);
+  assert.throws(() => validateSchedule(r, i), /UNEXPECTED_SHIFT_BOUNDARY/);
+  validateSchedule(r, i, 'report');
+  assert.ok(r.warnings.some((w) => w.rule === 'UNEXPECTED_SHIFT_BOUNDARY'));
+  // An actual availability change or accepted pin is a legitimate partial shift.
+  assert.deepEqual(codes(r, { ...i, employees: [{ id: 'a', end: H / 10 }, { id: 'b' }] }), []);
+  assert.deepEqual(codes(r, { ...i, pins: [{ missionId: 'g', employeeId: 'a', start: 0, end: H / 10 }] }), []);
+  assert.deepEqual(codes(r, { ...i, missions: [...i.missions,
+    { id: 'daily', type: 'daily', count: 1, occurrences: [{ start: H / 10, end: H }] }],
+  }), [], 'daily assignments can impose real off-grid boundaries');
+  const night = { ...i, nightWindows: [{ start: H / 10, end: H }] };
+  assert.ok(codes(r, night).includes('UNEXPECTED_SHIFT_BOUNDARY'), 'unchanged night staffing is not a reason to split');
+  assert.deepEqual(codes(r, { ...night, missions: [{ ...i.missions[0], nightCount: 2 }] }), [], 'changed night staffing is a real boundary');
+});

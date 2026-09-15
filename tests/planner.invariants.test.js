@@ -16,6 +16,7 @@ const planArb = fc.record({
   hours: fc.integer({ min: 1, max: 12 }),
   strategy: fc.constantFrom('balanced', 'rotation'),
   shiftMinutes: fc.constantFrom(30, 60, 90, 120),
+  restMinutes: fc.oneof(fc.constant(null), fc.integer({ min: 1, max: 480 })),
   employeeCount: fc.integer({ min: 1, max: 8 }),
   missions: fc.array(
     fc.record({
@@ -84,7 +85,7 @@ function build(spec) {
     m.occurrences = [{ start: m.start, end: middle }, { start: middle, end: m.end }];
   }
   return {
-    tags: [{ id: 'driver', name: 'Driver' }],
+    tags: [{ id: 'driver', name: 'Driver', minNightRestMinutes: spec.restMinutes }],
     pins: missions.length ? spec.pins.map((p) => ({
       employeeId: employees[p.employee % employees.length].id,
       missionId: missions[p.mission % missions.length].id, frozen: p.frozen,

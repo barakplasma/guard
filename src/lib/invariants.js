@@ -24,6 +24,17 @@ export function checkSchedule(result, input) {
   const missions = new Map(input.missions.map((m) => [m.id, m]));
   const employees = new Map(input.employees.map((e) => [e.id, e]));
   const spans = stretches(input);
+  // Independent of the planner's segmentation: every internal edge must have
+  // a hard scheduling reason. Soft preferences cannot create rotation turns.
+  const sharedEdges = input.employees.flatMap((e) => [e.start, e.end]);
+  for (const m of input.missions) if (m.type === 'daily') {
+    for (const w of m.occurrences ?? []) sharedEdges.push(w.start, w.end);
+  }
+  const allowedEdges = new Map(input.missions.map((m) => [m.id, new Set([
+    input.start, input.end, m.start, m.end, ...sharedEdges,
+    ...(input.pins ?? []).filter((p) => p.missionId === m.id).flatMap((p) => [p.start, p.end]),
+    ...((m.nightCount ?? m.count) === m.count ? [] : (input.nightWindows ?? []).flatMap((w) => [w.start, w.end])),
+  ])]));
   const events = new Map();
   const edge = (at) => { if (!events.has(at)) events.set(at, { add: [], remove: [] }); return events.get(at); };
   edge(input.start); edge(input.end);
@@ -49,6 +60,9 @@ export function checkSchedule(result, input) {
       const slotStart = span ? span.start + Math.floor((s.start - span.start) / step) * step : NaN;
       const slotEnd = Math.min(span?.end ?? NaN, slotStart + step);
       if (s.slotStart !== slotStart || s.slotEnd !== slotEnd || s.start < slotStart || s.end > slotEnd) report('ROW_EXCEEDS_SLOT', details);
+      if ([s.start, s.end].some((at) => at !== slotStart && at !== slotEnd && !allowedEdges.get(m.id).has(at))) {
+        report('UNEXPECTED_SHIFT_BOUNDARY', details);
+      }
     }
     edge(s.start).add.push(s); edge(s.end).remove.push(s);
   }

@@ -27,7 +27,7 @@
 import { getStrategy, DEFAULT_STRATEGY } from './strategies.js';
 import { validateSchedule } from './invariants.js';
 import { selectCrew, missingQualifications, requirementsOf } from './crew.js';
-import { preferredRest, overlapsRest, assessRest } from './rest.js';
+import { preferredRest, overlapsRest, assessRest, restCost } from './rest.js';
 
 const MINUTE = 60 * 1000;
 
@@ -581,15 +581,15 @@ export function plan({
     // Sleep-compatible duty: rest blocks neither deprioritize nor exclude
     // anyone from an on-call mission.
     if (mission.onCall) return selectCrew(candidates, fixed, need, mission.requires);
-    const ordered = [...candidates].sort((a, b) => Number(overlapsRest(a.id, lo, hi, rest)) - Number(overlapsRest(b.id, lo, hi, rest)));
-    const picked = selectCrew(ordered, fixed, need, mission.requires);
-    const rested = ordered.filter((e) => !overlapsRest(e.id, lo, hi, rest));
-    if (rested.length >= picked.length && rested.length < ordered.length) {
-      const safe = selectCrew(rested, fixed, need, mission.requires);
-      const deficit = (crew) => missingQualifications([...fixed, ...crew], mission.requires).reduce((n, r) => n + r.needed - r.got, 0);
-      if (deficit(safe) <= deficit(picked)) return safe;
-    }
-    return picked;
+    const costs = new Map(candidates.map((e) => [e.id, [
+      ...restCost(e, tags, nightWindows, rows.filter((r) => r.employeeId === e.id && !sleepable.has(r.missionId)), start, end, lo, hi),
+      Number(overlapsRest(e.id, lo, hi, rest)),
+    ]]));
+    const ordered = [...candidates].sort((a, b) => {
+      const left = costs.get(a.id), right = costs.get(b.id);
+      return left[0] - right[0] || left[1] - right[1] || left[2] - right[2];
+    });
+    return selectCrew(ordered, fixed, need, mission.requires, costs);
   };
   let seqCounter = emps.length;
   const nextSeq = () => seqCounter++;
@@ -625,22 +625,16 @@ export function plan({
   // These are the other one: edges every mission is cut on whatever it rotates
   // on. The plan's own bounds; every employee's availability edge, shared
   // across all missions since an employee's window genuinely affects whether
-  // *any* mission can be staffed across it; and every night edge, so no
-  // segment can straddle a day/night transition - a segment is staffed by one
-  // headcount, and one that spanned the boundary would have to pick a side and
-  // leave the other short. Each mission's own start/end is added only to its
+  // *any* mission can be staffed across it. A night edge only cuts missions
+  // whose headcount changes there. Each mission's own start/end is added to its
   // own segmentation, so it gets a properly clamped partial segment at its own
   // edges without leaking into an unrelated mission's grid (a remote or local
   // mission ending off-grid must not fragment some other local mission's
   // otherwise-clean hourly slots).
   const sharedEdges = [start, end];
-  for (const b of rest) sharedEdges.push(b.start, b.end);
+  // Rest is a preference for choosing crew, never a reason to shorten a shift.
   for (const m of miss) if (m.type === 'daily') for (const w of m.occurrences) sharedEdges.push(w.start, w.end);
   for (const e of emps) { sharedEdges.push(e.start, e.end); }
-  for (const w of nightWindows) {
-    if (w.start > start && w.start < end) sharedEdges.push(w.start);
-    if (w.end > start && w.end < end) sharedEdges.push(w.end);
-  }
 
   /** Grid points from `from`, stepping `minutes`, up to but not including `to`. */
   const stepInto = (into, from, to, minutes) => {
@@ -716,7 +710,8 @@ export function plan({
     if (hit) return hit;
     const bounds = slotBoundsFor(mission);
     const pinEdges = goodPins.filter((p) => p.missionId === mission.id).flatMap((p) => [p.start, p.end]);
-    const edges = [...new Set([...bounds, ...sharedEdges, ...pinEdges, mission.start, mission.end])]
+    const nightEdges = mission.count === mission.nightCount ? [] : nightWindows.flatMap((w) => [w.start, w.end]);
+    const edges = [...new Set([...bounds, ...sharedEdges, ...pinEdges, ...nightEdges, mission.start, mission.end])]
       .filter((t) => t >= mission.start && t <= mission.end)
       .sort((a, b) => a - b);
     const segments = [];
@@ -910,7 +905,7 @@ export function plan({
   }
   warnings.push(...missing.values());
   warnings.push(...assessRest(shifts, emps, tags, nightWindows, start, end, sleepable));
-  return validateSchedule(result, { start, end, shiftMinutes, employees: emps, missions: miss, nightWindows }, onInvariantViolation);
+  return validateSchedule(result, { start, end, shiftMinutes, employees: emps, missions: miss, pins: goodPins, nightWindows }, onInvariantViolation);
 }
 
 /* ------------------------------------------------------------------ */

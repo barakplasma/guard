@@ -66,7 +66,7 @@ jobs:
           path: dist/
 
       - name: Install Playwright
-        run: npm i --no-save playwright && npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps chromium
 
       - name: Serve built app
         run: npx vite preview --port 4173 --strictPort &
@@ -83,6 +83,7 @@ jobs:
           node tests/number-inputs.e2e.mjs
           node tests/mui-controls.e2e.mjs
           node tests/mui-pickers.e2e.mjs
+          node tests/short-shifts.e2e.mjs
           node tests/mobile-viewports.mjs
         env:
           BASE: http://localhost:4173
