@@ -160,6 +160,66 @@ window is bounded (ADR 012).
 **Avoid a single weighted sum.** A weighted objective can silently trade
 correctness for fairness, which inverts the priority order above.
 
+## The prototype, and what it has actually shown
+
+`prototype/minizinc/` holds the model, a lexicographic driver, a brute-force
+oracle and two comparison scripts. It is not imported by `src/` and nothing in
+the app calls it; it exists so the criteria below can be measured rather than
+argued about. Its own README carries the how-to-run detail.
+
+**The model agrees with an exhaustive search.** 420 random instances (seeds
+1-420), every one matching the oracle on all three objectives, on the assignment
+being feasible, and - separately - on the model's *reported* objectives matching
+what its own assignment scores. That last check is the one worth having: a model
+can compute something other than what it claims, and a comparison of totals
+alone would never notice.
+
+Each round is also required to have **proved** optimality rather than merely
+reported a bound. The ladder passes each level's optimum down as a cap, so a
+round that stopped early would be read as an optimum and quietly poison every
+level below it.
+
+**The model finds what the engine misses.** Run over `scripts/offGridFuzz.mjs`'s
+own generator and seed, so both are looking at the same instances:
+
+```
+shortage instants solved  : 1292
+model found a full crew   : 36  (2.8%)
+model agreed it was short : 1256
+plans with a shortage     : 305
+...of which falsely short : 36  (11.8%)
+```
+
+2.8% is the same figure `offGridFuzz.mjs` reports from a bespoke recursive
+search written for the purpose. Two independent searches landing on the same
+number is worth considerably more than either alone: the model closes exactly
+the class #40 left open, and agrees with the engine on the other 97%.
+
+The second denominator is the one a person feels. Counted per plan rather than
+per warning, **11.8% of the plans that said "not enough people" had enough
+people**.
+
+### What the prototype does not model
+
+Scoped deliberately to ADR 008's defect 3 - who stands where on a given segment
+grid, with pins, availability, exclusions and headcount as hard rules. Night
+rest, daily occurrences as distinct holds, remote wholeness, and the per-mission
+grids themselves are all absent. The grid arrives already computed, because
+building it is domain work the engine does well and a solver has no opinion on;
+that split is expected to survive into anything shipped.
+
+`vsEngine.mjs` correspondingly solves one instant at a time, which is exact only
+because that fuzz has no rest rules and no availability windows. It is not a
+statement about a 72-hour horizon.
+
+### What the timings do not say
+
+231ms per instant, which is three solver *processes* with startup dominating at
+this size. It is a per-measurement cost, not an estimate of what the app would
+pay: a real horizon is one instance, not 1292, and the browser path is a
+WebAssembly worker rather than a spawned binary. The number that matters is
+still unmeasured, and getting it needs the adapter this prototype does not have.
+
 ## Acceptance criteria
 
 The MiniZinc prototype must pass, before it replaces anything:
@@ -168,7 +228,9 @@ The MiniZinc prototype must pass, before it replaces anything:
 - the original short-shift link;
 - the off-grid callout fixture (`scripts/midScheduleCallout.mjs`);
 - manual-assignment and history cases end to end, through `setDoc`;
-- exhaustive checks against a brute-force oracle on small random instances;
+- exhaustive checks against a brute-force oracle on small random instances -
+  **met by the prototype** (`prototype/minizinc/check.mjs`), for the scope the
+  prototype models;
 - the **real production browser bundle, offline**.
 
 Plus representative Pixel-class measurements for first load, repeated solve
@@ -245,6 +307,7 @@ silently and confidently.
 
 `scripts/midScheduleCallout.mjs` (the reported case, now a regression fixture),
 `scripts/offGridFuzz.mjs` (2.8% of shortage instants still provably false on
-main), `scripts/completenessSearch.mjs`. Release counts from the npm registry,
+main), `scripts/completenessSearch.mjs`, and `prototype/minizinc/` for the model
+and the two measurements above. MiniZinc 2.9.3 with Chuffed 0.13.2. Release counts from the npm registry,
 read 2026-09-15: `minizinc` 409 versions, 27 stable. Invariant rules read from
 `src/lib/invariants.js`. #40's ordering change in `planner.js` phase 3.

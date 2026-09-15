@@ -46,7 +46,11 @@ be taken or left on its own:
   Chuffed**, selected explicitly, as the single production engine - accepted
   "for now", on ownership and failure surface rather than solving technology.
   It carries the model's lexicographic objective order, the acceptance criteria
-  a prototype must meet, and what would justify revisiting the choice.
+  a prototype must meet, and what would justify revisiting the choice. The
+  prototype now exists in `prototype/minizinc/` and has closed one of those
+  criteria: it agrees with a brute-force oracle over 420 random instances, and
+  finds a full crew on 2.8% of the instants the shipped engine calls short -
+  independently reproducing `offGridFuzz.mjs`'s figure for that class.
 - **012** records the 72-hour horizon and what it does to the others: it settles
   010 (the fragment is enough, local-first is not needed), sizes 011 at 648
   assignments, and raises 008's second defect to the main path because rolling
@@ -72,11 +76,18 @@ Suggested order, updated now that 009's core rule has landed:
 2. ~~010's fragment move~~ (not needed - already in the fragment) and
    ~~014's first half~~ (**done** - per-person exclusions).
 3. **011** - the MiniZinc model, which closes the shortage class #40 narrowed
-   but did not eliminate. Its `invariants.js` prerequisite is **partly done**:
+   but did not eliminate. **The model itself is prototyped and measured**
+   (`prototype/minizinc/`): oracle-checked, and it finds the crews the engine
+   misses. Its `invariants.js` prerequisite is **partly done**:
    `UNREPORTED_SHORTFALL` and `PIN_DROPPED` now catch a schedule that is short
    without saying so, or that quietly loses an accepted pin. Rest-score
    correctness, fairness optimality and false UNSAT still need an oracle rather
    than an invariant.
+4. **011's adapter** is what is now in front. The prototype takes an abstract
+   segment grid; nothing yet turns a plan document into one and the answer back
+   into rows. Until that exists the browser-bundle criteria cannot be measured
+   at all, and the timings the prototype reports are measurement cost rather
+   than anything the app would pay.
 
 ## Verification
 
@@ -85,7 +96,10 @@ reproduced with `node scripts/historyDriftCheck.mjs` (defects 1 and 2) and
 `node scripts/rollForwardLoss.mjs` (defect 2 under ADR 012's export decision),
 and `node scripts/completenessSearch.mjs` with `node scripts/offGridFuzz.mjs`
 (defect 3, before and after #40); all are measurements rather than tests and are
-deliberately outside `npm test`. Browser acceptance uses
+deliberately outside `npm test`. ADR 011's model is measured by
+`node prototype/minizinc/check.mjs` and `node prototype/minizinc/vsEngine.mjs`,
+which need a `minizinc` binary on `PATH` and are outside `npm test` for that
+reason. Browser acceptance uses
 `tests/e2e.mjs`, `tests/mobile-viewports.mjs`, and `tests/features.e2e.mjs`
 against a local built preview. Set `CHROME` to a headless Chromium binary and
 `SHOT_DIR` outside the repository.
