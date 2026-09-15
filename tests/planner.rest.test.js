@@ -100,7 +100,7 @@ for (const strategy of ['balanced', 'rotation']) {
     assert.equal(plan(d).shifts[0].employeeId, 'e0', 'on-call respects strategy ordering');
   });
 
-  test(`${strategy}: an on-call pin permits uninterrupted rest across mixed assignments`, () => {
+  test(`${strategy}: a rest-required driver is relieved of ordinary night duty a colleague can cover`, () => {
     const d = input(2);
     d.strategy = strategy;
     d.missions.unshift({ id: 'call', name: 'Call', type: 'local', count: 1, onCall: true, start: 2 * H, end: 3 * H });
@@ -108,14 +108,18 @@ for (const strategy of ['balanced', 'rotation']) {
     const r = plan(d);
     assert.ok(r.shifts.some((s) => s.missionId === 'call' && s.employeeId === 'e0' && s.pinned));
     assert.ok(!r.warnings.some((w) => ['rest-unsatisfied', 'understaffed'].includes(w.code)));
-    assert.ok(r.shifts.filter((s) => s.employeeId === 'e0' && s.missionId === 'g').every((s) => s.start >= 6 * H));
-    const ordinaryMinutes = r.shifts.filter((s) => s.employeeId === 'e0' && s.missionId === 'g').reduce((n, s) => n + (s.end - s.start) / 60000, 0);
-    assert.ok(ordinaryMinutes > 0);
-    assert.equal(r.stats.perEmployee.find((e) => e.employeeId === 'e0').minutes, 60 + ordinaryMinutes, 'on-call and ordinary hours both count');
+    // The total preference relieves the driver of optional night posts: the
+    // colleague takes the ordinary mission whole, in both strategies.
+    const ordinary = r.shifts.filter((s) => s.missionId === 'g');
+    assert.ok(ordinary.length > 0 && ordinary.every((s) => s.employeeId === 'e1'), 'a non-driver covers ordinary night duty');
+    assert.equal(r.stats.perEmployee.find((e) => e.employeeId === 'e0').minutes, 60, 'the pinned on-call hour still counts');
+    assert.equal(r.stats.perEmployee.find((e) => e.employeeId === 'e1').minutes, 480);
     for (const e of d.employees) {
       const shifts = r.shifts.filter((s) => s.employeeId === e.id).sort((a, b) => a.start - b.start);
       for (let i = 1; i < shifts.length; i++) assert.ok(shifts[i - 1].end <= shifts[i].start, 'on-call still blocks overlapping assignments');
     }
+    // Making the pinned on-call duty ordinary cannot manufacture a shortfall
+    // either: relief, not overwork, is the answer whenever a colleague exists.
     d.missions[0].onCall = false;
     const awake = plan(d);
     assert.ok(!awake.warnings.some((w) => w.code === 'rest-unsatisfied' && w.employeeId === 'e0'), 'split rest still meets six total hours');
@@ -126,7 +130,7 @@ for (const strategy of ['balanced', 'rotation']) {
   });
 }
 
-test('ordinary duty still interrupts rest between pinned on-call duties', () => {
+test('ordinary duty between pinned on-call duties reports total and continuous rest', () => {
   const d = input(1);
   d.tags[0].minNightRestMinutes = 480;
   d.missions = [
@@ -142,6 +146,13 @@ test('ordinary duty still interrupts rest between pinned on-call duties', () => 
   assert.equal(warning.needed, 480);
   assert.equal(r.stats.perEmployee[0].minutes, 480);
   assert.ok(r.shifts.every((s) => s.pinned));
+  // The interruption is real and still measured - as the longest continuous
+  // block, reported next to the total.
+  assert.deepEqual(r.rest.map((m) => [m.totalMinutes, m.longestMinutes]), [[420, 240]]);
+  assert.equal(r.rest[0].needed, 480);
+  d.tags[0].minNightRestMinutes = 360;
+  assert.ok(!plan(d).warnings.some((w) => w.code === 'rest-unsatisfied'),
+    'three hours before plus four after meet the six-hour total minimum');
 });
 
 for (const type of ['local', 'remote', 'daily']) {
