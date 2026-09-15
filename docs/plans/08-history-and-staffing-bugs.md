@@ -1,6 +1,7 @@
 # ADR 008: Three defects to fix regardless of any refactor
 
-- Status: Proposed. Independent of ADRs 009-011.
+- Status: Proposed. Independent of ADRs 009-011. Defect 3's severity is
+  re-rated by ADR 013.
 - Date: 2026-09-15
 
 ## Context
@@ -10,8 +11,8 @@ These were found while evaluating whether to adopt a constraint solver
 the document as they stand today, they are reproducible, and each is worth
 fixing whether or not the refactors in ADRs 009-011 ever happen.
 
-Two measurement scripts reproduce them. Both are measurements rather than
-tests, and both sit outside `npm test` on purpose.
+Three measurement scripts reproduce them. All are measurements rather than
+tests, and all sit outside `npm test` on purpose.
 
 ## Defect 1: a headcount change rewrites history
 
@@ -95,20 +96,51 @@ seat by preference strands the driver seat and reports a shortage that does not
 exist"* - and answered with scarcity ordering. Scarcity ordering closed most of
 it, not all.
 
-**How much it matters depends sharply on the roster.** The false-shortage rate
-peaks at 0.94% on five-person rosters with exclusions and falls toward zero as
-the roster grows. On the rota shape this app is actually used for - patrol
-requiring a driver, a gate, a kitchen refusing commanders, four days, hourly -
-it does not fire at all, at any headcount from critically tight to comfortable,
-with a one-hour spread across four days.
+### It fires on the main path, and an earlier draft of this record was wrong
 
-So this is real but not urgent. The user-visible harm is that `חסרים אנשים`
-is sometimes false, and a commander acting on it goes looking for a guard they
-already have.
+An earlier revision said this defect "does not fire at all" on realistic rota
+shapes. That was measured on **static** rotas, planned once and left alone, and
+it is wrong for how the app is actually used (ADR 013).
 
-**Fix:** ADR 011. A solver closes this class by construction. The alternative -
-hand-writing a per-segment matcher - is rejected there for reasons that have
-nothing to do with diff size.
+The reported case: a mission added into a running schedule, starting in twenty
+minutes, requiring two drivers. The app staffed one and reported it could not
+find the second - while the second driver was standing the gate, an
+unconstrained post any of the other guards could have held.
+
+`node scripts/midScheduleCallout.mjs` reproduces it. Eight guards, two of them
+drivers, gate needs three and patrol needs two:
+
+```
+  callout starts   crew it gets                 result
+  +  0 minutes    שומר 1 (driver), שומר 2 (driver) ok
+  + 20 minutes    שומר 1 (driver), שומר 7     SHORT A DRIVER
+  + 30 minutes    שומר 1 (driver), שומר 7     SHORT A DRIVER
+  + 45 minutes    שומר 1 (driver), שומר 7     SHORT A DRIVER
+  + 60 minutes    שומר 1 (driver), שומר 2 (driver) ok
+  + 90 minutes    שומר 1 (driver), שומר 4     SHORT A DRIVER
+  +120 minutes    שומר 1 (driver), שומר 2 (driver) ok
+```
+
+Seven seats are needed at that moment and there are eight guards, so a full
+staffing plainly exists - both drivers on the callout, six others across the
+other posts, one spare.
+
+**On the hour it works; off the hour it does not.** That is the mechanism
+exactly. Phase 3 orders demands `a.start - b.start || a.pool - b.pool`, so
+scarcity only breaks ties *within the same instant*. A mission inserted off the
+grid starts later than the hourly segment already covering that time, so the
+unconstrained post is filled first, takes a scarce driver, and the constrained
+mission twenty minutes later cannot get them back. The engine never reconsiders
+a placement.
+
+A real callout never starts neatly on the hour, so in practice this fires
+almost every time.
+
+**Fix:** ADR 011. A solver closes this class by construction, because it assigns
+globally rather than committing one demand at a time. The alternative -
+hand-writing a per-segment matcher - is rejected there, and would in any case
+not be enough here: the trade needed crosses missions *and* segment boundaries,
+since the driver has to be moved off a post whose hour started earlier.
 
 ## Consequences
 
@@ -117,10 +149,12 @@ actually stood post. They should be fixed first and do not need any dependency,
 any storage change, or any solver. Under ADR 012's 72-hour rolling horizon both
 fire on the normal path.
 
-Defect 3 is a correctness gap that realistic rotas do not currently hit. It is
-recorded so that it is not rediscovered, and so that the claim "the engine said
-we were short" is known to be fallible.
+Defect 3 was initially rated as rare. It is not: under ADR 013's churn workflow
+it fires on nearly every mid-schedule insertion, which is the normal operation.
+It is the strongest argument for ADR 011 and it should be read as urgent.
 
 ## Evidence
 
-`scripts/historyDriftCheck.mjs` and `scripts/completenessSearch.mjs`.
+`scripts/historyDriftCheck.mjs` (defects 1 and 2),
+`scripts/completenessSearch.mjs` (defect 3, measured rate) and
+`scripts/midScheduleCallout.mjs` (defect 3, the reported case).

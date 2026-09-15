@@ -2,6 +2,8 @@
 
 - Status: Proposed. Depends on ADR 009. Closes ADR 008's defect 3.
   Independent of ADR 010. Sized by ADR 012.
+  **Made urgent by ADR 013**: the defect it fixes fires on nearly every
+  mid-schedule insertion, which is the normal operation.
 - Date: 2026-09-15
 
 ## Context
@@ -33,6 +35,17 @@ browser.
 ADR 008's defect 3: the staffing pass is incomplete, reporting shortages on
 rosters that can be staffed in full. A solver closes that class by construction
 rather than by another ordering heuristic.
+
+This is no longer a theoretical gap. The reported case (ADR 013,
+`scripts/midScheduleCallout.mjs`) is a mission added mid-schedule needing two
+drivers, where the engine staffs one and reports a shortage while the second
+driver stands an unconstrained post. It works on the hour and fails off it, and
+real callouts do not start on the hour.
+
+Note that the per-segment matcher rejected below would **not** fix the reported
+case either. The trade needed crosses both missions and segment boundaries: the
+driver must come off a post whose hour started before the callout existed. Only
+assigning globally handles that.
 
 The tempting alternative is to lift `choose` from per-mission to per-segment,
 hand-writing a bipartite matcher, with no new dependency. **That is the wrong
@@ -167,6 +180,10 @@ against Pumpkin's three is closer than the release histories suggest.
 **Take MiniZinc instead** if owning the wasm bindings and a Rust model crate is
 more ownership than the problem is worth. That is a defensible reading, and the
 model-portability argument is genuinely good.
+
+ADR 014's second half - preferring to keep scarce qualifications uncommitted -
+is an objective term in whichever model is written, and is a further reason the
+policy belongs in a solver rather than in another ranking comparator.
 
 ## Consequences
 

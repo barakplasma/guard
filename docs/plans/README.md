@@ -19,6 +19,8 @@ pending implementation plans.
 | [010](10-plan-storage.md) | Keep the plan in the URL, in the fragment. *(Proposed)* |
 | [011](11-solver-selection.md) | If a solver, then Pumpkin. *(Proposed)* |
 | [012](12-planning-horizon.md) | Plan 72 hours at a time, rolled forward. *(Proposed)* |
+| [013](13-replanning-under-churn.md) | Continuous re-planning is the operating model. *(Proposed)* |
+| [014](14-exclusions-and-flexibility.md) | Exclude individuals; keep scarce people free. *(Proposed)* |
 
 Each record states the context, decision, consequences, rejected alternatives,
 and implementation or test evidence. Acceptance dates record this design, not a
@@ -42,6 +44,17 @@ can be taken or left on its own:
   the window forward is the normal operation. It leaves one question open -
   whether history is retained across rolls - **which should be answered before
   009 is implemented.**
+- **013** records that the rota is re-solved continuously against a moving
+  present, not planned once. That re-rates 008's third defect from rare to
+  daily and makes **011 urgent rather than optional**.
+- **014** adds per-person exclusions, which the document cannot express at all
+  today, and the softer rule that scarce qualifications should be kept
+  uncommitted so they can answer a callout. The first half needs no solver; the
+  second is an objective term and waits for 011.
+
+Suggested order: **009** first (fixes the history corruption, no dependencies),
+then **010** and the first half of **014** (both small and independent), then
+**011**, which closes the shortage bug that fires daily.
 
 ## Verification
 
