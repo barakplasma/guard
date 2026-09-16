@@ -215,10 +215,12 @@ memory quantity is read over that span. The wait before a turn is the one
 number capped short, at eight hours, because after a night's sleep it no
 longer matters when somebody last stood post (decision A).
 
-What that costs is document size, and it is worth a number. ADR 012 measured
-about ten characters of link per logged assignment. Ten seats held hourly for
-21 days is roughly 5,000 assignments, so a link of about 50,000 characters:
-fine for the browser, too long to paste into a chat. That is open question I.
+What bounds the log is the link itself (decision I, §17): the plan lives in
+the URL fragment, the fragment has a size ceiling, and when a document would
+not fit, the oldest logged shifts drop first. So the memory is whichever is
+shorter, `memoryDays` or what the fragment holds. ADR 012 measured about ten
+characters per logged assignment, so at the ceiling in §17 roughly 6,000
+assignments fit: ten hourly seats for about 25 days.
 
 `PreparationIssue` is a discriminated union keyed on `code`, with the same
 codes and fields the engine's warnings carry today, so `findings.js` renders
@@ -1180,7 +1182,63 @@ through `NativeRunner`, and prints the count of people sleeping eight hours and
 the shortest wait at each length. A measurement script like the others in
 `scripts/`, asserting nothing.
 
-## Decisions taken, and one still open
+## 17. The fragment is the limit, oldest shifts drop first
+
+The plan has always been in the fragment: the app runs under `HashRouter`, so
+`#/schedule?p=…` is one fragment and the `?p=` inside it never reaches a
+server (ADR 010's correction). What changes is that the fragment's size
+becomes the document's bound, and the log is a first-in, first-out queue
+against it.
+
+```ts
+// src/lib/urlState.js
+export const FRAGMENT_LIMIT = 64_000;   // characters of the encoded plan
+
+export function fitPlanToFragment(doc: DraftPlan): { doc: DraftPlan; dropped: number }
+// Returns `doc` itself when encodePlan(doc).length <= FRAGMENT_LIMIT.
+// Otherwise drops the oldest logged commitments, oldest resolved end first,
+// id as the tiebreak, until the encoding fits. Never drops a commitment that
+// is inside or after the plan window, and never one without a record: those
+// are instructions to the engine, not history. Binary-searches the number
+// of rows to drop, so it encodes O(log n) times rather than once per row.
+
+function loggedOldestFirst(doc: DraftPlan): Pin[]
+// The candidates in drop order: pins with a record whose resolved end is
+// before the window, sorted by that end, then by mission id and employee id.
+```
+
+`FRAGMENT_LIMIT` is a measured number, not a guess: `tests/urlState.fifo.e2e.mjs`
+opens a link of exactly that length in Chromium and asserts the plan decodes
+with every row present, and the same page is opened on the Pixel 10 before the
+constant is trusted. Sixty-four thousand is the starting point because it sits
+under every desktop and Android browser's fragment handling the prototype
+work touched, and well under what the address bar accepts; if the device
+proves more, the constant goes up. `URL_WARN_LENGTH` stays what it is, a
+warning about pasting into chat, which the WhatsApp message and iCal exports
+exist to avoid.
+
+`setDoc` calls it last, after `captureHistory` and `prunePins` and before
+`encodePlan`, so what drops is always a stamped record:
+
+```js
+const fitted = fitPlanToFragment(parsed);
+if (fitted.dropped > 0) setNotice(t.logTrimmed(fitted.dropped));
+const encoded = encodePlan(fitted.doc);
+```
+
+Two consequences, both deliberate. The drop is automatic and silent apart
+from the notice, which is the owner's choice over a clear button: the export
+is the durable record, and a rota that is exported regularly loses nothing.
+And the memory the model reads (§2) is bounded twice, by `memoryDays` and by
+what fits; `readDutyMemory` reads what is there and does not need to know
+which bound applied.
+
+`tests/urlState.fifo.test.js` asserts that a document under the limit is
+returned by identity, that only logged rows before the window are ever
+dropped, that they drop oldest first, and that the result encodes under the
+limit.
+
+## Decisions taken, and none still open
 
 - **A. `rotation` is round robin by longest wait.** Decided by the owner:
   nobody wants equal hours; whoever has waited longest since their last duty
@@ -1252,10 +1310,9 @@ the shortest wait at each length. A measurement script like the others in
   beginning at that hour. The 24-hour window with an eight-hour rest target
   is what gives these levels room: a night post and a day post can both be
   taken inside one window by different people.
-- **I. Open: how long a link may get.** With nothing cleared, a document
-  holds `memoryDays` of logged duty, about 50,000 characters for ten hourly
-  seats over 21 days (§2). The browser copes; chat apps do not. The choices
-  are to accept it, to let rows older than `memoryDays` fall off the document
-  automatically after an export has been made, or to keep the log outside the
-  link (ADR 010 reserved that and found it unnecessary at 72 hours, which is
-  no longer the question).
+- **I. The fragment is the limit, first in, first out.** Decided by the
+  owner: the link stays in the URL fragment, the fragment's size is the
+  document's ceiling, and when a document would exceed it the oldest logged
+  shifts drop off. `fitPlanToFragment` in §17, called from `setDoc`. The
+  memory the model reads is therefore bounded by `memoryDays` or by what
+  fits, whichever is shorter, and the export is the durable record.

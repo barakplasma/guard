@@ -40,6 +40,9 @@
   a person guards locally one day and goes on patrol the next), and night
   duty, which is much harder than day, is evened out so the same person
   does not always hold the same night hour.
+- The link lives in the URL fragment and its size is the document's limit.
+  When a plan would not fit, the oldest logged shifts drop first (FIFO);
+  nothing else trims the log.
 - Manual assignments must always win over automatic scheduling; show them with a lock icon. Automatically preserved elapsed assignments must use a distinct history icon and require an explicit correction before replacement.
 - Night rest is measured two ways inside the configured night hours: **total**
   rest (the configured per-qualification minimum is enforced and reported
