@@ -50,3 +50,10 @@ export function fromClockInput(value) {
   const minutes = Number(m[1]) * 60 + Number(m[2]);
   return minutes >= 0 && minutes < 24 * 60 ? minutes : null;
 }
+
+/** Apply a native temporal input value without clearing a required field mid-edit. */
+export function commitTemporalInput(value, parse, nullable, onChange) {
+  const next = parse(value);
+  if (next != null) onChange(next);
+  else if (nullable && value === '') onChange(null);
+}
