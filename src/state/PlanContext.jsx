@@ -1,5 +1,5 @@
 import {
-  createContext, useCallback, useContext, useMemo, useRef, useState,
+  createContext, useCallback, useContext, useEffect, useMemo, useRef, useState,
 } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { decodePlan, encodePlan, PARAM } from '../lib/urlState.js';
@@ -8,7 +8,8 @@ import {
   applyClearPin, applyClearPinsForMission, applyMissionAssignees, applySwap,
   applyCorrection, clearStalePins, freezeElapsedBeforeEdit, acceptSchedule, captureHistory,
 } from '../lib/pins.js';
-import { addUniqueEmployees } from '../lib/employees.js';
+import { addEmployeesToPlan } from '../lib/employees.js';
+import { browserModelContext, registerWebMcpTools } from '../lib/webmcp.js';
 import { t } from '../strings.js';
 
 const PlanContext = createContext(null);
@@ -123,14 +124,14 @@ export function PlanProvider({ children }) {
      * untouched rather than re-encoding an identical plan.
      */
     addEmployee: (name) => {
-      const result = addUniqueEmployees(doc.employees, [name]);
-      if (result.added.length > 0) update((d) => ({ ...d, employees: result.employees }));
+      const result = addEmployeesToPlan(lastDoc.current ?? doc, [name]);
+      if (result.added.length) setDoc(result.plan);
       return result;
     },
 
     addEmployees: (names) => {
-      const result = addUniqueEmployees(doc.employees, names);
-      if (result.added.length > 0) update((d) => ({ ...d, employees: result.employees }));
+      const result = addEmployeesToPlan(lastDoc.current ?? doc, names);
+      if (result.added.length) setDoc(result.plan);
       return result;
     },
 
@@ -253,12 +254,35 @@ export function PlanProvider({ children }) {
         })
         : applyClearPinsForMission(d, { missionId: warning.missionId, employeeId: warning.employeeId })
     )),
-  }), [doc, update]);
+  }), [doc, setDoc, update]);
 
   const value = useMemo(
     () => ({ doc, schedule: scheduleFor(doc), setDoc, update, notice, setNotice, decodeFailed, ...api }),
     [doc, scheduleFor, setDoc, update, notice, decodeFailed, api],
   );
+
+  const webMcpState = useRef(null);
+  webMcpState.current = { doc, schedule: value.schedule, actions: api };
+  useEffect(() => {
+    let disposed = false;
+    let unregister = () => {};
+    registerWebMcpTools({
+      modelContext: browserModelContext(),
+      getState: () => webMcpState.current,
+      actions: {
+        addEmployees: (...args) => webMcpState.current.actions.addEmployees(...args),
+        pinShift: (...args) => webMcpState.current.actions.pinShift(...args),
+        clearPin: (...args) => webMcpState.current.actions.clearPin(...args),
+      },
+    }).then((cleanup) => {
+      if (disposed) cleanup();
+      else unregister = cleanup;
+    });
+    return () => {
+      disposed = true;
+      unregister();
+    };
+  }, []);
 
   return <PlanContext.Provider value={value}>{children}</PlanContext.Provider>;
 }

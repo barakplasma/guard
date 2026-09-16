@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { addUniqueEmployees, duplicateEmployeeIds, nameKey } from '../src/lib/employees.js';
+import {
+  addEmployeesToPlan, addUniqueEmployees, duplicateEmployeeIds, nameKey,
+} from '../src/lib/employees.js';
 
 const list = (...names) => names.map((name, i) => ({
   id: `e${i + 1}`, name, start: null, end: null,
@@ -88,4 +90,12 @@ test('a decomposed name is refused as a duplicate of its precomposed twin', () =
   const { employees, skipped } = addUniqueEmployees(list('Jos\u00e9'), ['Jose\u0301']);
   assert.equal(employees.length, 1);
   assert.equal(skipped.length, 1);
+});
+
+test('consecutive employee additions compose against the latest plan', () => {
+  const first = addEmployeesToPlan({ employees: [] }, ['Alice']);
+  const second = addEmployeesToPlan(first.plan, ['Bob']);
+
+  assert.deepEqual(second.plan.employees.map((employee) => employee.name), ['Alice', 'Bob']);
+  assert.deepEqual(second.added.map((employee) => employee.name), ['Bob']);
 });
