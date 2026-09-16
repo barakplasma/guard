@@ -394,9 +394,11 @@ variable on the workflow step *replaces* the file's value rather than adding to 
 `DISABLE_LINTERS: ACTION_ZIZMOR` on the step silently discarded every entry in the file — which is
 how `standard` kept running, and rewriting, after being disabled there.
 
-Advisory does not mean harmless, because the job also runs with `APPLY_FIXES: all` and commits what
-a linter rewrites. So two exclusions in that file are load-bearing and will look arbitrary to
-anyone tidying up:
+The job runs with `APPLY_FIXES: all` and commits what a linter rewrites, **on purpose**: a
+formatting fix that a bot can make is not worth a human's or an agent's attention. That is what
+makes the exclusions below matter, though — a linter this repo does not agree with does not just
+report its opinion, it lands it. Three of them are load-bearing and will look arbitrary to anyone
+tidying up:
 
 - **`JAVASCRIPT_STANDARD` is off.** It enforces a no-semicolon style this repo does not use, and
   under `APPLY_FIXES` it does not report the difference, it *rewrites* and commits — one run
@@ -406,10 +408,12 @@ anyone tidying up:
 - **`SPELL_CSPELL` is off permanently.** All 140 of its findings were Hebrew product words,
   iCalendar keywords, British spellings or deliberate identifiers like `emps` and `sleepable` —
   not one was a typo.
-- **`tests/fixtures/` is excluded from `JSON_PRETTIER`.** prettier wants to reflow all four golden
-  fixtures, which `scripts/writeGoldens.mjs` writes — so any pull request that legitimately touched
-  one would come back with every golden reformatted and the real assignment diff buried under it.
-  Every other JSON file here is already prettier-clean, so nothing else needed excluding.
+- **`tests/fixtures/` is excluded from `JSON_PRETTIER`.** The goldens are written as one minified
+  line each by `scripts/writeGoldens.mjs`; prettier wants each of them exploded to ~180 lines.
+  Neither format is wrong, but two generators that disagree means every intentional golden
+  regeneration is followed by a bot commit re-flowing it, and the next `writeGoldens` run undoes
+  that again. The exclusion picks one owner. Every other JSON file here is already prettier-clean,
+  so nothing else needed excluding.
 
 `ACTION_ZIZMOR` is off here for a reason with an end date rather than a permanent one: it reports
 48 findings against the workflows as they stand, and the branch that reworks the workflow

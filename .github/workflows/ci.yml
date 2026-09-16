@@ -28,6 +28,11 @@ jobs:
         # style opinion from a linter this repo does not otherwise run cannot
         # hold a merge.
         #
+        # It does still *fix*, and commits what it fixes, which is the point: a
+        # formatting change a bot can make is not worth a human's attention. Note
+        # that the commit step's `if:` implies `success()`, so this only works
+        # while the step exits 0 - which is the second thing DISABLE_ERRORS buys.
+        #
         # Which linters run is configured in .mega-linter.yml, not here. An env
         # variable *replaces* the file's value rather than adding to it, so the
         # DISABLE_LINTERS that used to sit on this step silently discarded

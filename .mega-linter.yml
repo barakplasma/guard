@@ -46,11 +46,10 @@ DISABLE_LINTERS:
   # winning - and under APPLY_FIXES the louder one wins by committing.
   - JAVASCRIPT_STANDARD
 
-# The golden assignment fixtures are written by scripts/writeGoldens.mjs, and
-# reformatting them is the one thing CLAUDE.md says must never happen casually:
-# under APPLY_FIXES the job commits what it rewrites, so any pull request that
-# legitimately touches a golden would come back with all four of them reflowed
-# and the real diff buried. prettier wants to rewrite every one of them today.
-# Every other JSON file in the repo is already prettier-clean, so it keeps the
-# rest.
+# Two generators, one file. The goldens are written as one minified line each by
+# scripts/writeGoldens.mjs; prettier wants each of them exploded to ~180 lines.
+# Neither format is wrong, but with both running, every intentional golden
+# regeneration is followed by a bot commit re-flowing it and the next
+# writeGoldens run undoes that again. This picks one owner. Every other JSON file
+# in the repo is already prettier-clean, so prettier keeps the rest.
 JSON_PRETTIER_FILTER_REGEX_EXCLUDE: (tests/fixtures/)
