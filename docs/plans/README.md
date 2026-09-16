@@ -22,6 +22,7 @@ pending implementation plans.
 | [013](13-replanning-under-churn.md) | Continuous re-planning is the operating model. *(Proposed)* |
 | [014](14-exclusions-and-flexibility.md) | Exclude individuals; keep scarce people free. *(First half implemented)* |
 | [015](15-fairness-across-rolls.md) | Duty does not stop counting when the window rolls past it. *(Implemented)* |
+| [016](16-unbroken-runs.md) | `balanced` will work somebody for three days straight. *(Proposed — your call)* |
 
 Each record states the context, decision, consequences, rejected alternatives,
 and implementation or test evidence. Acceptance dates record this design, not a
@@ -84,6 +85,15 @@ be taken or left on its own:
   - and the softer rule that scarce qualifications should be kept uncommitted so
   they can answer a callout. That second half is an objective term and waits for
   011.
+
+- **016** is the one to read first, and the only record here waiting on a
+  decision rather than on work. Evening out hours is what produces an unbroken
+  run, so where somebody joins part-way through a period - leave, a course, a
+  new arrival - **half of those plans put a guard on post for twenty-four hours
+  or more without a break**, up to a full seventy-two. With everyone present
+  from the start the engine is fine. The fix is a tier in `balanced`; what it
+  needs is a threshold chosen, because every choice changes what already-shared
+  links render.
 
 Suggested order, updated now that 009's core rule has landed:
 
