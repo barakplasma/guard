@@ -125,12 +125,9 @@ function forEveryPlan(assertion, numRuns = 300) {
 test('nobody is ever double-booked', () => {
   forEveryPlan((input, { shifts }) => {
 
-    const byEmployee = new Map();
-    for (const s of shifts) {
-      if (!byEmployee.has(s.employeeId)) byEmployee.set(s.employeeId, []);
-      byEmployee.get(s.employeeId).push(s);
-    }
-    for (const list of byEmployee.values()) {
+    const employeeIds = new Set(shifts.map((shift) => shift.employeeId));
+    for (const employeeId of employeeIds) {
+      const list = shifts.filter((shift) => shift.employeeId === employeeId);
       list.sort((a, b) => a.start - b.start);
       for (let i = 1; i < list.length; i++) {
         assert.ok(list[i].start >= list[i - 1].end, 'overlapping shifts for one person');
