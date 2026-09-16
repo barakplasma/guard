@@ -1,0 +1,8 @@
+# Let zizmor authenticate when it resolves action references. The workflow token
+# remains scoped by the job's explicit permissions.
+ACTION_ZIZMOR_UNSECURED_ENV_VARIABLES:
+  - GITHUB_TOKEN
+
+# Findings already appear in the check summary. Keeping the reporter off avoids
+# granting issue and pull-request write access just to duplicate that output.
+GITHUB_COMMENT_REPORTER: false

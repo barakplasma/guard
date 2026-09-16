@@ -1,0 +1,3 @@
+# CI starts this address immediately before the browser suites. It is an
+# executable local endpoint, not a public link that Lychee can validate.
+exclude = ['^http://localhost:4173/?$']
