@@ -3,6 +3,9 @@ name: CI
 on:
   pull_request:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -16,6 +19,11 @@ jobs:
       contents: write
     steps:
       - name: Checkout code
+        # zizmor: ignore[artipacked]
+        # This is the one checkout that must keep its credentials: the
+        # auto-commit step below pushes MegaLinter's fixes back to the PR
+        # branch with them. Every other checkout in this repo sets
+        # persist-credentials: false.
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -37,12 +45,16 @@ jobs:
           commit_message: "[MegaLinter] Apply automatic fixes"
 
   check:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     # An explicit timeout on every job: the default is 360 minutes, so one hung
     # step would hold the concurrency group - and every later run - for hours.
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -75,11 +87,15 @@ jobs:
   # last one shipped red: release.yml ran these after the merge, which is too
   # late to keep main green.
   e2e-browser:
+    permissions:
+      contents: read
     needs: check
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:

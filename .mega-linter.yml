@@ -1,3 +1,9 @@
+# MegaLinter, JavaScript flavor.
+#
+# The workflow (.github/workflows/ci.yml) runs the flavor whole; what it does
+# *not* run is configured here, and every exclusion below has a reason rather
+# than a shrug.
+
 # Let zizmor authenticate when it resolves action references. The workflow token
 # remains scoped by the job's explicit permissions.
 ACTION_ZIZMOR_UNSECURED_ENV_VARIABLES:
@@ -6,3 +12,30 @@ ACTION_ZIZMOR_UNSECURED_ENV_VARIABLES:
 # Findings already appear in the check summary. Keeping the reporter off avoids
 # granting issue and pull-request write access just to duplicate that output.
 GITHUB_COMMENT_REPORTER: false
+
+DISABLE_LINTERS:
+  # Spell-checking is off permanently. This app is Hebrew-only and the codebase
+  # is full of protocol tokens and domain shorthand, so cspell's 140 findings
+  # were: Hebrew words (סידור, משמרות, שיבוץ), iCalendar keywords (DTSTART,
+  # DTEND, VEVENT, VCALENDAR, DTSTAMP), British spellings (behaviour, neighbour,
+  # unrecognised) and deliberate identifiers (emps, sleepable, hintable). Not one
+  # was a typo. A dictionary that has to list every Hebrew noun in the product is
+  # a maintenance job wearing a quality gate's clothes.
+  - SPELL_CSPELL
+
+  # `standard` enforces a style this repository does not use - it wants no
+  # semicolons, and every file here has them. With APPLY_FIXES it does not
+  # report that, it *rewrites*: one run reformatted 17 source files and
+  # committed them. Linting JavaScript here is oxlint's job (`npm run lint`,
+  # .oxlintrc.json), which already gates every pull request in the `check` job
+  # and carries three documented rule exceptions. Two linters with different
+  # opinions about the same files end with the louder one winning.
+  - JAVASCRIPT_STANDARD
+
+# Reported, never blocking. These are advisory by nature: a style opinion, a
+# duplication heuristic, or a link that was reachable yesterday. Worth seeing in
+# the job summary, not worth failing a pull request over.
+DISABLE_ERRORS_LINTERS:
+  - COPYPASTE_JSCPD
+  - MARKDOWN_MARKDOWNLINT
+  - SPELL_LYCHEE

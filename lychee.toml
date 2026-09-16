@@ -1,3 +1,5 @@
-# CI starts this address immediately before the browser suites. It is an
-# executable local endpoint, not a public link that Lychee can validate.
-exclude = ['^http://localhost:4173/?$']
+# Lychee resolves every URL it finds, including the ones that only exist while a
+# CI step is running. `release.yml` serves the built app on 8080 and the browser
+# suites use 4173; both are executable local endpoints rather than public links,
+# so there is nothing for a link checker to validate.
+exclude = ['^https?://(localhost|127\.0\.0\.1)(:\d+)?(/.*)?$']
