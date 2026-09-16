@@ -1,7 +1,28 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><title>rota.mzn in a browser</title></head>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rota.mzn in a browser</title>
+<style>
+  :root { color-scheme: light dark; font: 16px/1.5 system-ui, sans-serif; }
+  body { margin: 0; padding: 16px; max-width: 46rem; }
+  h1 { font-size: 1.1rem; margin: 0 0 .25rem; }
+  p.sub { margin: 0 0 1rem; opacity: .7; font-size: .9rem; }
+  /* The whole point of this page is to be readable on the phone being
+     measured, so the log wraps instead of forcing a horizontal scroll. */
+  pre { white-space: pre-wrap; word-break: break-word; font-size: .85rem;
+        background: color-mix(in srgb, currentColor 6%, transparent);
+        padding: 12px; border-radius: 8px; margin: 0; }
+  .headline { font-size: 1.6rem; font-weight: 700; margin: 1rem 0 .25rem; }
+  .headline small { font-size: .8rem; font-weight: 400; opacity: .7; display: block; }
+</style>
+</head>
 <body>
+<h1>rota.mzn on this device</h1>
+<p class="sub">ADR 011's Pixel-class measurement. Nothing is sent anywhere; everything below
+is measured in this tab.</p>
+<div class="headline" id="headline" hidden></div>
 <pre id="log">starting…</pre>
 <script type="module">
 // ADR 011's last untouched acceptance criterion: the real WebAssembly path,
@@ -20,16 +41,37 @@ window.rotaProbe = { crossOriginIsolated: window.crossOriginIsolated, levels: []
 
 const mark = () => performance.now();
 
-// Is CPU throttling actually reaching the code that does the work? A busy loop
-// on the main thread, timed. The solver runs in a Web Worker, and if the worker
-// is not throttled then any "phone" figure from this page is a desktop figure
-// wearing a hat.
-{
+// Is CPU throttling actually reaching the code that does the work? A busy loop,
+// timed, run twice: once on the main thread and once inside a Web Worker.
+//
+// This pair is the whole reason the Pixel-class figure stayed open. The solver
+// runs in a worker, and `Emulation.setCPUThrottlingRate` reaches the main
+// thread and *not* worker threads - so a run that throttles the main thread to
+// a crawl still solves at full desktop speed, and reports a "phone" number that
+// is a desktop number wearing a hat. Two spin rates rather than one turns that
+// from something you have to know into something the output says.
+const spin = (ms) => {
   const t = performance.now();
   let n = 0;
-  while (performance.now() - t < 50) n++;
-  window.rotaProbe.spinPerMs = Math.round(n / 50);
-}
+  while (performance.now() - t < ms) n++;
+  return Math.round(n / ms);
+};
+window.rotaProbe.spinPerMs = spin(50);
+window.rotaProbe.workerSpinPerMs = await new Promise((resolve) => {
+  const src = `self.onmessage=(e)=>{const t=performance.now();let n=0;
+    while(performance.now()-t<e.data)n++;postMessage(Math.round(n/e.data));};`;
+  const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+  const w = new Worker(url);
+  w.onmessage = (e) => { resolve(e.data); w.terminate(); URL.revokeObjectURL(url); };
+  w.postMessage(50);
+});
+window.rotaProbe.cores = navigator.hardwareConcurrency ?? null;
+window.rotaProbe.memoryGB = navigator.deviceMemory ?? null;
+say(`device: ${window.rotaProbe.cores ?? '?'} cores, ${
+  window.rotaProbe.memoryGB ? `${window.rotaProbe.memoryGB}GB+` : 'unknown RAM'}`);
+say(`spin: ${window.rotaProbe.spinPerMs}/ms main, ${window.rotaProbe.workerSpinPerMs}/ms worker`);
+say(`  (the worker figure is the one that predicts solve time - it is the thread`);
+say(`   the solver runs on. pixelClass.mjs's curve is indexed on it.)`);
 
 // Register the probe service worker and wait for it to have everything, so the
 // harness can cut the network and reload. Skipped unless asked for: the online
@@ -116,6 +158,22 @@ if (!window.rotaProbe.baseline) try {
   say(`ERROR ${window.rotaProbe.error}`);
 }
 window.rotaProbe.done = true;
+
+// The headline is for the person holding the phone. Everything above it is for
+// whoever reads the transcript afterwards.
+if (!window.rotaProbe.baseline && !window.rotaProbe.error) {
+  const ladder = window.rotaProbe.levels.reduce((n, l) => n + l.ms, 0);
+  const slowest = Math.max(...window.rotaProbe.levels.map((l) => l.ms));
+  const h = document.getElementById('headline');
+  h.hidden = false;
+  h.innerHTML = `${(ladder / 1000).toFixed(1)}s to schedule`
+    + `<small>first load ${window.rotaProbe.initMs}ms`
+    + ` · slowest single solve ${(slowest / 1000).toFixed(1)}s`
+    + ` · worker ${window.rotaProbe.workerSpinPerMs}/ms</small>`;
+  say('');
+  say(`TOTAL: ${(ladder / 1000).toFixed(1)}s for the four-solve ladder,`
+    + ` after ${window.rotaProbe.initMs}ms of first load.`);
+}
 say('done');
 </script>
 </body>
