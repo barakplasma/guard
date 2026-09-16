@@ -30,8 +30,20 @@ jobs:
       - name: Run MegaLinter
         id: megalinter
         uses: oxsecurity/megalinter/flavors/javascript@v10
+        # Advisory, never blocking: DISABLE_ERRORS reports every finding in the
+        # job summary and still exits 0. What gates a pull request is the
+        # `check` job below - oxlint, the scheduler tests and the build. The
+        # baseline this branch establishes is worth keeping clean, but a link
+        # that was reachable yesterday or a new rule in a linter this repo does
+        # not otherwise run should not hold a merge.
+        #
+        # Which linters run is configured in .mega-linter.yml, not here: a
+        # MegaLinter env variable *replaces* the file's value rather than adding
+        # to it, so a DISABLE_LINTERS on this step would silently discard every
+        # entry in that file.
         env:
           APPLY_FIXES: all
+          DISABLE_ERRORS: true
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_COMMENT_REPORTER: false
           VALIDATE_ALL_CODEBASE: false
