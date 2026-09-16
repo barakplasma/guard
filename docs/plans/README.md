@@ -24,6 +24,52 @@ pending implementation plans.
 | [015](15-fairness-across-rolls.md) | Duty does not stop counting when the window rolls past it. *(Implemented)* |
 | [016](16-unbroken-runs.md) | `balanced` will work somebody for three days straight. *(Proposed — your call)* |
 
+## How these fit together
+
+```mermaid
+flowchart TB
+    A008["008 · three defects<br/>the bug list"]
+
+    subgraph fixed ["Fixed"]
+        A009["009 · log the past,<br/>schedule only the future"]
+        A015["015 · duty keeps counting<br/>after the window rolls past"]
+        A014["014 · exclude a named person"]
+    end
+
+    subgraph decided ["Decided, nothing to build"]
+        A010["010 · the plan stays in the URL<br/><i>it was already in the fragment</i>"]
+    end
+
+    subgraph open ["Waiting on a decision"]
+        A016["016 · balanced will work somebody<br/>three days straight<br/><i>pick a threshold</i>"]
+        A011["011 · MiniZinc on HiGHS<br/><i>prototyped and measured</i>"]
+    end
+
+    subgraph frame ["Operating model"]
+        A012["012 · 72 hours, rolled forward"]
+        A013["013 · re-planned continuously"]
+    end
+
+    A008 -- "defects 1 and 2" --> A009
+    A008 -- "defect 3 · 12% of short seats" --> A011
+    A012 -- "rolling loses the record" --> A015
+    A013 -- "raises defect 3 to the main path" --> A008
+    A012 -- "the fragment is enough" --> A010
+    A012 -- "sizes the model" --> A011
+    A009 --> A011
+    A015 -- "found while measuring it" --> A016
+    A016 -. "would let 015 repay faster" .-> A015
+    A014 -. "second half needs a solver" .-> A011
+    A016 -. "a solver fixes it as a constraint" .-> A011
+
+    classDef done fill:#dff5e1,stroke:#2e7d32,color:#1b5e20
+    classDef todo fill:#fff4e5,stroke:#ed6c02,color:#7a3e00
+    classDef info fill:#e8eefb,stroke:#1565c0,color:#0d3c78
+    class A009,A015,A014 done
+    class A016,A011 todo
+    class A008,A010,A012,A013 info
+```
+
 Each record states the context, decision, consequences, rejected alternatives,
 and implementation or test evidence. Acceptance dates record this design, not a
 claim about deployment. Superseding decisions should identify the affected ADR.
