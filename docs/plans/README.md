@@ -5,25 +5,26 @@ considered and turned down. The historical `docs/plans` directory and filenames
 remain stable for existing references; these documents are decision records, not
 pending implementation plans.
 
-| ADR                                              | Decision                                                                   |
-|--------------------------------------------------|----------------------------------------------------------------------------|
-| [001](01-whole-mission-pin-on-local-mission.md)  | Represent local pins within rotation slots.                                |
-| [002](02-per-mission-shift-length.md)            | Give each local mission an explicit rotation grid.                         |
-| [003](03-daily-missions-and-per-job-rotation.md) | Hold daily missions by calendar occurrence.                                |
-| [004](04-schedule-constraints.md)                | Independent JS schedule checker. *(Failed; superseded by 017)*             |
-| [005](05-qualifications-and-tags.md)             | Select qualified crews with preferred night rest.                          |
-| [006](06-approved-continuation.md)               | Extend shared plan URLs without reordering existing fields.                |
-| [007](07-on-call-missions.md)                    | Count on-call missions toward night rest.                                  |
-| [008](08-history-and-staffing-bugs.md)           | Three defects to fix regardless of any refactor. *(Proposed)*              |
-| [009](09-timeline-split.md)                      | Log the past, schedule only the future. *(Partly implemented)*             |
-| [010](10-plan-storage.md)                        | The plan stays in the URL, where it already is. *(Accepted)*               |
-| [011](11-solver-selection.md)                    | MiniZinc as the one engine, on HiGHS. *(Accepted, provisionally)*          |
-| [012](12-planning-horizon.md)                    | Plan 72 hours at a time, rolled forward. *(Proposed)*                      |
-| [013](13-replanning-under-churn.md)              | Continuous re-planning is the operating model. *(Proposed)*                |
-| [014](14-exclusions-and-flexibility.md)          | Exclude individuals; keep scarce people free. *(First half implemented)*   |
-| [015](15-fairness-across-rolls.md)               | Duty does not stop counting when the window rolls past it. *(Implemented)* |
-| [016](16-unbroken-runs.md)                       | Nobody stands more than six hours if anyone else is free. *(Implemented)*  |
-| [017](17-illegal-states-and-solver-boundaries.md)| Typed boundaries; MiniZinc owns optimization and legality. *(Accepted)*     |
+| ADR                                               | Decision                                                                   |
+|---------------------------------------------------|----------------------------------------------------------------------------|
+| [001](01-whole-mission-pin-on-local-mission.md)   | Represent local pins within rotation slots.                                |
+| [002](02-per-mission-shift-length.md)             | Give each local mission an explicit rotation grid.                         |
+| [003](03-daily-missions-and-per-job-rotation.md)  | Hold daily missions by calendar occurrence.                                |
+| [004](04-schedule-constraints.md)                 | Independent JS schedule checker. *(Failed; superseded by 017)*             |
+| [005](05-qualifications-and-tags.md)              | Select qualified crews with preferred night rest.                          |
+| [006](06-approved-continuation.md)                | Extend shared plan URLs without reordering existing fields.                |
+| [007](07-on-call-missions.md)                     | Count on-call missions toward night rest.                                  |
+| [008](08-history-and-staffing-bugs.md)            | Three defects to fix regardless of any refactor. *(Proposed)*              |
+| [009](09-timeline-split.md)                       | Log the past, schedule only the future. *(Partly implemented)*             |
+| [010](10-plan-storage.md)                         | The plan stays in the URL, where it already is. *(Accepted)*               |
+| [011](11-solver-selection.md)                     | MiniZinc as the one engine, on HiGHS. *(Accepted, provisionally)*          |
+| [012](12-planning-horizon.md)                     | Plan 72 hours at a time, rolled forward. *(Proposed)*                      |
+| [013](13-replanning-under-churn.md)               | Continuous re-planning is the operating model. *(Proposed)*                |
+| [014](14-exclusions-and-flexibility.md)           | Exclude individuals; keep scarce people free. *(First half implemented)*   |
+| [015](15-fairness-across-rolls.md)                | Duty does not stop counting when the window rolls past it. *(Implemented)* |
+| [016](16-unbroken-runs.md)                        | Nobody stands more than six hours if anyone else is free. *(Implemented)*  |
+| [017](17-illegal-states-and-solver-boundaries.md) | Typed boundaries; MiniZinc owns optimization and legality. *(Accepted)*    |
+| [018](18-on-call-surplus.md)                      | Lend surplus on-call members to opted-in local missions. *(Accepted)*      |
 
 ## How these fit together
 
@@ -45,6 +46,7 @@ flowchart TB
     subgraph open ["Accepted, implementation open"]
         A011["011 · MiniZinc on HiGHS<br/><i>prototyped and measured</i>"]
         A017["017 · typed boundaries<br/>MiniZinc owns legality"]
+        A018["018 · on-call surplus<br/>can cover local missions"]
     end
 
     subgraph frame ["Operating model"]
@@ -61,6 +63,8 @@ flowchart TB
     A009 --> A011
     A004["004 · independent JS checker<br/><i>failed in practice</i>"] -. "superseded" .-> A017
     A011 --> A017
+    A007["007 · on-call duty<br/>is sleep-compatible"] --> A018
+    A017 --> A018
     A015 -- "found while measuring it" --> A016
     A016 -- "lets 015 repay in full" --> A015
     A014 -. "second half needs a solver" .-> A011
@@ -69,7 +73,7 @@ flowchart TB
     classDef todo fill:#fff4e5,stroke:#ed6c02,color:#7a3e00
     classDef info fill:#e8eefb,stroke:#1565c0,color:#0d3c78
     class A009,A015,A014,A016 done
-    class A011,A017 todo
+    class A011,A017,A018 todo
     class A008,A010,A012,A013 info
 ```
 
@@ -153,6 +157,15 @@ be taken or left on its own:
   unrepresentable. The old checker stays only as migration instrumentation
   until the hand-written scheduler is removed.
 
+- **018** separates on-call membership from active duty. An on-call mission's
+  existing headcount remains the required ready strength; optional extra
+  members create releasable capacity for local missions that explicitly opt
+  in. Every release preserves residual headcount and qualifications. The model
+  retains one active duty per person, counts overlapping commitment time once,
+  and treats the borrowed local interval as awake duty. It extends 007 and 017
+  without superseding either and is implementation-open on the shared MiniZinc
+  constraint core.
+
 Suggested order, updated now that 009's core rule has landed:
 
 1. ~~012's export plus 008's defect 2~~ - **closed, both halves.** Nothing
@@ -186,6 +199,10 @@ Suggested order, updated now that 009's core rule has landed:
    it reaches the main thread and not the worker. The model's remaining levels -
    history, rest, rotation turn counting - are the other half, and are modelling
    work rather than measurement.
+7. **018 follows the shared constraint core.** Its separate membership value,
+   residual readiness checks, and fixed-candidate validation belong in the same
+   MiniZinc authority as 017; a temporary greedy double-booking exception would
+   make the migration harder and leave two incompatible definitions of legality.
 
 ## Verification
 
