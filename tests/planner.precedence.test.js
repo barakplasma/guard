@@ -20,6 +20,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { plan, WARN } from '../src/lib/planner.js';
+import { runPlan } from './testHelpers.js';
 
 const localTime = (y, m, d, h = 0, min = 0) => new Date(y, m, d, h, min, 0, 0).getTime();
 const START = localTime(2026, 0, 5, 8, 0);
@@ -83,7 +84,7 @@ test('a pin that loses a seat contest does not evict an unrelated survivor as a 
 test('a whole-mission pin and a literal-range pin describing the same assignment count as one claimant', () => {
   const start = START;
   const end = start + 3 * HOUR;
-  const result = plan({
+  const result = runPlan({
     start,
     end,
     shiftMinutes: 60,
@@ -112,7 +113,7 @@ test('a byte-identical duplicate pin is idempotent', () => {
   const start = START;
   const end = start + HOUR;
   const dup = { missionId: 'm', employeeId: 'e1', start, end, frozen: true };
-  const result = plan({
+  const result = runPlan({
     start,
     end,
     shiftMinutes: 60,
@@ -134,7 +135,7 @@ test('a byte-identical duplicate pin is idempotent', () => {
 test('an explicit pin wins a contested seat against a frozen pin - explicit first, frozen second', () => {
   const start = START;
   const end = start + HOUR;
-  const result = plan({
+  const result = runPlan({
     start,
     end,
     shiftMinutes: 60,
@@ -155,7 +156,7 @@ test('an explicit pin wins a contested seat against a frozen pin - explicit firs
 test('an explicit pin wins a contested seat against a frozen pin - frozen first, explicit second', () => {
   const start = START;
   const end = start + HOUR;
-  const result = plan({
+  const result = runPlan({
     start,
     end,
     shiftMinutes: 60,
@@ -184,7 +185,7 @@ test('an explicit pin wins a contested seat against a frozen pin - frozen first,
 test('a pin outside the employee\'s availability is honoured, with an informational warning instead of a drop', () => {
   const start = START;
   const end = start + 4 * HOUR;
-  const result = plan({
+  const result = runPlan({
     start,
     end,
     shiftMinutes: 60,
@@ -213,7 +214,7 @@ test('a pin that resolves to zero duration outside the mission window still cann
   const start = START;
   const missionStart = start + HOUR;
   const missionEnd = start + 2 * HOUR;
-  const result = plan({
+  const result = runPlan({
     start,
     end: start + 3 * HOUR,
     shiftMinutes: 60,
@@ -234,7 +235,7 @@ test('a pin that resolves to zero duration outside the mission window still cann
 test('auto-assignment still respects availability - only manual pins are input facts', () => {
   const start = START;
   const end = start + 4 * HOUR;
-  const result = plan({
+  const result = runPlan({
     start,
     end,
     shiftMinutes: 60,
@@ -264,7 +265,7 @@ test('three explicit pins for a two-seat mission: the two newest win, the oldest
   const mission = { id: 'm', name: 'M', type: 'local', start, end, count: 2 };
   const employees = [{ id: 'e1', name: 'E1' }, { id: 'e2', name: 'E2' }, { id: 'e3', name: 'E3' }];
 
-  const result = plan({
+  const result = runPlan({
     start,
     end,
     shiftMinutes: 60,
@@ -292,7 +293,7 @@ test('three explicit pins for a two-seat mission: the two newest win, the oldest
   const mission = { id: 'm', name: 'M', type: 'local', start, end, count: 2 };
   const employees = [{ id: 'e1', name: 'E1' }, { id: 'e2', name: 'E2' }, { id: 'e3', name: 'E3' }];
 
-  const result = plan({
+  const result = runPlan({
     start,
     end,
     shiftMinutes: 60,

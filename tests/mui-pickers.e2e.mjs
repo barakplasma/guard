@@ -10,20 +10,16 @@
  * it after midday.
  */
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync } from 'node:fs';
-import { chromium } from 'playwright';
 import { planSchema } from '../src/lib/planSchema.js';
 import { encodePlan, decodePlan } from '../src/lib/urlState.js';
-const base = process.env.BASE || 'http://127.0.0.1:4173';
-const shots = process.env.SHOT_DIR || '/tmp/guard-mui-pickers';
-mkdirSync(shots, { recursive: true });
-const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROME || (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined) });
+import { baseUrl as base, captureFailure, launchBrowser, screenshotDirectory, watchErrors } from './e2eHelpers.mjs';
+const shots = screenshotDirectory('/tmp/guard-mui-pickers');
+const browser = await launchBrowser();
 try {
   const context = await browser.newContext({ viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true, timezoneId: 'Asia/Jerusalem', locale: 'he-IL' });
   const page = await context.newPage();
   const errors = [];
-  page.on('pageerror', (error) => errors.push(error.message));
-  page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+  watchErrors(page, errors);
   const start = Date.parse('2030-09-10T08:00:00+03:00');
   const doc = planSchema.parse({ start, end: start + 2 * 86400000, shiftMinutes: 60,
     employees: [{ id: 'e', name: 'אבי' }],
@@ -92,9 +88,6 @@ try {
   assert.deepEqual(errors, []);
   console.log('PASS native date/time fields, 24-hour values across device locales, clearable optional clocks, URL persistence, responsive layout');
 } catch (error) {
-  for (const context of browser.contexts()) for (const page of context.pages()) {
-    console.error((await page.locator('body').innerText()).slice(0, 5000));
-    await page.screenshot({ path: `${shots}/failure.png` });
-  }
+  await captureFailure(browser, `${shots}/failure.png`);
   throw error;
 } finally { await browser.close(); }

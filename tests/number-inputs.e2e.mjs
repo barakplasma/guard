@@ -1,21 +1,17 @@
 /** Touch controls must be real buttons: mobile Chrome can omit native spinners. */
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync } from 'node:fs';
-import { chromium } from 'playwright';
 import { planSchema } from '../src/lib/planSchema.js';
 import { encodePlan, decodePlan } from '../src/lib/urlState.js';
+import { baseUrl as base, launchBrowser, screenshotDirectory, watchErrors } from './e2eHelpers.mjs';
 
-const base = process.env.BASE || 'http://127.0.0.1:4173';
-const shots = process.env.SHOT_DIR || '/tmp/guard-number-inputs';
-mkdirSync(shots, { recursive: true });
-const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROME || (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined) });
+const shots = screenshotDirectory('/tmp/guard-number-inputs');
+const browser = await launchBrowser();
 try {
   const context = await browser.newContext({ viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true, locale: 'en-US', timezoneId: 'Asia/Jerusalem' });
   const page = await context.newPage();
   page.setDefaultTimeout(5000);
   const errors = [];
-  page.on('pageerror', (error) => errors.push(error.message));
-  page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+  watchErrors(page, errors);
   const start = Date.parse('2030-09-10T22:00:00+03:00');
   const doc = planSchema.parse({ start, end: start + 8 * 3600000, shiftMinutes: 60,
     employees: [{ id: 'e', name: 'אבי', tags: ['d'] }],

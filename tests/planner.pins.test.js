@@ -2,18 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { plan, WARN } from '../src/lib/planner.js';
-
-const HOUR = 3600 * 1000;
-const MIN = 60 * 1000;
-
-function localTime(y, m, d, h = 0, min = 0) {
-  return new Date(y, m, d, h, min, 0, 0).getTime();
-}
-
-const people = (n) => Array.from({ length: n }, (_, i) => ({
-  id: `e${i + 1}`,
-  name: `Emp${String(i + 1).padStart(2, '0')}`,
-}));
+import { HOUR, MINUTE as MIN, localTime, people, runPlan } from './testHelpers.js';
 
 const START = localTime(2026, 0, 5, 8, 0);
 
@@ -22,7 +11,7 @@ const START = localTime(2026, 0, 5, 8, 0);
 test('whole-mission pins staff a remote mission with exactly those people', () => {
   const start = START;
   const end = start + 6 * HOUR;
-  const result = plan({
+  const result = runPlan({
     start,
     end,
     shiftMinutes: 60,
@@ -62,7 +51,7 @@ test('a per-shift pin displaces the generated person, who is rescheduled elsewhe
   // Pick someone the planner did *not* choose for that slot.
   const other = input.employees.find((e) => e.id !== firstSlot.employeeId);
 
-  const after = plan({
+  const after = runPlan({
     ...input,
     pins: [{ missionId: 'l', employeeId: other.id, start, end: start + HOUR }],
   });
@@ -81,7 +70,7 @@ test('a per-shift pin displaces the generated person, who is rescheduled elsewhe
 test('pinned time counts toward the fairness totals', () => {
   const start = START;
   const end = start + 6 * HOUR;
-  const result = plan({
+  const result = runPlan({
     start,
     end,
     shiftMinutes: 60,
@@ -105,7 +94,7 @@ test('pinned time counts toward the fairness totals', () => {
 test('a person pinned to two overlapping missions keeps the latest and warns', () => {
   const start = START;
   const end = start + 2 * HOUR;
-  const result = plan({
+  const result = runPlan({
     start,
     end,
     shiftMinutes: 60,
@@ -149,14 +138,14 @@ test('flipping a mission to open-ended widens its window - a whole-mission pin n
 
   // Baseline: the mission's explicit end matches e1's availability, so there
   // is nothing to override.
-  const before = plan({
+  const before = runPlan({
     start, end: planEnd, shiftMinutes: 60, employees, missions: missionWithEnd(missionEnd), pins,
   });
   assert.ok(!before.warnings.some((w) => w.code === WARN.PIN_AVAILABILITY_OVERRIDDEN));
 
   // Now flip the mission open-ended (end: null). normalizeMissions resolves
   // that to the plan's end, which e1's own window does not cover.
-  const after = plan({
+  const after = runPlan({
     start, end: planEnd, shiftMinutes: 60, employees, missions: missionWithEnd(null), pins,
   });
   const warning = after.warnings.find(
@@ -177,7 +166,7 @@ test('reassigning someone off a whole-mission pin onto a specific shift wins, no
   // wider pin was never explicitly cleared.
   const start = START;
   const end = start + 4 * HOUR;
-  const result = plan({
+  const result = runPlan({
     start,
     end,
     shiftMinutes: 60,
@@ -208,7 +197,7 @@ test('pins beyond the headcount are dropped with a warning, keeping the newest',
   // product decision.
   const start = START;
   const end = start + 2 * HOUR;
-  const result = plan({
+  const result = runPlan({
     start,
     end,
     shiftMinutes: 60,
@@ -233,7 +222,7 @@ test('a pin outside the person\'s availability is honoured, with an informationa
   // instead); that was exactly the override the user reported as the bug.
   const start = START;
   const end = start + 4 * HOUR;
-  const result = plan({
+  const result = runPlan({
     start,
     end,
     shiftMinutes: 60,
@@ -262,7 +251,7 @@ test('a frozen pin survives even when the employee is no longer available for it
   // rather than being silently swallowed by a bypass.
   const start = START;
   const end = start + 2 * HOUR;
-  const result = plan({
+  const result = runPlan({
     start,
     end,
     shiftMinutes: 60,
@@ -287,7 +276,7 @@ test('a frozen pin survives even when the employee is no longer available for it
 test('a manual (non-frozen) pin produces a shift with frozen: false', () => {
   const start = START;
   const end = start + HOUR;
-  const result = plan({
+  const result = runPlan({
     start,
     end,
     shiftMinutes: 60,
@@ -310,7 +299,7 @@ test('a frozen pin still expands with its mission when switched to remote, now h
   // e1 keeps the whole remote mission with an informational warning instead.
   const start = START;
   const end = start + 4 * HOUR;
-  const result = plan({
+  const result = runPlan({
     start,
     end,
     shiftMinutes: 60,
@@ -338,7 +327,7 @@ test('a frozen whole-mission pin still stands when the remote mission window is 
   const start = START;
   const originalEnd = start + 2 * HOUR;
   const extendedEnd = start + 4 * HOUR;
-  const result = plan({
+  const result = runPlan({
     start,
     end: extendedEnd,
     shiftMinutes: 60,
@@ -371,7 +360,7 @@ test('a frozen pin whose resolved range still matches exactly what it was frozen
   // any other availability mismatch: honoured, with an informational note.
   const start = START;
   const end = start + 2 * HOUR;
-  const result = plan({
+  const result = runPlan({
     start,
     end,
     shiftMinutes: 60,
@@ -399,7 +388,7 @@ test('an unfrozen pin is honoured when the employee is unavailable, exactly like
   // plain manual pin (dropped, e2 covers). That asymmetry is gone on purpose.
   const start = START;
   const end = start + 2 * HOUR;
-  const result = plan({
+  const result = runPlan({
     start,
     end,
     shiftMinutes: 60,
@@ -421,7 +410,7 @@ test('an unfrozen pin is honoured when the employee is unavailable, exactly like
 test('pins naming a deleted employee or mission are ignored silently', () => {
   const start = START;
   const end = start + 2 * HOUR;
-  const result = plan({
+  const result = runPlan({
     start,
     end,
     shiftMinutes: 60,
@@ -478,7 +467,7 @@ test('re-pinning the person the planner already chose changes nothing but the fl
 
   const before = plan(input);
   const first = before.shifts.find((s) => s.start === start);
-  const after = plan({
+  const after = runPlan({
     ...input,
     pins: [{ missionId: 'l', employeeId: first.employeeId, start, end: start + HOUR }],
   });
@@ -495,7 +484,7 @@ test('a partial pin on a remote mission covers the whole mission, not part of it
   const start = START;
   const end = start + 2 * HOUR;
   // A per-shift pin made while the mission was local, then switched to remote.
-  const result = plan({
+  const result = runPlan({
     start,
     end,
     shiftMinutes: 60,
@@ -520,7 +509,7 @@ test('a partial remote pin that outruns availability is still widened to the who
   // gets an informational warning.
   const start = START;
   const end = start + 2 * HOUR;
-  const result = plan({
+  const result = runPlan({
     start,
     end,
     shiftMinutes: 60,
@@ -544,7 +533,7 @@ test('a swap over a whole-mission pin replaces the assignee rather than competin
   const end = start + 2 * HOUR;
   // What PlanContext.pinShift must produce: the displaced person's covering pin
   // removed, the replacement written for the row's range.
-  const result = plan({
+  const result = runPlan({
     start,
     end,
     shiftMinutes: 60,
@@ -641,7 +630,7 @@ test('a whole-mission pin on an off-grid mission gets partial rows at the missio
   // edges of its own, so what comes out is the mission's own segmentation: a
   // half-hour row at each end and whole slots in between.
   const start = START;
-  const result = plan({
+  const result = runPlan({
     start,
     end: start + 6 * HOUR,
     shiftMinutes: 60,
@@ -666,7 +655,7 @@ test('a pinned slot torn by an unrelated availability edge merges back into one 
   // and it must repair a pinned row the same way it repairs a generated one -
   // without ever welding two consecutive slots together.
   const start = START;
-  const result = plan({
+  const result = runPlan({
     start,
     end: start + 3 * HOUR,
     shiftMinutes: 60,
