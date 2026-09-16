@@ -21,29 +21,29 @@
  */
 
 /** Deterministic JSON: object keys sorted, Maps and Sets written as sorted pairs. */
-function canonical (value: unknown): string {
-  if (value === null || value === undefined) return 'n'
-  if (typeof value === 'number') return Number.isFinite(value) ? `#${value}` : `#${value > 0 ? 'inf' : '-inf'}`
-  if (typeof value === 'boolean') return value ? 'T' : 'F'
-  if (typeof value === 'string') return `"${value}"`
+function canonical(value: unknown): string {
+  if (value === null || value === undefined) return 'n';
+  if (typeof value === 'number') return Number.isFinite(value) ? `#${value}` : `#${value > 0 ? 'inf' : '-inf'}`;
+  if (typeof value === 'boolean') return value ? 'T' : 'F';
+  if (typeof value === 'string') return `"${value}"`;
   if (value instanceof Map) {
     return `{${[...value.entries()]
       .map(([k, v]) => [canonical(k), canonical(v)] as const)
       .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
       .map(([k, v]) => `${k}:${v}`)
-      .join(',')}}`
+      .join(',')}}`;
   }
   if (value instanceof Set) {
-    return `[${[...value].map(canonical).sort().join(',')}]`
+    return `[${[...value].map(canonical).sort().join(',')}]`;
   }
-  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
   if (typeof value === 'object') {
     const entries = Object.entries(value as Record<string, unknown>)
       .filter(([, v]) => v !== undefined)
-      .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
-    return `{${entries.map(([k, v]) => `"${k}":${canonical(v)}`).join(',')}}`
+      .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+    return `{${entries.map(([k, v]) => `"${k}":${canonical(v)}`).join(',')}}`;
   }
-  return `?${String(value)}`
+  return `?${String(value)}`;
 }
 
 /**
@@ -51,16 +51,16 @@ function canonical (value: unknown): string {
  * One 32-bit lane collides at a few tens of thousands of documents, which is
  * well inside one editing session's worth of keystrokes.
  */
-const OFFSETS = [0x811c9dc5, 0x01000193, 0x9e3779b9, 0x85ebca6b]
+const OFFSETS = [0x811c9dc5, 0x01000193, 0x9e3779b9, 0x85ebca6b];
 
-export function digestOf (value: unknown): string {
-  const text = canonical(value)
-  const lanes = [...OFFSETS]
+export function digestOf(value: unknown): string {
+  const text = canonical(value);
+  const lanes = [...OFFSETS];
   for (let i = 0; i < text.length; i++) {
-    const code = text.charCodeAt(i)
+    const code = text.charCodeAt(i);
     for (let lane = 0; lane < lanes.length; lane++) {
-      lanes[lane] = Math.imul(lanes[lane] ^ code ^ lane, 0x01000193) >>> 0
+      lanes[lane] = Math.imul(lanes[lane] ^ code ^ lane, 0x01000193) >>> 0;
     }
   }
-  return lanes.map((lane) => lane.toString(16).padStart(8, '0')).join('')
+  return lanes.map((lane) => lane.toString(16).padStart(8, '0')).join('');
 }

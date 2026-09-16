@@ -4,6 +4,6 @@
  * any other module rather than fetched at runtime (CLAUDE.md: no network).
  */
 declare module '*.mzn?raw' {
-  const source: string
-  export default source
+  const source: string;
+  export default source;
 }
