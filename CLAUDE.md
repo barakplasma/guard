@@ -395,7 +395,13 @@ variable on the workflow step *replaces* the file's value rather than adding to 
 how `standard` kept running, and rewriting, after being disabled there.
 
 The job runs with `APPLY_FIXES: all` and commits what a linter rewrites, **on purpose**: a
-formatting fix that a bot can make is not worth a human's or an agent's attention. That is what
+formatting fix that a bot can make is not worth a human's or an agent's attention. Two mechanics
+make that work, and both look like bugs until you know them. The commit step's `if:` implies
+`success()`, so while MegaLinter exited non-zero every fix it computed was written to the report
+folder and thrown away — `DISABLE_ERRORS` is what lets them land. And the push is made with
+`GITHUB_TOKEN`, which by design does **not** trigger a new workflow run, so the commit it lands
+carries no checks of its own and the pull request reads `unstable` until the next real push. That
+is acceptable only because these fixes are formatting; the commit underneath was verified green. That is what
 makes the exclusions below matter, though — a linter this repo does not agree with does not just
 report its opinion, it lands it. Three of them are load-bearing and will look arbitrary to anyone
 tidying up:
