@@ -80,19 +80,32 @@ interface PreparedEmployee {
   id: EmployeeId;
   available: Interval;                 // clamped to the horizon
   qualifications: ReadonlySet<QualificationId>;
-  carriedStints: number;
   requiredNightRestMinutes: DurationMinutes; // 0 when nothing applies
-  idleMinutesAtHorizonStart: DurationMinutes; // since their last logged duty ended
+  memory: DutyMemory;                  // what the log says, §2
+}
+
+interface DutyMemory {                 // read from logged duty inside memoryDays
+  idleMinutesAtHorizonStart: DurationMinutes; // since the last logged duty, capped
+  turns: number;
+  nightMinutes: DurationMinutes;
+  turnsOnMission: ReadonlyMap<MissionId, number>;
+  heldWithinCooldown: ReadonlySet<MissionId>;
+  hourHolds: readonly number[];        // 24 counts: turns begun in each hour of day
 }
 
 type PreparedMission =
   | { kind: 'local'; id: MissionId; window: Interval; daySeats: number; nightSeats: number;
       slotBounds: readonly InstantMs[]; requires: readonly Requirement[];
-      exclusions: Exclusions; onCall: boolean }
+      exclusions: Exclusions; onCall: boolean; repeatAfterDays: number | null }
   | { kind: 'remote'; id: MissionId; window: Interval; seats: number;
-      requires: readonly Requirement[]; exclusions: Exclusions; onCall: boolean }
+      requires: readonly Requirement[]; exclusions: Exclusions; onCall: boolean;
+      repeatAfterDays: number | null }
   | { kind: 'daily'; id: MissionId; occurrences: readonly Interval[]; seats: number;
-      requires: readonly Requirement[]; exclusions: Exclusions; onCall: boolean };
+      requires: readonly Requirement[]; exclusions: Exclusions; onCall: boolean;
+      repeatAfterDays: number | null };
+
+// `repeatAfterDays` is the once-per-rotation rule (decision G): kitchen duty
+// with 7 means nobody takes it twice inside seven days if anyone else can.
 
 interface Commitment {               // a manual pin or a logged record, resolved
   employeeId: EmployeeId;
@@ -108,6 +121,7 @@ interface PreparedProblem {
   employees: readonly PreparedEmployee[];
   missions: readonly PreparedMission[];
   commitments: readonly Commitment[];
+  memoryDays: number;                // how far back the log is read, default 21
   issues: readonly PreparationIssue[];
   revision: ProblemRevision;
 }
@@ -182,19 +196,29 @@ exists:
 | `resolveEmployees(draft)`      | `normalizeEmployees` via `segmentGrid`'s `prepare`     | `requiredNightRestMinutes` from `tags[].minNightRestMinutes`                                                                                  |
 | `resolveMissions(draft)`       | `normalizeMissions`, `slotBoundsFor` via `segmentGrid` | the discriminated union; issues `mission-outside-window`, `tag-required-and-excluded`                                                         |
 | `resolveCommitments(draft)`    | `acceptedPins` (planner.js)                            | provenance; issues `pin-conflict`, `pin-overflow`, `pin-unavailable`, `pin-availability-overridden`                                           |
-| `resolveCarriedTurns(draft)`   | `isOutOfPeriod`, `resolvePinWindow`                    | `carriedStints` plus one turn per out-of-period pin, as `plan()` counts them today                                                            |
 | `countStaleCommitments(draft)` | `isOutOfPeriod`, `isElapsedBeforePeriod`               | issue `pin-out-of-period` with `count` and `elapsed`                                                                                          |
-| `resolveIdleAtStart(draft)`    | `isElapsedBeforePeriod`, `resolvePinWindow`            | minutes from the latest elapsed commitment's end to the horizon start, else from `lastDutyEnd`, capped at eight hours (`TARGET_REST_MINUTES`) |
+| `readDutyMemory(draft)`        | `isElapsedBeforePeriod`, `resolvePinWindow`, `nightWindows` | one `DutyMemory` per employee from the logged duty inside `memoryDays`: idle minutes at the start (capped at eight hours), turns, night minutes, turns per mission, missions held inside their cooldown, turns begun per hour of day |
 
-`resolveIdleAtStart` is what lets round robin survive a roll (decision A),
-and the cap is what keeps it small. The owner's rule is that after a night's
-sleep it no longer matters when somebody last stood post, and the night's
-sleep to aim for is eight hours, so a wait is only ever a number between zero
-and eight hours, and the only history that can affect it is a duty that ended
-inside the eight hours before the horizon starts. Out-of-period pins still in the document carry that. Once they have
-been exported and cleared, the employee's `lastDutyEnd`, an instant written by
-`clearStalePins` at the same moment as `carriedStints`, carries it instead.
-A `lastDutyEnd` more than eight hours before the horizon is ignored.
+**The log is the memory, and nothing clears it.** The owner wants export
+and no clear button, so logged duty stays in the document and `readDutyMemory`
+reads it directly. There is no `carriedMinutes`, `carriedStints` or
+`lastDutyEnd`: every number the model needs about the past is derived from
+the rows themselves at preparation time, so nothing has to be stamped when a
+window rolls. `clearStalePins`, `countStalePins` and the clear half of the
+export button go at step 6; `outOfPeriodLog` and the CSV export stay as they
+are. The `pin-out-of-period` issue becomes purely informational.
+
+The window is 24 hours by default, which `emptyPlan()` already writes;
+ADR 012's 72 is amended. The memory reaches further back than the window:
+`memoryDays` defaults to 21, the longest once-per-rotation cooldown, and every
+memory quantity is read over that span. The wait before a turn is the one
+number capped short, at eight hours, because after a night's sleep it no
+longer matters when somebody last stood post (decision A).
+
+What that costs is document size, and it is worth a number. ADR 012 measured
+about ten characters of link per logged assignment. Ten seats held hourly for
+21 days is roughly 5,000 assignments, so a link of about 50,000 characters:
+fine for the browser, too long to paste into a chat. That is open question I.
 
 `PreparationIssue` is a discriminated union keyed on `code`, with the same
 codes and fields the engine's warnings carry today, so `findings.js` renders
@@ -206,9 +230,9 @@ link. So the wire format takes a `SCHEMA_VERSION` bump when this lands, and
 `decodePlan` gains one migration, `migrateLegacyPlan(raw)`, that keeps the
 employee list (id, name, qualification ids) and the qualification
 definitions, and starts everything else from `emptyPlan()`: missions, pins,
-period, night bounds, carried hours. The `strategy` field, `carriedMinutes`
-and ADR 006's append-only tuple discipline stop applying to new fields;
-`lastDutyEnd` is an ordinary employee field. ADR 006 is amended when the
+period, night bounds. The `strategy` field, `carriedMinutes`, `carriedStints`
+and ADR 006's append-only tuple discipline go; `repeatAfterDays` on a mission
+and `memoryDays` on the plan are ordinary fields. ADR 006 is amended when the
 bump lands, and `tests/urlState.test.js`'s literal blob becomes a test of
 the migration rather than of byte identity.
 
@@ -261,6 +285,12 @@ function requirementTables(problem, index): { requirementMission: number[]; requ
 function nightOfSegment(problem, segments): number[]
 // 0 for a day segment, else the 1-based index of the night it lies in.
 
+function memoryTables(problem, index): MemoryTables
+// The DutyMemory of every employee laid out as the model's arrays:
+// idleMinutesAtHorizonStart, recentTurns, recentNightMinutes,
+// recentTurnsOnMission, heldWithinCooldown, recentHourHolds, plus
+// repeatAfterDays per mission (0 = none) and hourOfSegment per segment.
+
 function enumerateLongRunWindows(segments, capMinutes = MAX_UNBROKEN_MINUTES): { first: number[]; last: number[] }
 // Every minimal window of consecutive segments whose minutes exceed the cap:
 // for each first segment, the smallest last segment past the cap. Linear in
@@ -274,9 +304,8 @@ function enumerateSleepWindows(segments, nightOfSegment, minutes = TARGET_REST_M
 
 function deriveSymmetryClasses(instance): number[]
 // Same rule as prototype/minizinc/solve.mjs::symClasses, on the new arrays:
-// identical availability row, allowed row, qualification column, carried
-// stints, capped idle time at the start and rest requirement, and no
-// commitment anywhere. 0 = singleton. The cap makes most of a rested roster
+// identical availability row, allowed row, qualification column, the whole
+// DutyMemory and rest requirement, and no commitment anywhere. 0 = singleton. The cap makes most of a rested roster
 // identical at the start, which is exactly when symmetry breaking pays.
 
 function instanceToJsonData(instance, ladder: LadderParams): object
@@ -305,7 +334,7 @@ and every named quantity. The two entry files each `include` it and add only a
 include "lex_lesseq.mzn";
 
 int: MODEL_VERSION = 1;
-int: LEVEL_COUNT = 10;
+int: LEVEL_COUNT = 14;
 int: OFF_DUTY = 0;
 
 % ---- sizes ----------------------------------------------------------------
@@ -328,6 +357,7 @@ set of int: Requirements   = 1..requirementCount;
 set of int: LongRunWindows = 1..longRunWindowCount;
 set of int: SleepWindows   = 1..sleepWindowCount;
 set of int: Levels         = 1..LEVEL_COUNT;
+set of int: Hours          = 0..23;
 
 % ---- the grid -------------------------------------------------------------
 array[Segments] of int: segmentMinutes;
@@ -339,8 +369,16 @@ array[Missions, Segments] of int: holdOfSegment; % indivisible hold, 0 = none
 % ---- people ---------------------------------------------------------------
 array[Employees, Segments] of bool: isAvailable;
 array[Employees, Missions] of bool: isAllowed;   % not excluded by tag or name
-array[Employees] of int: carriedStints;
+
+% ---- what the log says about the memory horizon (§2) ----------------------
 array[Employees] of int: idleMinutesAtHorizonStart; % since the last logged duty, capped
+array[Employees] of int: recentTurns;
+array[Employees] of int: recentNightMinutes;
+array[Employees, Missions] of int: recentTurnsOnMission;
+array[Employees, Missions] of bool: heldWithinCooldown;
+array[Employees, Hours] of int: recentHourHolds;    % turns begun at that hour of day
+array[Segments] of int: hourOfSegment;              % 0..23, at the segment's start
+array[Missions] of int: repeatAfterDays;            % 0 = no once-per-rotation rule
 array[Employees] of int: requiredNightRestMinutes; % 0 = no requirement
 array[Employees] of int: symmetryClass;          % 0 = nobody else is like me
 
@@ -548,7 +586,31 @@ array[Employees] of var 0..longRunWindowCount: longRunsByEmployee :: output =
     | employee in Employees ];
 var 0..employeeCount * longRunWindowCount: longRunCount :: output = sum(longRunsByEmployee);
 
-% Level 8: fairness is round robin, and nothing else (decision A, decision E).
+% Level 8: a mission everyone hates comes round once per rotation (decision
+% G). A mission with `repeatAfterDays` set, kitchen say, costs one for every
+% person who takes it while their last logged turn on it is inside the
+% cooldown, and one more for every extra turn on it inside this window. The
+% cooldown is measured from the log to the horizon start (§2), an
+% approximation of at most one window's length, which on a 24-hour plan is one
+% day. Above round robin on purpose: this decides who is eligible for the
+% kitchen, the wait decides who goes next among them.
+array[Employees, Missions] of var 0..segmentCount: turnsOnMission :: output =
+  array2d(Employees, Missions, [
+    sum(segment in Segments
+        where seatsWanted[mission, segment] > 0
+           /\ (if segment == 1 then true
+               else slotOfSegment[mission, segment] != slotOfSegment[mission, segment - 1]
+                 \/ holdOfSegment[mission, segment] != holdOfSegment[mission, segment - 1]
+               endif))(
+      isOnMission[employee, mission, segment])
+    | employee in Employees, mission in Missions ]);
+
+var 0..employeeCount * missionCount * (segmentCount + 1): cooldownBreachCount :: output =
+  sum(employee in Employees, mission in Missions where repeatAfterDays[mission] > 0)(
+    bool2int(heldWithinCooldown[employee, mission]) * bool2int(turnsOnMission[employee, mission] >= 1)
+    + max(0, turnsOnMission[employee, mission] - 1));
+
+% Level 9: fairness is round robin, and nothing else (decision A, decision E).
 % Whoever has waited longest goes next, and somebody back from a long mission
 % goes to the end of the queue. Hours are never consulted; `dutyMinutes` is
 % reported for the summary table and optimised nowhere.
@@ -590,27 +652,22 @@ var 0..TARGET_REST_MINUTES: shortestWaitMinutes :: output;
 constraint forall(employee in Employees, segment in Segments)(
   startsChosenTurn[employee, segment] -> shortestWaitMinutes <= idleMinutesBefore[employee, segment]);
 % Minimised, so the wait is maximised. Zero means everyone the solver chose
-% had eight hours off first; from there the queue is turns alone (level 9).
+% had eight hours off first; from there the queue is turns alone (level 10).
 % With no chosen turn at all the level is trivially proved.
 var 0..TARGET_REST_MINUTES: waitDeficitMinutes :: output = TARGET_REST_MINUTES - shortestWaitMinutes;
 
-% Level 9: once the bottleneck wait is settled, turns are shared out. A turn is one distinct rotation slot entered, plus one per hold.
+% Level 10: once the bottleneck wait is settled, turns are shared out, the
+% turns the log remembers included. A turn is one distinct rotation slot
+% entered, plus one per hold.
 array[Employees] of var 0..missionCount * segmentCount: turnsTaken :: output =
-  [ sum(mission in Missions, segment in Segments
-        where seatsWanted[mission, segment] > 0
-           /\ (if segment == 1 then true
-               else slotOfSegment[mission, segment] != slotOfSegment[mission, segment - 1]
-                 \/ holdOfSegment[mission, segment] != holdOfSegment[mission, segment - 1]
-               endif))(
-      isOnMission[employee, mission, segment])
-    | employee in Employees ];
-int: maxCarriedStints = max([0] ++ carriedStints);
+  [ sum(mission in Missions)(turnsOnMission[employee, mission]) | employee in Employees ];
+int: maxRecentTurns = max([0] ++ recentTurns);
 array[Employees] of var int: totalTurns =
-  [ turnsTaken[employee] + carriedStints[employee] | employee in Employees ];
-var 0..missionCount * segmentCount + maxCarriedStints: turnSpread :: output =
+  [ turnsTaken[employee] + recentTurns[employee] | employee in Employees ];
+var 0..missionCount * segmentCount + maxRecentTurns: turnSpread :: output =
   max(totalTurns) - min(totalTurns);
 
-% Level 10: prefer distinct people for distinct required roles. A person on a
+% Level 11: prefer distinct people for distinct required roles. A person on a
 % mission holding more than one of its required qualifications costs the
 % surplus, so a driver who is also the commander is chosen only when nobody
 % else can hold the second seat. An approximation, recorded as one.
@@ -622,6 +679,40 @@ var 0..employeeCount * segmentCount * requirementCount: sharedRoleCount :: outpu
                    where requirementMission[requirement] == mission)(
                  holdsRequirement[requirement, employee]) - 1));
 
+% Level 12: night is much harder than day, so night duty is evened out over
+% the memory horizon, not only inside this window (decision H). Somebody who
+% only ever stands 01:00 while another only ever stands 13:00 is what this
+% level exists to stop.
+array[Employees] of var 0..totalNightMinutes: nightMinutesInWindow :: output =
+  [ sum(segment in Segments where nightOfSegment[segment] > 0)(
+      segmentMinutes[segment] * isOnDuty[employee, segment])
+    | employee in Employees ];
+int: maxRecentNightMinutes = max([0] ++ recentNightMinutes);
+array[Employees] of var int: totalNightMinutesHeld =
+  [ nightMinutesInWindow[employee] + recentNightMinutes[employee] | employee in Employees ];
+var 0..totalNightMinutes + maxRecentNightMinutes: nightDutySpreadMinutes :: output =
+  max(totalNightMinutesHeld) - min(totalNightMinutesHeld);
+
+% Level 13: rotate people across missions (decision H). Every turn on a
+% mission costs the number of turns the log already shows that person on that
+% mission, so whoever has done it least lately is the cheapest to send. With
+% enough drivers this is what swaps who takes the morning and the night
+% patrol, and what sends somebody on patrol one day and to the gate the next.
+int: missionRepeatCeiling = segmentCount
+  * sum(employee in Employees, mission in Missions)(recentTurnsOnMission[employee, mission]);
+var 0..missionRepeatCeiling: missionRepeatCost :: output =
+  sum(employee in Employees, mission in Missions)(
+    recentTurnsOnMission[employee, mission] * turnsOnMission[employee, mission]);
+
+% Level 14: not the same person at the same night hour every night (decision
+% H). Standing a night segment costs the number of turns the log shows that
+% person beginning at that hour of the day, so the 01:00 post moves around.
+int: nightHourRepeatCeiling = segmentCount
+  * sum(employee in Employees, hour in Hours)(recentHourHolds[employee, hour]);
+var 0..nightHourRepeatCeiling: nightHourRepeatCost :: output =
+  sum(employee in Employees, segment in Segments where nightOfSegment[segment] > 0)(
+    recentHourHolds[employee, hourOfSegment[segment]] * isOnDuty[employee, segment]);
+
 % ---- the ladder -----------------------------------------------------------
 array[Levels] of var int: objectives = [
   unmetQualificationMinutes,      % 1  coverage
@@ -631,9 +722,13 @@ array[Levels] of var int: objectives = [
   targetRestShortfallMinutes,     % 5  eight hours off in total, everyone
   nightsWithoutTargetSleep,       % 6  eight hours in one stretch, for as many as possible
   longRunCount,                   % 7  nobody stands six hours if anyone is free
-  waitDeficitMinutes,             % 8  the longest wait (round robin)
-  turnSpread,                     % 9  turns shared out
-  sharedRoleCount                 % 10 distinct people for distinct roles
+  cooldownBreachCount,            % 8  kitchen once per rotation
+  waitDeficitMinutes,             % 9  the longest wait (round robin)
+  turnSpread,                     % 10 turns shared out
+  sharedRoleCount,                % 11 distinct people for distinct roles
+  nightDutySpreadMinutes,         % 12 night duty evened out over the memory
+  missionRepeatCost,              % 13 rotate people across missions
+  nightHourRepeatCost             % 14 not the same night hour every night
 ];
 
 constraint forall(level in Levels where objectiveCap[level] >= 0)(
@@ -694,7 +789,8 @@ in `tests/solver.oracle.test.js` (§13) rather than kept beside the prototype.
 ### 4.6 Diagnostics the model outputs
 
 `seatsFilled`, `qualifiedSeatsFilled`, `nightRestMinutes`, `sleepsTarget`,
-`longRunsByEmployee`, `dutyMinutes`, `turnsTaken` and `shortestWaitMinutes`
+`longRunsByEmployee`, `dutyMinutes`, `turnsTaken`, `turnsOnMission`,
+`nightMinutesInWindow` and `shortestWaitMinutes`
 are outputs so the UI's findings are a *reading* of MiniZinc's answer.
 `SegmentDiagnostics` in `types.ts` is exactly these arrays, typed and
 dimension-checked.
@@ -897,7 +993,7 @@ sequenceDiagram
     UI->>S: request(r2)
     S->>S: abort r1, debounce
     S->>L: instance, index
-    loop levels 1..10 until unproved
+    loop levels 1..14 until unproved
         L->>R: run(rota-optimize, level, caps)
         R-->>L: status + last solution
     end
@@ -944,7 +1040,8 @@ function restMetricsFrom(accepted, index, draft): RestMetric[]
 // presentation figure beside the model's yes/no.
 
 function statsFrom(accepted, index, draft): Stats
-// perEmployee from dutyMinutes and turnsTaken; the shortest wait from the
+// perEmployee from dutyMinutes, nightMinutesInWindow and turnsTaken, with
+// the memory's night minutes beside them; the shortest wait from the
 // accepted quantities, never re-summed. The summary shows hours because
 // people ask, and the shortest wait and turns because that is what was
 // optimised; the spread of hours is not shown as if it were a goal.
@@ -1026,6 +1123,9 @@ rejected freezing on a timer.
 | `tests/solver.oracle.test.js`       | yes            | tiny exhaustive instances: brute force over the matrix agrees with the ladder on every level and on feasibility                                                                                                                                                                                                                                        |
 | `tests/solver.metamorphic.test.js`  | yes            | splitting a segment at an off-grid instant (no new legal handover) leaves feasibility and every quantity unchanged                                                                                                                                                                                                                                     |
 | `tests/solver.rotation.test.js`     | yes            | no chosen turn begins after a wait shorter than the reported `shortestWaitMinutes`; a guard whose hold ends at the horizon start takes no local slot while anyone with a longer wait is free; two people both eight hours rested are interchangeable for the wait and only turns separate them; the oracle agrees on the bottleneck for tiny instances |
+| `tests/solver.memory.test.js`       | no             | `readDutyMemory` over a log: idle minutes capped at eight hours; turns, night minutes and per-mission turns counted only inside `memoryDays`; a mission held inside its `repeatAfterDays` is in `heldWithinCooldown`; hour-of-day counts use the viewer's clock like `nightWindows` |
+| `tests/solver.cooldown.test.js`     | yes            | a person who held the kitchen inside its cooldown is not sent back while anyone else eligible is free; the cooldown yields to coverage when nobody else is free and the breach is reported                                                                               |
+| `tests/solver.variety.test.js`      | yes            | with two drivers and morning and night patrols, the driver who took the night patrol in the log takes the morning one; night minutes even out across people over the memory; the person the log shows at 01:00 every night is not chosen for 01:00 while an equal alternative exists |
 | `tests/solver.sleep.test.js`        | yes            | `sleepsTarget` is true exactly when an eight-hour off-duty window lies inside the night and the person's availability; on-call duty counts as sleep; a night the person is absent for is not counted; a driver's six-hour minimum is level 4 and never raises or lowers the target                                                                     |
 | `tests/solver.differential.test.js` | yes            | over the golden documents, while the engine is still authority: MiniZinc's levels 1 and 2 are never worse than the engine's; every accepted schedule passes `checkSchedule` as evidence, not authority                                                                                                                                                 |
 | `tests/solver.e2e.mjs`              | browser        | the shipped wasm path completes optimize and check; offline reload serves every asset from the precache; cancel then re-solve leaks no worker; a stale completion never replaces the shown schedule                                                                                                                                                    |
@@ -1063,7 +1163,12 @@ outcome, its quantities and a diff of assignments. Only step 6 flips
 |--------------------------|-------|------------------------------------------------------------------|
 | optimize, per level      | 20 s  | the Pixel's slowest measured level was 7.6 s                     |
 | check                    | 5 s   | a fixed instance propagates; anything longer is a model problem  |
-| whole ladder (10 levels) | 200 s | a hard bound, not an expectation; `unknown` is the honest answer |
+| whole ladder (14 levels) | 280 s | a hard bound, not an expectation; `unknown` is the honest answer |
+
+Fourteen solves per plan sounds worse than it is: the default window is now
+24 hours, a third of the 72-hour instance every figure in ADR 011 was
+measured on, and a level whose optimum is zero on the first incumbent proves
+in propagation. The sweep in §16 is where the real number gets measured.
 
 ## 16. One question the model answers that the engine could not
 
@@ -1082,10 +1187,9 @@ the shortest wait at each length. A measurement script like the others in
   goes next, and somebody back from a long mission joins the end of the
   queue. Refined by the owner: most plans are a day or less, and after a
   night's sleep it no longer matters when somebody last guarded. Modelled as
-  level 8 `waitDeficitMinutes` (the shortest wait before a chosen turn,
-  capped at the eight-hour target, maximised) with level 9 `turnSpread`
-  behind it, and `idleMinutesAtHorizonStart` plus the `lastDutyEnd` field so
-  a wait inside the last eight hours survives a roll (§2). The engine's
+  level 9 `waitDeficitMinutes` (the shortest wait before a chosen turn,
+  capped at the eight-hour target, maximised) with level 10 `turnSpread`
+  behind it, and `idleMinutesAtHorizonStart` read from the log (§2). The engine's
   slot-by-slot ring order is not reproduced, so the goldens change at step 6,
   which the owner has accepted (decision E). The bottleneck form is deliberate: it says "call nobody back inside
   eight hours sooner than the schedule forces" without inventing a target
@@ -1116,18 +1220,42 @@ the shortest wait at each length. A measurement script like the others in
 - **D. The carried-hours clamp, moot.** ADR 015 normalised and capped a
   guard's carried hours before they fed `balanced`'s fairness. With `balanced`
   retired (E) no hours feed fairness at all, so `carriedDebts` is not reused
-  and `carriedMinutes` is not read; what survives of ADR 015 is
-  `carriedStints`, which feeds `turnSpread`, and now `lastDutyEnd`.
+  and `carriedMinutes` is not read. ADR 015's carried totals existed only
+  because clearing deleted the rows they summarised; with no clear (F) the
+  log itself is the memory and the totals go too.
 - **E. `balanced` is retired; round robin is the only fairness rule.**
   Decided by the owner, together with setting aside backwards compatibility
   for everything but names and qualifications. The `strategy` field goes,
-  the model has one level 8 and one level 9, and the golden fixtures are
+  the model has one level 9 and one level 10, and the golden fixtures are
   regenerated once at step 6 from MiniZinc's accepted output (§13). The
   summary table keeps showing hours, because people ask, but nothing
   optimises them.
-- **F. Open: where `lastDutyEnd` is written.** §2 assumes `clearStalePins`
-  stamps it when it converts out-of-period pins into carried totals. If the
-  export-and-clear button is ever split from the roll, the stamp has to move
-  with the clear, not the export. With the eight-hour cap this field only
-  matters when history is cleared within eight hours of somebody's last duty;
-  if clearing always happens after a night, it can be dropped.
+- **F. Export, never clear.** Decided by the owner: there is no export-and-
+  clear button, only export. Logged duty stays in the document and is the
+  model's memory (§2), so `lastDutyEnd` and the carried totals are not
+  needed and are gone. The default window is 24 hours.
+- **G. A hated mission comes round once per rotation.** Decided by the
+  owner: kitchen duty and its like should fall to a person once per 7, 14 or
+  21 days. A mission carries `repeatAfterDays`; level 8
+  `cooldownBreachCount` counts every person sent back inside their cooldown,
+  above round robin because it decides who is eligible before the wait
+  decides who goes next. Soft, so a roster with nobody else free still gets
+  an answer and a reported breach.
+- **H. Mix people across missions and across night hours.** Decided by the
+  owner, as the last levels: nobody should always do the same mission when
+  they could rotate, drivers should swap the morning and night patrol, and
+  night is much harder than day so the same person must not always hold
+  01:00 while somebody else only ever holds 13:00. Three levels, in the order
+  the owner's emphasis suggests: 12 evens out night minutes over the memory,
+  13 charges a turn by how often the log already shows that person on that
+  mission, 14 charges a night segment by how often the log shows that person
+  beginning at that hour. The 24-hour window with an eight-hour rest target
+  is what gives these levels room: a night post and a day post can both be
+  taken inside one window by different people.
+- **I. Open: how long a link may get.** With nothing cleared, a document
+  holds `memoryDays` of logged duty, about 50,000 characters for ten hourly
+  seats over 21 days (§2). The browser copes; chat apps do not. The choices
+  are to accept it, to let rows older than `memoryDays` fall off the document
+  automatically after an export has been made, or to keep the log outside the
+  link (ADR 010 reserved that and found it unnecessary at 72 hours, which is
+  no longer the question).

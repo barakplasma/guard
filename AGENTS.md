@@ -30,6 +30,16 @@
 - Backwards compatibility of shared links matters only for employee names
   and qualifications. Everything else in the wire format may change under
   a schema version bump with a migration that keeps those two.
+- History is exported, never cleared: there is no clear button and no
+  automatic removal of logged duty. The log is the scheduler's memory.
+- The default planning window is 24 hours.
+- A hated mission such as kitchen duty falls to a person once per rotation
+  (7, 14 or 21 days, set per mission); this is its own priority level.
+- The last priority levels mix people up: nobody always does the same
+  mission when they could rotate (drivers swap morning and night patrol,
+  a person guards locally one day and goes on patrol the next), and night
+  duty, which is much harder than day, is evened out so the same person
+  does not always hold the same night hour.
 - Manual assignments must always win over automatic scheduling; show them with a lock icon. Automatically preserved elapsed assignments must use a distinct history icon and require an explicit correction before replacement.
 - Night rest is measured two ways inside the configured night hours: **total**
   rest (the configured per-qualification minimum is enforced and reported
