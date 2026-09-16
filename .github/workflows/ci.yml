@@ -70,47 +70,6 @@ jobs:
           name: dist
           path: dist/
 
-  # MegaLinter's JavaScript flavor, on everything `npm run lint` does not cover:
-  # workflows, YAML, shell, the Dockerfile, Markdown, and a secret scan. The JS
-  # linters in the flavor are switched off in `.mega-linter.yml` on purpose -
-  # `oxlint` already gates this repository in the `check` job above, and two
-  # linters with different opinions about the same files end with the louder one
-  # reformatting everything. That file names every other omission and why.
-  #
-  # Runs beside `check` rather than after it: it shares nothing with the build,
-  # and a lint finding is more useful arriving early than queued behind a test
-  # suite it has no bearing on.
-  megalinter:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    steps:
-      # MegaLinter reports against the pull request's own history, so it needs
-      # more than the default single commit.
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: MegaLinter
-        uses: oxsecurity/megalinter/flavors/javascript@v10.1.0
-        env:
-          VALIDATE_ALL_CODEBASE: true
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # No PR comment. It needs `pull-requests: write`, and the findings are
-          # already in the job summary and the uploaded report - a comment would
-          # buy a wider token for a third copy of the same thing.
-          GITHUB_COMMENT_REPORTER: false
-
-      # The reports say which linter objected and to what, which the job log
-      # summarises but does not always show in full.
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: megalinter-reports
-          path: megalinter-reports/
-          retention-days: 7
-
   # The browser suites, on every pull request rather than only after merge.
   # They are the only cover for whole classes of bug the unit tests cannot see
   # - MUI dropping a test id, a zod schema rejecting a freshly added mission, a

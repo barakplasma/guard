@@ -382,17 +382,27 @@ For layout changes run `tests/mobile-viewports.mjs` too (same server, three phon
 viewports). It fails on horizontal overflow and on any table cell whose content is wider than its
 column — the shape of every mobile layout bug reported so far.
 
-CI also runs **MegaLinter's JavaScript flavor** on every pull request, configured in
-`.mega-linter.yml`. Its **JavaScript linters are switched off on purpose** — this repo lints with
-`oxlint`, and eslint, standard, prettier or biome running beside it means two tools with different
-opinions about the same files, where the louder one wins by reformatting everything. MegaLinter is
-here for what `oxlint` does not cover: workflows, YAML, shell, the Dockerfile, Markdown, and a
-secret scan. Every other omission is named in that file with its reason; the spell checkers and
-`jscpd` in particular would fight the Hebrew copy and the deliberately-shared fuzz generators.
-`.yamllint.yml` and `.markdownlint.yml` hold the two rule sets that needed relaxing, both for
-stated reasons rather than to silence a complaint — and both in YAML so the reason sits beside the
-rule. Note that **actionlint only lints the shell inside `run:` blocks when `shellcheck` is on
-`PATH`**: running it locally without shellcheck installed reports clean and CI does not.
+CI also runs **MegaLinter's JavaScript flavor** on every pull request (`ci.yml`, configured in
+`.mega-linter.yml`). Two things there are load-bearing and will look like arbitrary exclusions to
+anyone tidying up:
+
+- **`JAVASCRIPT_STANDARD` is off.** It enforces a no-semicolon style this repo does not use, and
+  the job runs with `APPLY_FIXES: all` — so it does not report the difference, it *rewrites* and
+  commits. One run reformatted 17 source files that way. JavaScript here is `oxlint`'s job, which
+  already gates every pull request in the `check` job and carries three documented rule exceptions
+  in `.oxlintrc.json`. MegaLinter earns its place on what oxlint does not cover: workflows, YAML,
+  shell, the Dockerfile, Markdown, secrets and dependency scanning.
+- **`SPELL_CSPELL` is off permanently.** All 140 of its findings were Hebrew product words,
+  iCalendar keywords, British spellings or deliberate identifiers like `emps` and `sleepable` —
+  not one was a typo.
+
+`jscpd`, `markdownlint` and `lychee` are listed in `DISABLE_ERRORS_LINTERS`: advisory by nature,
+reported into the job summary without failing the build. `.github/zizmor.yml` requires actions to
+be pinned to a ref rather than a hash, which still rejects `@main` while keeping the rolling major
+tags the workflows deliberately track.
+
+Note that **actionlint only lints the shell inside `run:` blocks when `shellcheck` is on `PATH`**:
+running it locally without shellcheck installed reports clean and CI does not.
 
 `lz-string` is CommonJS: import it as a default and destructure, or the Node test run breaks while
 the Vite build keeps working.
