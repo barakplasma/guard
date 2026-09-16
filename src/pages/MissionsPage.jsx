@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import {
-  Autocomplete, Box, Button, Checkbox, Chip, FormControlLabel, IconButton,
+  Autocomplete, Box, Button, Checkbox, Chip, FormControlLabel, FormHelperText, IconButton,
   Paper, Stack, Switch, TextField, ToggleButton,
   ToggleButtonGroup, Tooltip, Typography,
 } from '@mui/material';
@@ -92,6 +92,24 @@ function MissionCard({ mission, doc, onChange, onRemove, onDuplicate, onAssign }
                 nullable fallbackValue={mission.count} testId={`mission-night-count-${mission.id}`}
                 onChange={(value) => onChange({ nightCount: value })} />
             </Tooltip>
+          )}
+
+          {/* Empty means "no rule", which is what every mission but the hated
+              one wants - so the field is nullable and shows blank rather than
+              a misleading zero. Offered on every type: a remote or daily
+              mission can be the hated one as easily as a local one. A cooldown
+              longer than the plan's memory cannot be observed, and says so
+              here rather than being clamped behind the user's back. */}
+          <Tooltip title={t.repeatAfterDaysHelp}>
+            <NumberField label={t.repeatAfterDays} value={mission.repeatAfterDays}
+              nullable min={1} max={90} step={1}
+              testId={`mission-repeat-days-${mission.id}`}
+              onChange={(value) => onChange({ repeatAfterDays: value })} />
+          </Tooltip>
+          {mission.repeatAfterDays != null && mission.repeatAfterDays > (doc.memoryDays ?? 21) && (
+            <FormHelperText data-testid={`mission-repeat-warning-${mission.id}`} sx={{ width: '100%' }}>
+              {t.cooldownBeyondMemory(mission.name, mission.repeatAfterDays, doc.memoryDays ?? 21)}
+            </FormHelperText>
           )}
 
           <Tooltip title={t.onCallHelp}>

@@ -22,3 +22,8 @@ mobile-screenshots/
 
 # MegaLinter writes here when run locally with mega-linter-runner.
 megalinter-reports/
+
+# MiniZinc's WebAssembly assets, copied out of node_modules by
+# scripts/copyMinizincAssets.mjs at prebuild/predev. Build output of a
+# dependency (19 MB of .wasm), not source.
+public/solver/

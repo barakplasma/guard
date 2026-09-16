@@ -782,19 +782,34 @@ export function acceptedPins(input) {
   return prepare(input).goodPins;
 }
 
-/** Normalization shared by `segmentGrid` and `acceptedPins`. */
+/**
+ * The same normalization, with the findings it raised.
+ *
+ * `segmentGrid` and `acceptedPins` answer structural questions and throw their
+ * warnings away, because `plan()` is where findings belong. The solver
+ * adapter (`src/solver/prepare.ts`) is a third caller that needs both halves:
+ * it *is* the thing that reports findings on that path, and re-deriving
+ * "which pin was dropped and why" outside this file is exactly the second
+ * implementation the two exports above exist to prevent.
+ */
+export function normalizedInput(input) {
+  const { emps, miss, goodPins, warnings } = prepare(input);
+  return { employees: emps, missions: miss, pins: goodPins, warnings };
+}
+
+/** Normalization shared by `segmentGrid`, `acceptedPins` and `normalizedInput`. */
 function prepare({
   start, end, employees = [], missions = [], pins = [], nightWindows = [],
 }) {
-  // Warnings raised here are discarded: these answer structural questions, and
-  // `plan()` is where findings belong.
+  // Warnings are collected rather than dropped so `normalizedInput` can hand
+  // them on; `segmentGrid` and `acceptedPins` still ignore them.
   const warnings = [];
   const emps = normalizeEmployees(employees, start, end, warnings);
   const miss = normalizeMissions(missions, start, end, warnings);
   const employeeById = new Map(emps.map((e) => [e.id, e]));
   const missionById = new Map(miss.map((m) => [m.id, m]));
   const goodPins = normalizePins(pins, employeeById, missionById, start, end, warnings, nightWindows);
-  return { emps, miss, goodPins };
+  return { emps, miss, goodPins, warnings };
 }
 
 function planOnce({

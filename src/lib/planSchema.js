@@ -83,6 +83,13 @@ export const missionSchema = z.object({
   // night-rest requirement instead of breaking it. Absent from every link
   // written before this field existed, which reads as plain duty.
   onCall: z.boolean().default(false),
+  // The once-per-rotation rule: a mission everybody hates - kitchen duty is
+  // the case the owner named - should fall to a person once every 7, 14 or 21
+  // days rather than whenever the queue happens to reach them. `null` is "no
+  // rule", which is what every other mission wants and what every link written
+  // before this field existed means. Offered on every mission type: a remote or
+  // daily mission can be the hated one as easily as a local one.
+  repeatAfterDays: z.number().int().min(1).max(90).nullable().default(null),
 });
 
 /**
@@ -139,6 +146,13 @@ export const planSchema = z.object({
   // carrying a `nightCount`, these two decide nothing at all.
   nightStart: minuteOfDay.default(DEFAULT_NIGHT_START),
   nightEnd: minuteOfDay.default(DEFAULT_NIGHT_END),
+  // How far back logged duty still counts. The log is the scheduler's memory -
+  // there is no clear button and no carried totals - so this is the one number
+  // that says how much of it is read: whose turn it is, night duty evened out,
+  // mission rotation and the once-per-rotation rule above. A plan-level field
+  // with a default, so links written before it existed parse and keep their
+  // meaning (CLAUDE.md: no version bump for one of these).
+  memoryDays: z.number().int().min(1).max(90).default(21),
   employees: z.array(employeeSchema).default([]),
   missions: z.array(missionSchema).default([]),
   pins: z.array(pinSchema).default([]),
@@ -323,6 +337,10 @@ export function toPlannerInput(doc, now) {
       shiftMinutes: m.shiftMinutes ?? undefined,
       nightShiftMinutes: m.nightShiftMinutes ?? undefined,
       onCall: m.onCall,
+      // `repeatAfterDays` and `memoryDays` are deliberately not passed: the
+      // engine has no notion of a cooldown or of a memory horizon, and a field
+      // that reaches it inert is worse than one that never does. The solver
+      // path reads them straight off the document in `src/solver/prepare.ts`.
       ...(m.type === 'daily' ? { occurrences: dailyOccurrences(doc, m) } : {}),
     })),
     pins: doc.pins.map((p) => ({
