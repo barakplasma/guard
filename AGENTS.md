@@ -14,6 +14,37 @@
   preserved and clearly report actual rest shortfalls.
 - Resolve daily wall-clock times in the viewer's timezone, matching night windows.
 - Schedule work continues on `main`; the old PR #28 branch is gone.
+- The `rotation` strategy means round robin by longest wait, not equal
+  hours: whoever has waited longest since their last duty goes next, and
+  somebody back from a long mission joins the end of the queue for local
+  missions. Nobody wants equal hours. The wait only matters until a night's
+  sleep: after one it makes no difference when someone last guarded, and
+  most schedules are 24 hours or less.
+- Eight hours off is the rest target to optimise for, across as many
+  people as possible. Six total hours is a strongly suggested minimum for
+  drivers, which the user may accept in a big pinch; it is reported, never
+  a veto. Night shift length is a lever the owner may vary to get more
+  people to eight hours.
+- `balanced` (equal hours) is retired; round robin by longest wait is the
+  only fairness rule, and the `strategy` setting goes with it.
+- Backwards compatibility of shared links matters only for employee names
+  and qualifications. Everything else in the wire format may change under
+  a schema version bump with a migration that keeps those two.
+- History is exported, never cleared: there is no clear button and no
+  automatic removal of logged duty. The log is the scheduler's memory.
+- The default planning window is 24 hours.
+- A hated mission such as kitchen duty falls to a person once per rotation
+  (7, 14 or 21 days, set per mission); this is its own priority level.
+- How many days of past duty the scheduler remembers (21 by default) is a
+  plan setting the user edits in the UI, like the per-mission rotation days.
+- The last priority levels mix people up: nobody always does the same
+  mission when they could rotate (drivers swap morning and night patrol,
+  a person guards locally one day and goes on patrol the next), and night
+  duty, which is much harder than day, is evened out so the same person
+  does not always hold the same night hour.
+- The link lives in the URL fragment and its size is the document's limit.
+  When a plan would not fit, the oldest logged shifts drop first (FIFO);
+  nothing else trims the log.
 - Manual assignments must always win over automatic scheduling; show them with a lock icon. Automatically preserved elapsed assignments must use a distinct history icon and require an explicit correction before replacement.
 - Night rest is measured two ways inside the configured night hours: **total**
   rest (the configured per-qualification minimum is enforced and reported

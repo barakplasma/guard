@@ -6,6 +6,8 @@
 - Date: 2026-09-16
 - Extends: ADR 009 (accepted history), ADR 011 (MiniZinc), ADR 012 (rolling
   horizon), and ADR 015 (carried duty).
+- Implementation design, to the class and function level:
+  [`docs/minizinc-implementation-design.md`](../minizinc-implementation-design.md).
 
 ## Context
 
