@@ -26,14 +26,22 @@ without the extensions retain their previous encoding.
 | mission  | 12       | excluded tag ids                              | []                                 |
 | mission  | 13       | on-call flag                                  | absent; `1` when on-call           |
 | mission  | 14       | excluded employee ids                         | []                                 |
+| mission  | 15       | once-per-rotation days (`repeatAfterDays`)    | absent; written only when set      |
 | employee | 4        | qualification ids                             | []                                 |
 | employee | 5–6      | carried duty minutes, carried stints          | absent; written only when non-zero |
 | pin      | 0–4      | missionId, employeeId, start, end, frozen     | existing conventions               |
 | pin      | 5        | history record                                | absent until the pin is a record   |
 | plan     | key `tg` | qualification definitions                     | omitted                            |
+| plan     | key `md` | how far back the log counts (`memoryDays`)    | omitted; the schema default is 21  |
 
 Mission types encode as local `0`, remote `1`, and daily `2`. Future extension
 fields must follow these reservations.
+
+A *plan-level* field is a new short key with a schema default rather than a
+version bump, and `memoryDays` is the second worked example after `strategy`:
+a link written before it existed carries no `md`, parses, and keeps its old
+meaning. It is written only when it differs from that default, so those links
+keep their exact bytes as well.
 
 The pin's history record is one nested array at position 5 — employee name,
 mission name, mission type code, qualification ids — rather than four appended

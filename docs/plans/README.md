@@ -23,7 +23,7 @@ pending implementation plans.
 | [014](14-exclusions-and-flexibility.md)          | Exclude individuals; keep scarce people free. *(First half implemented)*   |
 | [015](15-fairness-across-rolls.md)               | Duty does not stop counting when the window rolls past it. *(Implemented)* |
 | [016](16-unbroken-runs.md)                       | Nobody stands more than six hours if anyone else is free. *(Implemented)*  |
-| [017](17-illegal-states-and-solver-boundaries.md)| Typed boundaries; MiniZinc owns optimization and legality. *(Accepted)*     |
+| [017](17-illegal-states-and-solver-boundaries.md)| Typed boundaries; MiniZinc owns optimization and legality. *(Steps 1, 3-5 built)* |
 
 ## How these fit together
 
@@ -42,9 +42,9 @@ flowchart TB
         A010["010 · the plan stays in the URL<br/><i>it was already in the fragment</i>"]
     end
 
-    subgraph open ["Accepted, implementation open"]
+    subgraph open ["Accepted, being built"]
         A011["011 · MiniZinc on HiGHS<br/><i>prototyped and measured</i>"]
-        A017["017 · typed boundaries<br/>MiniZinc owns legality"]
+        A017["017 · typed boundaries<br/>MiniZinc owns legality<br/><i>runs beside the engine</i>"]
     end
 
     subgraph frame ["Operating model"]

@@ -9,6 +9,17 @@ import {
 } from '../solver/session.ts';
 
 /**
+ * Where the worker's own assets live.
+ *
+ * Absolute, not relative. The worker reaches these through `importScripts`,
+ * which has no document to be relative *to*: a `./` path is simply rejected as
+ * an invalid URL, and the failure arrives as a worker-side SyntaxError that
+ * leaves the page saying "solving" forever. `document.baseURI` is what the
+ * build's `base` setting means, resolved.
+ */
+const solverAsset = (name) => new URL(`solver/${name}`, document.baseURI).href;
+
+/**
  * The MiniZinc path, beside the engine rather than instead of it.
  *
  * ADR 017's migration order is explicit that there is no step where two
@@ -41,12 +52,16 @@ export default function useScheduleSession(doc, enabled, now) {
 
   const ensureSession = useCallback(() => {
     if (!sessionRef.current) {
-      const base = import.meta.env.BASE_URL ?? './';
+      // See `solverAsset`: absolute, not relative. The worker resolves these with
+      // `importScripts`, which has no document to be relative *to*: a `./`
+      // path is simply rejected as an invalid URL, and the failure arrives as
+      // a worker-side SyntaxError that leaves the page saying "solving"
+      // forever. `document.baseURI` is what the build's `base` setting means.
       sessionRef.current = new SolveSession({
         runner: new BrowserRunner({
-          workerURL: `${base}solver/minizinc-worker.js`,
-          wasmURL: `${base}solver/minizinc.wasm`,
-          dataURL: `${base}solver/minizinc.data`,
+          workerURL: solverAsset('minizinc-worker.js'),
+          wasmURL: solverAsset('minizinc.wasm'),
+          dataURL: solverAsset('minizinc.data'),
         }, MODEL_SOURCES),
         timeLimitMsPerLevel: DEFAULT_LEVEL_TIME_LIMIT_MS,
         checkTimeLimitMs: DEFAULT_CHECK_TIME_LIMIT_MS,

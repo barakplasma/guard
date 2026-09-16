@@ -381,8 +381,8 @@ export function prepareProblem(draft: Draft, clock: { now: number }): PreparedPr
    * person writes everything else.
    */
   const commitments: Commitment[] = normalized.pins.map((pin: Draft) => ({
-    employeeId: pin.employee.id as EmployeeId,
-    missionId: pin.mission.id as MissionId,
+    employeeId: pin.employeeId as EmployeeId,
+    missionId: pin.missionId as MissionId,
     coverage: interval(pin.start, pin.end),
     provenance: pin.frozen ? 'logged' as const : 'manual' as const,
   }));

@@ -60,9 +60,24 @@ npm run dev
 
 ```sh
 npm run lint
+npm run typecheck
 npm test
 npm run build
 npm run preview
+```
+
+`npm run typecheck` covers `src/solver/`, which is TypeScript. Nothing else
+checks it: Vite and `node --test` both *strip* the types rather than verifying
+them.
+
+`npm test` skips the tests that need a real solver unless a `minizinc` binary
+is on `PATH`. They report *skipped*, not passed. To run them, install the
+[bundled release](https://github.com/MiniZinc/MiniZincIDE/releases) (2.9.3 is
+what CI uses) and either put its `bin/` on `PATH` or set `MINIZINC` to the
+binary:
+
+```sh
+MINIZINC=/opt/minizinc/bin/minizinc npm test
 ```
 
 The production output is `dist/`. Serve it over HTTP(S) using a static file server;
@@ -91,7 +106,19 @@ BASE=http://127.0.0.1:4173 node tests/mui-controls.e2e.mjs
 BASE=http://127.0.0.1:4173 node tests/mui-pickers.e2e.mjs
 BASE=http://127.0.0.1:4173 node tests/short-shifts.e2e.mjs
 BASE=http://127.0.0.1:4173 node tests/assignment-badges.e2e.mjs
+BASE=http://127.0.0.1:4173 node tests/carried-duty.e2e.mjs
+BASE=http://127.0.0.1:4173 node tests/memory-settings.e2e.mjs
+BASE=http://127.0.0.1:4173 node tests/urlState.fifo.e2e.mjs
+BASE=http://127.0.0.1:4173 node tests/solver.e2e.mjs
 ```
+
+`tests/solver.e2e.mjs` is the only place the *shipped* solver is exercised: the
+WebAssembly build, the precached assets and the offline reload. Everything else
+about the model runs against a native binary, which proves the model and proves
+nothing about the thing users run. `tests/urlState.fifo.e2e.mjs` is what makes
+`FRAGMENT_LIMIT` a measured number rather than a guess, and both it and
+`tests/memory-settings.e2e.mjs` should be run on the Pixel 10 before the
+constant or the controls are trusted.
 
 Set `CHROME=/usr/bin/chromium` to use an installed browser instead. The suites
 cover sharing, offline reload, manual assignments, mobile overflow, daily duties,

@@ -1,10 +1,16 @@
 # MiniZinc implementation design for ADR 017
 
-- Status: **Design only, nothing implemented.** Resolves ADR 017's decision to
-  the class and function level for the MiniZinc path: migration steps 3 to 6,
-  plus the slice of step 1 the solver needs. History as its own domain value
-  (step 2) is named where the solver touches it and otherwise left to its own
-  design.
+- Status: **Steps 1, 3, 4 and 5 are implemented; step 6 is not.** Every module
+  below exists in `src/solver/`, the model is in `src/solver/model/`, and the
+  ladder runs beside the engine behind the debug section's toggle. The engine
+  in `planner.js` is still the production authority: `acceptSchedule` has not
+  been flipped, and no golden fixture has been regenerated. See **What changed
+  on contact with a solver** below for the places the implementation departs
+  from this document.
+- Resolves ADR 017's decision to the class and function level for the MiniZinc
+  path: migration steps 3 to 6, plus the slice of step 1 the solver needs.
+  History as its own domain value (step 2) is named where the solver touches it
+  and otherwise left to its own design.
 - Date: 2026-09-16
 - Reads with: ADR 011 (the model and its measurements), ADR 017 (the
   boundaries), `prototype/minizinc/README.md` (what has been measured).
@@ -1383,3 +1389,59 @@ already covers what `readDutyMemory` does with `memoryDays`.
   shifts drop off. `fitPlanToFragment` in §17, called from `setDoc`. The
   memory the model reads is therefore bounded by `memoryDays` or by what
   fits, whichever is shorter, and the export is the durable record.
+
+## What changed on contact with a solver
+
+Six places where the implementation departs from the design above. None of them
+changes a decision; all of them are things the design could not have known
+without running the thing.
+
+- **`:: add_to_output`, not `:: output`.** The annotation that puts a *defined*
+  variable into `--output-mode json`'s output is `add_to_output`. With no
+  annotation at all MiniZinc prints only the undefined top-level variables, so
+  the first run came back with the assignment matrix and nothing else.
+  `tests/solver.model.test.js` asserts every quantity the schema expects
+  carries it.
+
+- **`shortestWaitMinutes` is a `min`, not a variable bounded from above.** The
+  design declares it `var 0..TARGET_REST_MINUTES` and constrains every chosen
+  turn to be at least it. That is right for optimize mode, where it is being
+  maximised, and empty in check mode: fixing the assignment leaves the variable
+  free to take any value below the true minimum, so the objective comparison
+  that catches "the model computed something other than it reported" would have
+  compared against nothing. Written as a `min` it is determined by the
+  assignment in both modes.
+
+- **A satisfaction run prints no status line.** `--json-stream` emits a status
+  for an optimum, for unsatisfiable and for a time limit, and nothing at all
+  for "here is an answer". Check mode is exactly that shape, so
+  `parseJsonStream` reads a solution with no status as `SATISFIED`.
+
+- **The core is added with `use: false` in the browser.** `Model.addFile`
+  treats a `.mzn` file as a model to compile unless told otherwise, so adding
+  the core *and* letting the entry file `include` it compiled every declaration
+  twice. The native runner never hit this: it passes the entry file on the
+  command line and MiniZinc resolves the include off disk.
+
+- **The worker's asset URLs must be absolute.** The worker reaches them through
+  `importScripts`, which has no document to be relative to; a `./` path is
+  rejected as an invalid URL. Worse, the rejection arrived as a worker-side
+  `SyntaxError` that never settled the promise the package had handed out, so
+  the page said "solving" forever. `BrowserRunner` now also carries a watchdog
+  (`WATCHDOG_GRACE_MS` past the run's own limit) so a worker that dies without
+  settling becomes a `failed` outcome rather than a permanent spinner.
+
+- **The revision is a synchronous digest, not SHA-256.** `prepareProblem` runs
+  on the render path and has to return a finished value; `crypto.subtle.digest`
+  is a promise in the browser, and awaiting it would make every consumer async
+  for a token that is an identity rather than a security boundary. `revision.ts`
+  is a 128-bit FNV-1a over a canonical serialization. `revisionOf` in
+  `session.ts` is the same question asked one layer down, over the compiled
+  instance.
+
+Two smaller ones: `planner.js` gained an export, `normalizedInput`, so the
+adapter reads the findings the existing normalization already raised instead of
+deriving them a second time; and the differential suite runs over documents
+*shaped* after the golden ones rather than the golden ones themselves, because
+fourteen proved levels over a 163-segment week is a measurement exercise rather
+than a unit test.

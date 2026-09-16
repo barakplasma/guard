@@ -40,6 +40,13 @@ export interface ModelSources {
   readonly check: string;
 }
 
+/**
+ * How long past its own time limit a run may go before the runner gives up on
+ * it. Generous: a cold WebAssembly start on a phone is seconds of work before
+ * the solver's clock starts.
+ */
+export const WATCHDOG_GRACE_MS = 60_000;
+
 export const SOLVER_OPTIONS = {
   solver: 'highs',
   'output-mode': 'json',
@@ -104,7 +111,11 @@ export class BrowserRunner implements MiniZincRunner {
     if (signal.aborted) return { kind: 'cancelled' };
 
     const model = new MiniZinc.Model();
-    model.addFile('rota-core.mzn', this.#sources.core);
+    // `use: false` on the core: it is a file the entry's `include` resolves,
+    // not a model in its own right. Passed as a model file it is compiled
+    // twice - once on its own and once through the include - and every
+    // declaration in it collides with itself.
+    model.addFile('rota-core.mzn', this.#sources.core, false);
     model.addFile(request.entry, entrySource(this.#sources, request.entry));
     model.addJson(request.data);
 
@@ -125,7 +136,21 @@ export class BrowserRunner implements MiniZincRunner {
         lastSolution = (solution as { output?: { json?: unknown } }).output?.json ?? null;
       });
       progress.on('error', (error) => { errorDetail = String((error as { message?: string }).message ?? error); });
-      const result = await progress;
+      // A watchdog, because a worker that dies on its own does not always
+      // settle the promise it handed out - a bad asset URL throws inside
+      // `importScripts` and nothing ever resolves, which the page renders as
+      // "solving" forever. The solver has its own time limit; this only fires
+      // well past it, and it fires as a failure rather than as an answer.
+      const result = await Promise.race([
+        progress,
+        new Promise<never>((_, reject) => {
+          const timer = setTimeout(
+            () => reject(new Error(`the solver did not answer within ${request.timeLimitMs + WATCHDOG_GRACE_MS}ms`)),
+            request.timeLimitMs + WATCHDOG_GRACE_MS,
+          );
+          void Promise.resolve(progress).finally(() => clearTimeout(timer));
+        }),
+      ]);
       // A cancelled progress resolves as cancelled whatever status the package
       // reports afterwards: the answer was never wanted.
       if (cancelled || signal.aborted) return { kind: 'cancelled' };
