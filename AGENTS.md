@@ -17,7 +17,9 @@
 - The `rotation` strategy means round robin by longest wait, not equal
   hours: whoever has waited longest since their last duty goes next, and
   somebody back from a long mission joins the end of the queue for local
-  missions. Nobody wants equal hours.
+  missions. Nobody wants equal hours. The wait only matters for six hours:
+  after a six-hour night sleep it makes no difference when someone last
+  guarded, and most schedules are 24 hours or less.
 - Six hours of continuous night sleep is a metric to maximise across as
   many people as possible, never an enforced minimum. Night shift length
   is a lever the owner may vary to get more people to six hours.

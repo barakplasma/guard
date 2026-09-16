@@ -186,16 +186,18 @@ exists:
 | `resolveCommitments(draft)`    | `acceptedPins` (planner.js)                            | provenance; issues `pin-conflict`, `pin-overflow`, `pin-unavailable`, `pin-availability-overridden`                     |
 | `resolveCarriedDuty(draft)`    | `carriedDebts` (planner.js, to be exported)            | nothing                                                                                                                 |
 | `countStaleCommitments(draft)` | `isOutOfPeriod`, `isElapsedBeforePeriod`               | issue `pin-out-of-period` with `count` and `elapsed`                                                                    |
-| `resolveIdleAtStart(draft)`    | `isElapsedBeforePeriod`, `resolvePinWindow`            | minutes from the latest elapsed commitment's end to the horizon start, else from `lastDutyEnd`, else the horizon length |
+| `resolveIdleAtStart(draft)`    | `isElapsedBeforePeriod`, `resolvePinWindow`            | minutes from the latest elapsed commitment's end to the horizon start, else from `lastDutyEnd`, capped at six hours (`FULL_REST_MINUTES`) |
 
-`resolveIdleAtStart` is what lets round robin survive a roll (decision A).
-Once a rolled-past window is exported and cleared, the out-of-period pins
-that said when somebody last stood post are gone, and a guard back from a
-long remote mission would read as fully rested. So the employee carries
-`lastDutyEnd`, an instant, alongside `carriedMinutes` and `carriedStints`,
-written by `clearStalePins` at the same moment and only when set, at the
-next free employee tuple position in ADR 006's table. It is the same shape
-of fix ADR 015 made for hours, applied to the one number a wait needs.
+`resolveIdleAtStart` is what lets round robin survive a roll (decision A),
+and the cap is what keeps it small. The owner's rule is that after six hours
+off it no longer matters when somebody last stood post, so a wait is only
+ever a number between zero and six hours, and the only history that can
+affect it is a duty that ended inside the six hours before the horizon
+starts. Out-of-period pins still in the document carry that. Once they have
+been exported and cleared, the employee's `lastDutyEnd`, an instant written by
+`clearStalePins` at the same moment as `carriedMinutes` and only when set, at
+the next free employee tuple position in ADR 006's table, carries it instead.
+A `lastDutyEnd` more than six hours before the horizon is ignored.
 
 `PreparationIssue` is a discriminated union keyed on `code`, with the same
 codes and fields the engine's warnings carry today, so `findings.js` renders
@@ -264,8 +266,9 @@ function enumerateSleepWindows(segments, nightOfSegment, minutes = SIX_HOURS): {
 function deriveSymmetryClasses(instance): number[]
 // Same rule as prototype/minizinc/solve.mjs::symClasses, on the new arrays:
 // identical availability row, allowed row, qualification column, carried
-// minutes, stints, idle time at the start and rest requirement, and no
-// commitment anywhere. 0 = singleton.
+// minutes, stints, capped idle time at the start and rest requirement, and no
+// commitment anywhere. 0 = singleton. The cap makes most of a rested roster
+// identical at the start, which is exactly when symmetry breaking pays.
 
 function instanceToJsonData(instance, ladder: LadderParams): object
 // The object handed to Model.addJson. Nested arrays for 2-D parameters;
@@ -329,7 +332,7 @@ array[Employees, Segments] of bool: isAvailable;
 array[Employees, Missions] of bool: isAllowed;   % not excluded by tag or name
 array[Employees] of int: carriedDutyMinutes;     % normalized, clamped (ADR 015)
 array[Employees] of int: carriedStints;
-array[Employees] of int: idleMinutesAtHorizonStart; % since the last logged duty
+array[Employees] of int: idleMinutesAtHorizonStart; % since the last logged duty, capped
 array[Employees] of int: requiredNightRestMinutes; % 0 = no requirement
 array[Employees] of int: symmetryClass;          % 0 = nobody else is like me
 
@@ -543,18 +546,25 @@ var 0..horizonMinutes + maxCarriedMinutes: dutyMinutesSpread :: output =
 % one slot at a time: the shortest wait before any turn the solver chose is as
 % long as it can be. A committed cell is not the solver's choice, so the wait
 % before it is not scored.
-int: maxIdleAtStart = max([0] ++ idleMinutesAtHorizonStart);
-int: longestPossibleWait = horizonMinutes + maxIdleAtStart;
+%
+% A wait is capped at six hours. After a night's sleep it no longer matters
+% when somebody last stood post (the owner's words), and most plans are a day
+% or less, so the queue only has to remember the last six hours. Any six hours
+% off counts, not only a night: on a horizon this short a six-hour break is a
+% night's sleep in practice, and the cap keeps every domain here small.
+int: FULL_REST_MINUTES = 360;
 
-% Minutes off duty running up to each segment: the idle time at the horizon
-% start, then a stretch that resets to zero after every on-duty segment.
-array[Employees, Segments] of var 0..longestPossibleWait: idleMinutesBefore;
+% Minutes off duty running up to each segment, capped: the idle time at the
+% horizon start, then a stretch that resets to zero after every on-duty
+% segment and stops growing at the cap.
+array[Employees, Segments] of var 0..FULL_REST_MINUTES: idleMinutesBefore;
 constraint forall(employee in Employees)(
-  idleMinutesBefore[employee, 1] == idleMinutesAtHorizonStart[employee]);
+  idleMinutesBefore[employee, 1] == min(FULL_REST_MINUTES, idleMinutesAtHorizonStart[employee]));
 constraint forall(employee in Employees, segment in 2..segmentCount)(
   idleMinutesBefore[employee, segment] ==
-    (1 - isOnDuty[employee, segment - 1])
-      * (idleMinutesBefore[employee, segment - 1] + segmentMinutes[segment - 1]));
+    min(FULL_REST_MINUTES,
+        (1 - isOnDuty[employee, segment - 1])
+          * (idleMinutesBefore[employee, segment - 1] + segmentMinutes[segment - 1])));
 
 array[Employees, Segments] of var bool: startsChosenTurn =
   array2d(Employees, Segments, [
@@ -563,12 +573,13 @@ array[Employees, Segments] of var bool: startsChosenTurn =
     /\ not isPinnedCell[employee, segment]
     | employee in Employees, segment in Segments ]);
 
-var 0..longestPossibleWait: shortestWaitMinutes :: output;
+var 0..FULL_REST_MINUTES: shortestWaitMinutes :: output;
 constraint forall(employee in Employees, segment in Segments)(
   startsChosenTurn[employee, segment] -> shortestWaitMinutes <= idleMinutesBefore[employee, segment]);
-% Minimised, so the wait is maximised. With no chosen turn at all the domain
-% top is the answer and the level is trivially proved.
-var 0..longestPossibleWait: waitDeficitMinutes :: output = longestPossibleWait - shortestWaitMinutes;
+% Minimised, so the wait is maximised. Zero means everyone the solver chose
+% had six hours off first; from there the queue is turns alone (level 9).
+% With no chosen turn at all the level is trivially proved.
+var 0..FULL_REST_MINUTES: waitDeficitMinutes :: output = FULL_REST_MINUTES - shortestWaitMinutes;
 
 var int: fairnessObjective = if fairnessMode == 1 then waitDeficitMinutes else dutyMinutesSpread endif;
 
@@ -1008,7 +1019,7 @@ rejected freezing on a timer.
 | `tests/solver.model.test.js`        | yes            | `MODEL_VERSION` in TypeScript equals the model's; both entry files compile (`model.check()`)                                                                                                                                                                                   |
 | `tests/solver.oracle.test.js`       | yes            | tiny exhaustive instances: brute force over the matrix agrees with the ladder on every level and on feasibility                                                                                                                                                                |
 | `tests/solver.metamorphic.test.js`  | yes            | splitting a segment at an off-grid instant (no new legal handover) leaves feasibility and every quantity unchanged                                                                                                                                                             |
-| `tests/solver.rotation.test.js`     | yes            | under `fairnessMode = 1`: no chosen turn begins after a wait shorter than the reported `shortestWaitMinutes`; a guard whose hold ends at the horizon start takes no local slot while anyone with a longer wait is free; the oracle agrees on the bottleneck for tiny instances |
+| `tests/solver.rotation.test.js`     | yes            | under `fairnessMode = 1`: no chosen turn begins after a wait shorter than the reported `shortestWaitMinutes`; a guard whose hold ends at the horizon start takes no local slot while anyone with a longer wait is free; two people both six hours rested are interchangeable for the wait and only turns separate them; the oracle agrees on the bottleneck for tiny instances |
 | `tests/solver.sleep.test.js`        | yes            | `sleepsSixHours` is true exactly when a six-hour off-duty window lies inside the night and the person's availability; on-call duty counts as sleep; a night the person is absent for is not counted                                                                            |
 | `tests/solver.differential.test.js` | yes            | over the golden documents: MiniZinc's levels 1 and 2 are never worse than the engine's; every accepted schedule passes `checkSchedule` as evidence, not authority                                                                                                              |
 | `tests/solver.e2e.mjs`              | browser        | the shipped wasm path completes optimize and check; offline reload serves every asset from the precache; cancel then re-solve leaks no worker; a stale completion never replaces the shown schedule                                                                            |
@@ -1058,15 +1069,19 @@ the shortest wait at each length. A measurement script like the others in
 - **A. `rotation` is round robin by longest wait.** Decided by the owner:
   nobody wants equal hours; whoever has waited longest since their last duty
   goes next, and somebody back from a long mission joins the end of the
-  queue. Modelled as level 8 `waitDeficitMinutes` (the bottleneck wait,
-  maximised) with level 9 `turnSpread` behind it, and `idleMinutesAtHorizonStart`
-  plus the `lastDutyEnd` field so the wait survives a roll (§2). The engine's
-  slot-by-slot ring order is not reproduced, so rotation goldens change at
-  step 6. The bottleneck form is deliberate: it says "call nobody back sooner
-  than the schedule forces" without inventing a target gap, and it is what a
-  linear relaxation proves quickly. If it turns out too coarse in the
-  differential run, the recorded alternative is the sum of waits below the
-  bottleneck as a level 9 of its own.
+  queue. Refined by the owner: most plans are a day or less, and after a
+  six-hour night's sleep it no longer matters when somebody last guarded.
+  Modelled as level 8 `waitDeficitMinutes` (the shortest wait before a chosen
+  turn, capped at six hours, maximised) with level 9 `turnSpread` behind it,
+  and `idleMinutesAtHorizonStart` plus the `lastDutyEnd` field so a wait
+  inside the last six hours survives a roll (§2). The engine's slot-by-slot
+  ring order is not reproduced, so rotation goldens change at step 6. The
+  bottleneck form is deliberate: it says "call nobody back inside six hours
+  sooner than the schedule forces" without inventing a target gap, and the
+  cap makes it a small-domain quantity a linear relaxation proves quickly.
+  The recorded simplification is that any six hours off counts as the night's
+  sleep; if a day-time six-hour break should count for less, the cap becomes
+  a per-night window like level 6's.
 - **B. Six hours of sleep is maximised, for everyone.** Decided by the
   owner: as many people as possible should get six hours. Modelled as level 6
   `nightsWithoutSixHourSleep`, counted over every person present for the
@@ -1098,4 +1113,6 @@ the shortest wait at each length. A measurement script like the others in
 - **F. Open: where `lastDutyEnd` is written.** §2 assumes `clearStalePins`
   stamps it when it converts out-of-period pins into carried totals. If the
   export-and-clear button is ever split from the roll, the stamp has to move
-  with the clear, not the export.
+  with the clear, not the export. With the six-hour cap this field only
+  matters when history is cleared within six hours of somebody's last duty;
+  if clearing always happens after a night, it can be dropped.
