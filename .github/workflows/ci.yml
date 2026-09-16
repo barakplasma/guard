@@ -24,8 +24,6 @@ jobs:
         uses: oxsecurity/megalinter/flavors/javascript@v10
         env:
           APPLY_FIXES: all
-          DISABLE_LINTERS: ACTION_ZIZMOR
-          ENABLE: ACTION,JAVASCRIPT,JSON,JSX,TSX,TYPESCRIPT,YAML
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_COMMENT_REPORTER: false
           VALIDATE_ALL_CODEBASE: false
