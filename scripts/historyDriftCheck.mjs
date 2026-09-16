@@ -30,7 +30,15 @@
 
 import { plan } from '../src/lib/planner.js';
 import { toPlannerInput, planSchema, prunePins } from '../src/lib/planSchema.js';
-import { freezeElapsedBeforeEdit } from '../src/lib/pins.js';
+import { acceptSchedule, captureHistory, freezeElapsedBeforeEdit } from '../src/lib/pins.js';
+
+/**
+ * The app's own path, spelled out: accept a schedule for `prev`, then freeze
+ * elapsed rows out of *that* result. `freezeElapsedBeforeEdit` no longer solves
+ * for itself, so every caller has to say which answer it is recording.
+ */
+const freezeBefore = (prev, next, now) => freezeElapsedBeforeEdit(prev, next, now, acceptSchedule(prev, now).result);
+
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
@@ -49,7 +57,7 @@ const doc = planSchema.parse({
 
 /** Exactly what PlanContext.setDoc does, with the clock held still. */
 const setDoc = (prev, next) => planSchema.parse(
-  prunePins(freezeElapsedBeforeEdit(prev, next, NOW)),
+  prunePins(captureHistory(prev, freezeBefore(prev, next, NOW))),
 );
 
 /** Past slot -> the set of people recorded on it. A slot can hold several. */

@@ -406,18 +406,26 @@ baseline  821MB    821MB     +0MB   (page loaded, MiniZinc never initialised)
 
 It does **not** grow with the horizon - 6 hours and 72 hours cost the same
 within noise - so this is the price of having MiniZinc loaded, not of the plan
-being long, and rolling the window forward does not make it worse. But it is
+being long, and rolling the window forward does not make it worse. It is
 250-400MB, and the baseline row says essentially all of it is MiniZinc rather
-than Chromium. A background tab holding a third of a gigabyte is a tab Android
-may reclaim. This record's "configure one worker initially" now has a number
-behind it, and that number is the strongest argument yet for keeping the
-hand-written engine as the thing that renders a shared link.
+than Chromium.
+
+**Ruled acceptable by the project owner (2026-09-16): any footprint that works
+on a Pixel 10 with 12GB of RAM.** 400MB against 12GB is a budget this fits
+inside with room to spare, so peak memory is no longer the blocker this section
+called it. What survives the ruling is narrower and still true: a background tab
+holding a third of a gigabyte is a tab Android may reclaim, which is a
+*reload* cost rather than a failure - the document is in the URL, so a reclaimed
+tab loses nothing but the time to initialise again. That keeps "configure one
+worker initially" as written, since a worker pool multiplies the number rather
+than the risk, and it keeps the Pixel-class measurement on the list: what is now
+being measured there is startup and solve time, not whether the thing fits.
 
 **One criterion is still untouched: a Pixel-class figure.** The main-thread
 finding above is why - CDP CPU throttling reaches the main thread and not the
 worker, so a desktop core did all the solving at every throttle setting.
-Fourteen seconds here is not fourteen seconds on a phone. Given the memory
-number, that measurement should happen on real hardware before anything ships.
+Fourteen seconds here is not fourteen seconds on a phone. With memory settled,
+this is now the only open measurement, and it is about time rather than fit.
 
 ### What the timings do not say
 
@@ -427,23 +435,44 @@ pay: a real horizon is one instance, not 1292, and the browser path is a
 WebAssembly worker rather than a spawned binary. The number that matters is
 still unmeasured, and getting it needs the adapter this prototype does not have.
 
-## A prerequisite, not a consequence
+## A prerequisite, not a consequence - **done**
 
 Raised in review and agreed: **the history freeze must capture the accepted
 result, never recompute it.**
 
-`freezeElapsedBeforeEdit` calls `runPlanner(toPlannerInput(prev))` - deliberately
+`freezeElapsedBeforeEdit` called `runPlanner(toPlannerInput(prev))` - deliberately
 without `now`, since passing it makes the engine decline to plan the very hours
 the freeze is about to record. With today's deterministic engine that reproduces
 what was on screen. With an asynchronous solver, a time limit, a different
 incumbent or a version bump, it does not, and the app would freeze assignments
 nobody ever saw as though somebody had agreed to them.
 
-That is a defect this record *creates*, so it belongs to this record: the
-accepted schedule result has to be retained and its elapsed rows appended, and
-history must never be reconstructed by solving again. It should land **before**
-any solver does, not alongside - it is cheap against the current engine and
-becomes a data-integrity bug the moment the engine stops being deterministic.
+That is a defect this record *creates*, so it belonged to this record, and it
+has landed ahead of any solver as intended - cheap against the current engine,
+a data-integrity bug the moment the engine stops being deterministic.
+
+**What changed.** There is now exactly one solve per document and one place it
+happens: `acceptSchedule` (`src/lib/pins.js`), called by `PlanContext` and
+cached by document identity. The schedule screen renders that object and
+`setDoc` freezes elapsed rows out of that same object - identity, not
+equivalence. `freezeElapsedBeforeEdit` takes the accepted result as a required
+argument and throws without one, because a caller with no accepted answer has
+nothing to record and quietly solving for one is the entire defect. For an
+asynchronous solver the seam is already in the right place: `acceptSchedule` is
+where an awaited result would arrive, and nothing downstream of it solves.
+
+Two smaller things fell out of it, both improvements. The freeze now runs with
+`now` as `loggedBefore`, exactly as the display does, which is what "the same
+object" requires; the old omission was justified by an argument that only holds
+for elapsed segments already carrying a record, and those come back as pinned
+rows the freeze discards anyway. And "history freezing does not freeze invalid
+output" now holds through `freezePastShifts`'s `engine-bug` check rather than a
+caught throw, because the accepted result is computed in report mode - the same
+guarantee read off the warnings instead of a stack.
+
+Pinned in `tests/pins.test.js`, including a test that hands the freeze a result
+which deliberately disagrees with what the engine would produce and asserts the
+*handed* answer is what became history.
 
 ## Acceptance criteria
 
@@ -458,7 +487,7 @@ The MiniZinc prototype must pass, before it replaces anything:
   prototype models;
 - the **real production browser bundle, offline**;
 - the history freeze capturing the accepted result rather than recomputing it,
-  per the prerequisite above.
+  per the prerequisite above - **met**.
 
 Plus representative Pixel-class measurements for first load, repeated solve
 time, cancellation, peak memory and worker cleanup. **Configure one worker

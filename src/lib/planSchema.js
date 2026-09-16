@@ -85,6 +85,30 @@ export const missionSchema = z.object({
   onCall: z.boolean().default(false),
 });
 
+/**
+ * What a pin needs to stay readable once it is the record of a shift that
+ * happened (ADR 012's correction).
+ *
+ * A pin is a pair of ids and a range, all three of which are *live references*:
+ * the names come from the employee and mission lists, and a null bound inherits
+ * the mission's window. That is right while the pin is an instruction to the
+ * engine, and wrong the moment it becomes history, because history cannot be
+ * allowed to change when the things it points at do. Delete the guard and the
+ * record of their duty goes with them; rename them and the exported CSV quietly
+ * claims a different person stood that post.
+ *
+ * So a pin that records duty carries its own copy of everything it needs to be
+ * read: the two names, the mission's type, and the qualifications the person
+ * held *at the time*, which is the thing a reader months later is actually
+ * asking about. Written once and never refreshed - a stamp, not a cache.
+ */
+export const pinRecordSchema = z.object({
+  employeeName: z.string().max(120).default(''),
+  missionName: z.string().max(120).default(''),
+  missionType: z.enum(['local', 'remote', 'daily']).default('local'),
+  tags: z.array(id).default([]),
+});
+
 export const pinSchema = z.object({
   missionId: id,
   employeeId: id,
@@ -95,6 +119,10 @@ export const pinSchema = z.object({
   // person actually chose, it must not be invalidated by a later availability
   // edit - see planner.js's normalizePins.
   frozen: z.boolean().default(false),
+  // Absent on a pin that is still an instruction; present from the moment it
+  // becomes a record. `null` rather than optional so the absence is a value the
+  // wire format can carry and the codec can round-trip.
+  record: pinRecordSchema.nullable().default(null),
 });
 
 export const planSchema = z.object({
@@ -157,13 +185,26 @@ export function emptyPlan(now = Date.now()) {
 }
 
 /**
- * Drop pins whose employee or mission no longer exists. Called after any delete
- * so the document never carries dangling references around in the URL.
+ * Drop pins whose employee or mission no longer exists, so the document does not
+ * carry dangling instructions around in the URL.
+ *
+ * **Except a pin carrying a record.** That one is not an instruction any more,
+ * it is the evidence that somebody stood a post, and deleting the guard from
+ * the roster is not a statement that they never did. This used to delete it:
+ * remove a person who left, or a mission that ended, and the only account of
+ * their duty went with them - before anyone had a chance to export it. Nothing
+ * removes recorded duty except the explicit button beside the warning, which
+ * exports first (ADR 012).
+ *
+ * A recorded pin is safe to keep dangling: `normalizePins` skips stale
+ * references, and `captureHistory` resolved its bounds to literal instants
+ * before stamping it, so nothing downstream needs the mission it points at.
  */
 export function prunePins(doc) {
   const employeeIds = new Set(doc.employees.map((e) => e.id));
   const missionIds = new Set(doc.missions.map((m) => m.id));
-  const pins = doc.pins.filter((p) => employeeIds.has(p.employeeId) && missionIds.has(p.missionId));
+  const pins = doc.pins.filter((p) => p.record
+    || (employeeIds.has(p.employeeId) && missionIds.has(p.missionId)));
   return pins.length === doc.pins.length ? doc : { ...doc, pins };
 }
 

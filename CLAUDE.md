@@ -98,7 +98,23 @@ new employee or a widened availability window from silently reshuffling history 
 locks it in. `PlanContext`'s `setDoc` does that by running `freezeElapsedBeforeEdit`
 (`src/lib/pins.js`) on every mutation, before the edit is applied: whatever the engine had already
 decided for an already-elapsed, auto-assigned shift becomes a real pin, indistinguishable from one
-a person swapped by hand. This has to sit in `setDoc`, not a `SchedulePage` render effect — every
+a person swapped by hand.
+
+**The freeze consumes an accepted result; it never solves for one.** There is exactly one solve
+per document, in `acceptSchedule` (`src/lib/pins.js`), which `PlanContext` caches by document
+identity — the schedule screen renders that object and `setDoc` freezes elapsed rows out of *that
+same object*. Identity, not equivalence: a second solve reproduces the screen only because the
+engine happens to be deterministic and synchronous, and under an async solver with a time limit it
+would write into the permanent record a past nobody was ever shown (ADR 011's prerequisite). So
+`freezeElapsedBeforeEdit` takes the result as a **required** argument and throws without one — a
+caller with no accepted answer has nothing to record. Two things follow. The freeze runs with `now`
+as `loggedBefore`, exactly as the display does; the old omission was justified by an argument that
+only holds for elapsed segments already carrying a record, and those come back as pinned rows the
+freeze discards anyway. And "does not freeze invalid output" now holds through `freezePastShifts`'s
+`engine-bug` check rather than a caught throw, because the accepted result is computed in report
+mode.
+
+This has to sit in `setDoc`, not a `SchedulePage` render effect — every
 mutator (`addEmployee`, `updateMission`, a swap, …) funnels through it, so an edit made from the
 Employees or Missions page freezes history exactly like one made from the schedule screen. The
 freeze snapshot is taken from the *previous* document, not the one the edit produces: a shift
@@ -142,6 +158,23 @@ There is no automatic cleanup, and that is deliberate. `pruneStalePins` used to 
 and was right while out-of-period pins were residue; ADR 012 inverts that by making them the only
 durable record, so it is gone and `src/lib/pins.js` keeps the reasoning where it used to live.
 Nothing removes recorded duty without an export any more.
+
+**A record cannot be a set of live references.** A pin is two ids and a range, all three of which
+are resolved at read time — names from the employee and mission lists, a null bound from the
+mission's window. Right while it is an instruction to the engine, wrong the moment it is the record
+of a shift that happened. Removing a guard who had left deleted 24 of 96 recorded rows; removing a
+mission took 48; a rename left all 96 and made 24 of them name somebody who had not been there
+(`scripts/historyRecordLoss.mjs`). So a pin that has become history carries a `record` — the
+employee's name, the mission's name and type, and the qualifications held *at the time* — stamped
+once and never refreshed, with its bounds resolved to literal instants at the same moment.
+`freezePastShifts` stamps what it writes; `captureHistory` catches the hand-made pins, which become
+history only when the period rolls past them. `captureHistory` runs in `setDoc` **before**
+`prunePins`, reads `prev` for the names and `next`'s period for the question, because one edit can
+roll the window forward *and* remove the guard now behind it, and reading either document for both
+halves loses that case. `prunePins` keeps anything carrying a record — a recorded pin is safe to
+leave dangling, since `normalizePins` skips stale references and the bounds no longer need their
+mission. `outOfPeriodLog` reads the record, falling back to the live lists only for pins written
+before the field existed (ADR 012's second correction; pin tuple position 5 in ADR 006).
 
 ### Duty does not stop counting when the window rolls past it
 

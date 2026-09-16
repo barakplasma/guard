@@ -24,7 +24,15 @@
 
 import { plan } from '../src/lib/planner.js';
 import { toPlannerInput } from '../src/lib/planSchema.js';
-import { freezeElapsedBeforeEdit } from '../src/lib/pins.js';
+import { acceptSchedule, freezeElapsedBeforeEdit } from '../src/lib/pins.js';
+
+/**
+ * The app's own path, spelled out: accept a schedule for `prev`, then freeze
+ * elapsed rows out of *that* result. `freezeElapsedBeforeEdit` no longer solves
+ * for itself, so every caller has to say which answer it is recording.
+ */
+const freezeBefore = (prev, next, now) => freezeElapsedBeforeEdit(prev, next, now, acceptSchedule(prev, now).result);
+
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
@@ -83,7 +91,7 @@ for (let i = 0; i <= ROLLS; i++) {
   console.log(`  ${String(i).padStart(4)}   ${`${hours.toFixed(0)}h`.padStart(18)}   ${name}`);
   if (i === ROLLS) break;
   now += ROLL;
-  doc = freezeElapsedBeforeEdit(doc, { ...doc, start: doc.start + ROLL, end: doc.end + ROLL }, now);
+  doc = freezeBefore(doc, { ...doc, start: doc.start + ROLL, end: doc.end + ROLL }, now);
 }
 
 console.log('\nEvery roll should read at or under six hours (ADR 016). Before that cap the');

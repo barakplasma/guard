@@ -6,7 +6,7 @@ import { decodePlan, encodePlan, PARAM } from '../lib/urlState.js';
 import { emptyPlan, makeId, planSchema, prunePins } from '../lib/planSchema.js';
 import {
   applyClearPin, applyClearPinsForMission, applyMissionAssignees, applySwap,
-  applyCorrection, clearStalePins, freezeElapsedBeforeEdit,
+  applyCorrection, clearStalePins, freezeElapsedBeforeEdit, acceptSchedule, captureHistory,
 } from '../lib/pins.js';
 import { addUniqueEmployees } from '../lib/employees.js';
 import { t } from '../strings.js';
@@ -56,22 +56,54 @@ export function PlanProvider({ children }) {
     return { doc: result.plan, decodeFailed: false };
   }, [location.search]);
 
+  /**
+   * The accepted schedule, cached by document identity.
+   *
+   * There is exactly one solve per document and both readers get that same
+   * object: the schedule screen renders it, and `setDoc` freezes elapsed rows
+   * out of it. That identity is the point - history must be *appended from what
+   * was accepted*, never reconstructed by solving again, or an asynchronous
+   * solver could write a past nobody was ever shown (ADR 011's prerequisite).
+   *
+   * Keyed on the document object rather than a memo on `doc`, because `update`
+   * composes against `lastDoc.current`, which can run ahead of the rendered
+   * `doc` when two controls emit before navigation lands.
+   */
+  const accepted = useRef({ doc: null, schedule: null });
+  const scheduleFor = useCallback((d) => {
+    if (accepted.current.doc !== d) {
+      accepted.current = { doc: d, schedule: acceptSchedule(d, Date.now()) };
+    }
+    return accepted.current.schedule;
+  }, []);
+
   // Every mutation passes through here, which is what makes freezing the past
   // work regardless of which page the edit was made on - see freezeElapsedBeforeEdit.
   const setDoc = useCallback((next) => {
     const previous = lastDoc.current ?? doc;
-    const frozen = freezeElapsedBeforeEdit(previous, next);
-    // No automatic pruning of out-of-period pins: they are the durable record
-    // of duty once ADR 012 exports a rolled-past window, and deleting them here
-    // cost 288 assignments per unrelated edit. Removal is explicit now.
-    const parsed = planSchema.parse(prunePins(frozen));
+    const frozen = freezeElapsedBeforeEdit(
+      previous, next, Date.now(), scheduleFor(previous).result,
+    );
+    // Order matters here, and both halves of it are a bug that was reported.
+    //
+    // `captureHistory` has to run *before* `prunePins`, and it has to read
+    // `previous`: an edit that deletes a guard has already removed them from
+    // `next`, so this is the last moment their name exists to be copied onto
+    // the record of what they stood. Only then can `prunePins` clear the
+    // dangling references, and it now keeps anything carrying a record.
+    //
+    // There is still no automatic pruning of out-of-period pins: they are the
+    // durable record of duty once ADR 012 exports a rolled-past window, and
+    // deleting them here cost 288 assignments per unrelated edit. Removal is
+    // explicit now.
+    const parsed = planSchema.parse(prunePins(captureHistory(previous, frozen)));
     const encoded = encodePlan(parsed);
     lastBlob.current = encoded;
     lastDoc.current = parsed;
     const params = new URLSearchParams(location.search);
     params.set(PARAM, encoded);
     navigate({ pathname: location.pathname, search: `?${params}` }, { replace: true });
-  }, [doc, location.pathname, location.search, navigate]);
+  }, [doc, location.pathname, location.search, navigate, scheduleFor]);
 
   // Two controls may emit before navigation has rendered the first edit.
   // Compose against the immediately cached document, not that render's closure.
@@ -224,8 +256,8 @@ export function PlanProvider({ children }) {
   }), [doc, update]);
 
   const value = useMemo(
-    () => ({ doc, setDoc, update, notice, setNotice, decodeFailed, ...api }),
-    [doc, setDoc, update, notice, decodeFailed, api],
+    () => ({ doc, schedule: scheduleFor(doc), setDoc, update, notice, setNotice, decodeFailed, ...api }),
+    [doc, scheduleFor, setDoc, update, notice, decodeFailed, api],
   );
 
   return <PlanContext.Provider value={value}>{children}</PlanContext.Provider>;

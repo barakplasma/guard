@@ -25,7 +25,15 @@
  */
 
 import { planSchema, prunePins } from '../src/lib/planSchema.js';
-import { freezeElapsedBeforeEdit, countStalePins } from '../src/lib/pins.js';
+import { acceptSchedule, captureHistory, freezeElapsedBeforeEdit, countStalePins } from '../src/lib/pins.js';
+
+/**
+ * The app's own path, spelled out: accept a schedule for `prev`, then freeze
+ * elapsed rows out of *that* result. `freezeElapsedBeforeEdit` no longer solves
+ * for itself, so every caller has to say which answer it is recording.
+ */
+const freezeBefore = (prev, next, now) => freezeElapsedBeforeEdit(prev, next, now, acceptSchedule(prev, now).result);
+
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
@@ -44,7 +52,7 @@ const doc = planSchema.parse({
 
 /** Exactly what PlanContext.setDoc does, with the clock held still. */
 const setDoc = (prev, next) => planSchema.parse(
-  prunePins(freezeElapsedBeforeEdit(prev, next, NOW)),
+  prunePins(captureHistory(prev, freezeBefore(prev, next, NOW))),
 );
 
 const step = (label, value) => console.log(`  ${label.padEnd(44)} ${String(value).padStart(4)}`);

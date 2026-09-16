@@ -28,10 +28,20 @@ without the extensions retain their previous encoding.
 | mission  | 14       | excluded employee ids                         | []                                 |
 | employee | 4        | qualification ids                             | []                                 |
 | employee | 5–6      | carried duty minutes, carried stints          | absent; written only when non-zero |
+| pin      | 0–4      | missionId, employeeId, start, end, frozen     | existing conventions               |
+| pin      | 5        | history record                                | absent until the pin is a record   |
 | plan     | key `tg` | qualification definitions                     | omitted                            |
 
 Mission types encode as local `0`, remote `1`, and daily `2`. Future extension
-fields must follow these reservations. Decode through the document schema;
+fields must follow these reservations.
+
+The pin's history record is one nested array at position 5 — employee name,
+mission name, mission type code, qualification ids — rather than four appended
+positions, because the mission type encodes as `0` for local and `trimTail`
+cannot tell a meaningful trailing zero from an unset one. Nested, the whole
+stamp is either present or absent. A pin that is still an instruction writes no
+position 5 at all, so a document with no recorded duty encodes to exactly the
+bytes it encoded to before the field existed. Decode through the document schema;
 corrupt or unsupported links fall back to an empty document with a notice.
 The edit cache follows that fallback so a later edit cannot restore stale data.
 

@@ -32,6 +32,9 @@ const inTs = (v) => (v === 0 || v == null ? null : v);
 /** The mission tuple as it stood before per-mission shift lengths were added. */
 const MISSION_TUPLE_WAS = 7;
 
+/** The pin tuple as it stood before pins could carry their own history record. */
+const PIN_TUPLE_WAS = 5;
+
 /**
  * Drop trailing "not set" slots from a positional tuple, never shortening it
  * past `keep`.
@@ -87,7 +90,17 @@ export function encodePlan(doc) {
       // exactly as it did before this field existed (ADR 006, ADR 014).
       x.excludeEmployees ?? [],
     ], MISSION_TUPLE_WAS)),
-    pin: doc.pins.map((x) => [x.missionId, x.employeeId, outTs(x.start), outTs(x.end), x.frozen ? 1 : 0]),
+    // Position 5 is the history record (ADR 006's table, ADR 012's correction),
+    // written only once a pin has become a record of duty. One nested array
+    // rather than four appended positions on purpose: the mission type encodes
+    // as `0` for local, and `trimTail` cannot tell a meaningful trailing zero
+    // from an unset one. Nested, the whole stamp is either there or it is not.
+    pin: doc.pins.map((x) => trimTail([
+      x.missionId, x.employeeId, outTs(x.start), outTs(x.end), x.frozen ? 1 : 0,
+      x.record
+        ? [x.record.employeeName, x.record.missionName, TYPE_CODE[x.record.missionType] ?? 0, x.record.tags ?? []]
+        : null,
+    ], PIN_TUPLE_WAS)),
     ...(doc.tags?.length ? { tg: doc.tags.map((t) => [t.id, t.name, t.minNightRestMinutes]) } : {}),
   };
   return compressToEncodedURIComponent(JSON.stringify(compact));
@@ -154,8 +167,21 @@ export function decodePlan(blob) {
         onCall: onCall === 1,
         excludeEmployees: excludeEmployees ?? [],
       })),
-      pins: (raw.pin ?? []).map(([missionId, employeeId, s, e, f]) => ({
-        missionId, employeeId, start: inTs(s), end: inTs(e), frozen: Boolean(f),
+      pins: (raw.pin ?? []).map(([missionId, employeeId, s, e, f, rec]) => ({
+        missionId,
+        employeeId,
+        start: inTs(s),
+        end: inTs(e),
+        frozen: Boolean(f),
+        // A link written before pins could carry a record has no sixth element
+        // and reads back as `null`, which is exactly what it always meant: this
+        // pin is an instruction, not yet a record.
+        record: rec == null ? null : {
+          employeeName: rec[0] ?? '',
+          missionName: rec[1] ?? '',
+          missionType: CODE_TYPE[rec[2]] ?? 'local',
+          tags: rec[3] ?? [],
+        },
       })),
     });
     return { ok: true, plan: doc };

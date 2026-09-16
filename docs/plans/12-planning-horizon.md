@@ -44,6 +44,70 @@ planned for later and will be kept.
 
 Pinned in `tests/logExport.test.js` and `tests/pins.test.js`.
 
+## Correction: a record cannot be a set of live references
+
+**2026-09-16, from the same review.** The first correction fixed *which* pins
+count as history. This one fixes what a history pin actually is.
+
+A pin is two ids and a range, and all three are live references: the names are
+looked up in the employee and mission lists at read time, and a null bound
+inherits the mission's window. That is exactly right while the pin is an
+instruction to the engine. It is wrong the moment the pin becomes the record of
+a shift that happened, because a record must not change when the things it
+points at do.
+
+It was losing the record twice over, not once. `prunePins` deleted any pin whose
+employee or mission was gone — so removing a guard who had left, or a mission
+that had ended, deleted the only account of their duty. And even with the pin
+kept, `outOfPeriodLog` skipped any row it could not name, on a rationale written
+into the code at the time: *"a row that says only 'someone was somewhere' is
+worse than an honest omission."* True while these pins were residue. False from
+the moment this record made them the durable evidence.
+
+Measured by `scripts/historyRecordLoss.mjs` on a two-day, 96-row fixture:
+
+| edit                        | rows lost | rows falsified |
+|-----------------------------|-----------|----------------|
+| remove a guard who has left | 24        | 0              |
+| remove a mission that ended | 48        | 0              |
+| rename a guard              | 0         | 24             |
+| edit their qualifications   | 0         | 24             |
+
+Removing the mission took half the record with it. The rename is worse in its
+own way: nothing was lost, so the file still had 96 rows, and 24 of them now
+named somebody who had not been there. Nothing in any of these edits is about
+the past.
+
+**A pin that has become history carries its own copy of what it needs to be
+read** — the employee's name, the mission's name and type, and the
+qualifications that person held *at the time*, which is what a reader months
+later is actually asking about. It is stamped once, when the assignment stops
+being an instruction, and never refreshed: a stamp, not a cache. Its bounds are
+resolved to literal instants at the same moment, because an inherited bound is
+a live reference too and a mission that later moves must not move the hours
+somebody already stood.
+
+Two places stamp it. `freezePastShifts` stamps the pins it writes, which is most
+of them, at the instant the engine's decision becomes a record. `captureHistory`
+catches the rest — an assignment made by hand, which becomes history only when
+the period rolls past it. `captureHistory` runs inside `setDoc`, before
+`prunePins`, and reads the *previous* document for the names while asking the
+*next* document's period whether the pin is history yet. One edit can do both —
+roll the window forward and remove the guard who is now behind it — and reading
+either document for both halves loses that case in one direction or the other.
+
+`prunePins` now keeps any pin carrying a record. A recorded pin is safe to leave
+dangling: `normalizePins` already skips stale references, and the bounds no
+longer need the mission they point at. Nothing removes recorded duty except the
+explicit button, which exports first.
+
+The wire format takes one appended position, pin tuple 5, reserved in ADR 006.
+A pin that is still an instruction writes nothing there, so every link already
+shared keeps its exact string.
+
+Pinned in `tests/logExport.test.js`, `tests/urlState.test.js`, and
+`scripts/historyRecordLoss.mjs`.
+
 ## Consequences
 
 ### The URL holds it comfortably

@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { outOfPeriodLog, outOfPeriodCount, logFilename } from '../src/lib/logExport.js';
-import { clearStalePins, countStalePins } from '../src/lib/pins.js';
-import { planSchema } from '../src/lib/planSchema.js';
+import { captureHistory, clearStalePins, countStalePins } from '../src/lib/pins.js';
+import { planSchema, prunePins } from '../src/lib/planSchema.js';
 import { shiftsToCsv } from '../src/lib/exportCsv.js';
 
 /**
@@ -102,4 +102,107 @@ test('nothing outside the period means nothing to export', () => {
   const d = doc({ start: BASE, end: BASE + 6 * DAY });
   assert.equal(outOfPeriodCount(d), 0);
   assert.deepEqual(outOfPeriodLog(d), []);
+});
+
+/* --- history must not be a set of live references --------------------- */
+
+test('deleting a guard does not delete the record of what they stood', () => {
+  // The reported failure, reproduced. Two mechanisms lost it, not one:
+  // `prunePins` dropped the pin because its employee was gone, and even with
+  // the pin kept, `outOfPeriodLog` skipped any row it could not name.
+  const before = doc();
+  assert.equal(outOfPeriodCount(before), 2);
+
+  const edited = captureHistory(before, {
+    ...before,
+    employees: before.employees.filter((e) => e.id !== 'e1'),
+  });
+  const after = planSchema.parse(prunePins(edited));
+
+  const rows = outOfPeriodLog(after);
+  assert.equal(rows.length, 2, 'both elapsed assignments are still on the record');
+  const hers = rows.find((r) => r.employeeId === 'e1');
+  assert.equal(hers.employeeName, 'דנה', 'named from the record, not the roster she has left');
+  assert.deepEqual(hers.qualifications, ['driver'], 'and qualified as she was at the time');
+});
+
+test('deleting a mission does not delete the record of duty on it', () => {
+  const before = doc();
+  const edited = captureHistory(before, { ...before, missions: [] });
+  const after = planSchema.parse(prunePins(edited));
+
+  const rows = outOfPeriodLog(after);
+  assert.equal(rows.length, 2);
+  assert.ok(rows.every((r) => r.missionName === 'שער'));
+  assert.ok(rows.every((r) => r.type === 'local'));
+});
+
+test('renaming a guard does not rewrite what the history file says they did', () => {
+  // The accuracy issue from the same review. A record read through the live
+  // employee list is a record of who they are now, not of who stood the post.
+  const before = doc();
+  const stamped = captureHistory(before, before);
+  const renamed = planSchema.parse({
+    ...stamped,
+    employees: stamped.employees.map((e) => (e.id === 'e1' ? { ...e, name: 'דנה כהן', tags: [] } : e)),
+  });
+
+  const hers = outOfPeriodLog(renamed).find((r) => r.employeeId === 'e1');
+  assert.equal(hers.employeeName, 'דנה', 'the name she held when she stood it');
+  assert.deepEqual(hers.qualifications, ['driver'], 'and the qualification she held then');
+});
+
+test('an assignment still inside the period keeps following its mission', () => {
+  // The other half of the rule: only history is stamped. A live pin is still an
+  // instruction, so it must keep inheriting - stamping it would freeze it
+  // against a mission the user may yet move.
+  const before = doc();
+  const after = captureHistory(before, before);
+  const live = after.pins.find((p) => p.start === BASE + 4 * DAY);
+  assert.equal(live.record, null);
+});
+
+test('a window rolled forward and a guard removed in the same edit still records them', () => {
+  // The case that decides which document each half of captureHistory reads.
+  // Under the old period this assignment is not history yet; under the new one
+  // it is, and by then she is already gone from the roster. Asking one document
+  // both questions loses it in one direction or the other.
+  const before = doc({
+    start: BASE, end: BASE + 3 * DAY, pins: [
+      { missionId: 'm1', employeeId: 'e1', start: BASE + HOUR, end: BASE + 2 * HOUR, frozen: true },
+    ],
+  });
+  assert.equal(outOfPeriodCount(before), 0, 'nothing is history yet');
+
+  const rolled = captureHistory(before, {
+    ...before,
+    start: BASE + 3 * DAY,
+    end: BASE + 6 * DAY,
+    employees: before.employees.filter((e) => e.id !== 'e1'),
+  });
+  const after = planSchema.parse(prunePins(rolled));
+
+  const rows = outOfPeriodLog(after);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].employeeName, 'דנה');
+});
+
+test('a stamped pin no longer follows a mission window that moves', () => {
+  // Bounds are live references too. A whole-mission pin inherits the mission's
+  // window, so moving the mission would otherwise move the recorded hours.
+  const before = doc({
+    start: BASE + 3 * DAY, end: BASE + 6 * DAY,
+    missions: [{ id: 'm1', name: 'שער', type: 'local', count: 1, start: BASE, end: BASE + HOUR }],
+    pins: [{ missionId: 'm1', employeeId: 'e1', start: null, end: null, frozen: true }],
+  });
+  const stamped = captureHistory(before, before);
+  const moved = planSchema.parse({
+    ...stamped,
+    missions: [{ ...stamped.missions[0], start: BASE + DAY, end: BASE + DAY + HOUR }],
+  });
+
+  const rows = outOfPeriodLog(moved);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].start, BASE, 'the hours it recorded, not the hours the mission now covers');
+  assert.equal(rows[0].end, BASE + HOUR);
 });

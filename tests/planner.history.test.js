@@ -2,7 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { plan } from '../src/lib/planner.js';
 import { toPlannerInput, planSchema, prunePins } from '../src/lib/planSchema.js';
-import { freezeElapsedBeforeEdit } from '../src/lib/pins.js';
+import { acceptSchedule, captureHistory, freezeElapsedBeforeEdit } from '../src/lib/pins.js';
+
+/**
+ * The app's own path, spelled out: accept a schedule for `prev`, then freeze
+ * elapsed rows out of *that* result. `freezeElapsedBeforeEdit` no longer solves
+ * for itself, so every caller has to say which answer it is recording.
+ */
+const freezeBefore = (prev, next, now) => freezeElapsedBeforeEdit(prev, next, now, acceptSchedule(prev, now).result);
+
 
 /**
  * ADR 009: elapsed time that already has a record is a record, not a slot to
@@ -32,7 +40,7 @@ const doc = () => planSchema.parse({
 
 /** Exactly what PlanContext.setDoc does, with the clock held still. */
 const setDoc = (previous, next) => planSchema.parse(
-  prunePins(freezeElapsedBeforeEdit(previous, next, NOW)),
+  prunePins(captureHistory(previous, freezeBefore(previous, next, NOW))),
 );
 
 /** Elapsed slot -> the set of people recorded on it. */

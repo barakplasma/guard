@@ -149,13 +149,124 @@ export function applyClearPinsForMission(doc, { missionId, employeeId }) {
  */
 export function freezePastShifts(doc, result, now) {
   if (result.warnings?.some((w) => w.code === 'engine-bug')) return doc;
+  const tagsById = new Map(doc.employees.map((e) => [e.id, e.tags ?? []]));
   const newPins = result.shifts
     .filter((s) => !s.pinned && s.end <= now)
     .map((s) => ({
-      missionId: s.missionId, employeeId: s.employeeId, start: s.start, end: s.end, frozen: true,
+      missionId: s.missionId,
+      employeeId: s.employeeId,
+      start: s.start,
+      end: s.end,
+      frozen: true,
+      // Stamped here, at the instant the shift becomes a record, rather than
+      // later when the record is read. Anything read later is read through the
+      // *current* employee and mission lists, so a rename between the shift and
+      // the export would have the CSV claim somebody else stood that post - and
+      // a deletion would have it claim nobody did. The row already carries both
+      // names; the qualifications come off the document because the engine has
+      // no reason to put them on a shift.
+      record: {
+        employeeName: s.employeeName,
+        missionName: s.missionName,
+        missionType: s.type,
+        tags: [...(tagsById.get(s.employeeId) ?? [])],
+      },
     }));
   if (newPins.length === 0) return doc;
   return { ...doc, pins: [...doc.pins, ...newPins] };
+}
+
+/**
+ * Stamp every pin that has become a record of duty with what it needs to be
+ * read on its own (ADR 012's correction).
+ *
+ * `freezePastShifts` stamps the pins *it* writes, which is most of them. This
+ * catches the rest: an assignment somebody made by hand, which was an
+ * instruction to the engine when it was written and becomes history the moment
+ * the period rolls past it. Until it is stamped, it is three live references -
+ * an employee id, a mission id, and very often a null bound that inherits the
+ * mission's window - and deleting any of those takes the record with it.
+ *
+ * The two documents are read for different things, deliberately. Whether a pin
+ * is now history is asked of **`next`'s** period, because that is the window the
+ * document is about to have; who and what it names is read out of **`prev`'s**
+ * lists, because that is where the answer still exists. One edit can do both -
+ * roll the window forward and delete the guard who is now behind it - and
+ * reading either document for both halves loses that case in one direction or
+ * the other.
+ *
+ * Bounds are resolved to literal instants at the same time. An inherited bound
+ * is another live reference: a mission that is later moved, or deleted, would
+ * otherwise take the recorded hours with it. History does not follow anything.
+ */
+export function captureHistory(prev, next) {
+  const missionById = new Map(prev.missions.map((m) => [m.id, m]));
+  const employeeById = new Map(prev.employees.map((e) => [e.id, e]));
+  let changed = false;
+
+  const pins = next.pins.map((pin) => {
+    if (pin.record) return pin;
+    const mission = missionById.get(pin.missionId);
+    const employee = employeeById.get(pin.employeeId);
+    // Nothing left to copy from. The pin is already a dangling reference, so
+    // there is no record here to preserve - `prunePins` clears it as before.
+    if (!mission || !employee) return pin;
+    if (!isElapsedBeforePeriod(pin, mission, next.start, next.end)) return pin;
+
+    const { start, end } = resolvePinWindow(pin, mission, next.start, next.end);
+    changed = true;
+    return {
+      ...pin,
+      start,
+      end,
+      record: {
+        employeeName: employee.name,
+        missionName: mission.name,
+        missionType: mission.type,
+        tags: [...(employee.tags ?? [])],
+      },
+    };
+  });
+
+  return changed ? { ...next, pins } : next;
+}
+
+/**
+ * Solve `doc` and *accept* the answer: the one place a schedule comes into
+ * existence, and the only thing history is ever allowed to be built from.
+ *
+ * The freeze below used to call the engine itself, which was safe only by
+ * accident. With a deterministic, synchronous engine, solving `prev` a second
+ * time reproduces what the screen showed. With an asynchronous solver, a time
+ * limit, a different incumbent or a version bump it does not - and the freeze
+ * would then write into the permanent record assignments nobody ever saw. The
+ * rule that replaces it is blunt: **history is appended from an accepted
+ * result, never reconstructed by solving again.** So the solve lives here,
+ * every caller holds on to what comes back, and `freezeElapsedBeforeEdit`
+ * takes a result rather than producing one.
+ *
+ * `now` reaches the engine as `loggedBefore` (ADR 009), exactly as it does for
+ * the schedule screen, because this *is* the schedule screen's call - the
+ * provider caches one of these per document and hands the same object to both.
+ * The previous code deliberately omitted it, on the grounds that the engine
+ * would otherwise decline to plan the very hours being frozen. That is only
+ * true of elapsed segments which already carry a record, and those come back as
+ * pinned rows that `freezePastShifts` discards anyway; an elapsed segment with
+ * nothing recorded on it is still planned in full. What the omission actually
+ * bought was a freeze that disagreed with the display about partly-recorded
+ * segments - the engine leaves those alone on purpose, because today's
+ * headcount is not evidence about the past.
+ *
+ * @returns `{ result }`, `{ error }` when the engine threw, or `{}` when there
+ * is nothing to solve yet.
+ */
+export function acceptSchedule(doc, now) {
+  if (doc.employees.length === 0 || doc.missions.length === 0) return {};
+  try {
+    return { result: runPlanner({ ...toPlannerInput(doc, now), onInvariantViolation: 'report' }) };
+  } catch (e) {
+    return { error: e.message };
+  }
 }
 
 /**
@@ -165,25 +276,28 @@ export function freezePastShifts(doc, result, now) {
  * `setDoc`), not just ones made from the schedule screen, so an edit on the
  * Employees or Missions page can't reshuffle history either.
  *
+ * `result` must be the accepted schedule for `prev` - what `acceptSchedule`
+ * returned and what the screen was showing. It is required rather than
+ * defaulted: a caller that cannot supply one has no accepted answer to record,
+ * and silently solving for it again is the defect this parameter exists to
+ * close.
+ *
  * The snapshot is taken from `prev` on purpose. Freezing what `next` looks
  * like instead would immediately re-pin a shift the caller just cleared on
  * purpose - `applyClearPin`/`clearAllPins` remove a pin from `next`, but that
  * same shift is already pinned in `prev`, so `freezePastShifts` skips it
  * there and the clear survives.
+ *
+ * Invalid output is still never frozen. That used to hold because the freeze
+ * solved in strict mode and caught the throw; the accepted result is computed
+ * in report mode, so it holds through `freezePastShifts`'s `engine-bug` check
+ * instead - the same guarantee, read off the warnings rather than a stack.
  */
-export function freezeElapsedBeforeEdit(prev, next, now = Date.now()) {
-  if (prev.employees.length === 0 || prev.missions.length === 0) return next;
-  let result;
-  try {
-    // Deliberately *without* `now`. The freeze's whole job is to capture what
-    // the engine had already decided for elapsed time, so it needs the
-    // unrestricted schedule; passing `now` here would make the engine decline
-    // to plan the very hours this is about to record, and history would be lost
-    // rather than preserved (ADR 009).
-    result = runPlanner(toPlannerInput(prev));
-  } catch {
-    return next;
+export function freezeElapsedBeforeEdit(prev, next, now = Date.now(), result) {
+  if (arguments.length < 4) {
+    throw new TypeError('freezeElapsedBeforeEdit requires the accepted result for `prev`');
   }
+  if (!result) return next;
   const frozenPrev = freezePastShifts(prev, result, now);
   if (frozenPrev === prev) return next;
   const newPins = frozenPrev.pins.slice(prev.pins.length);

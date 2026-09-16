@@ -10,8 +10,6 @@ import DebugSection from '../components/DebugSection.jsx';
 import ConfirmDialog from '../components/ConfirmDialog.jsx';
 import EmployeeSelect from '../components/EmployeeSelect.jsx';
 import { usePlan } from '../state/PlanContext.jsx';
-import { plan as runPlanner } from '../lib/planner.js';
-import { toPlannerInput } from '../lib/planSchema.js';
 import { outOfPeriodLog, logFilename } from '../lib/logExport.js';
 import { shiftsToCsv, downloadCsv } from '../lib/exportCsv.js';
 import { findNowSlot, groupAgenda } from '../lib/agenda.js';
@@ -21,24 +19,22 @@ import useNow from '../hooks/useNow.js';
 import { t } from '../strings.js';
 
 /**
- * The schedule is recomputed from the document on every render rather than
- * stored: the engine is deterministic and fast, so "the plan" is always exactly
- * what the URL says, and a manual swap takes effect immediately.
+ * The schedule is never stored: it is a pure function of the document, so "the
+ * plan" is always exactly what the URL says and a manual swap takes effect
+ * immediately.
+ *
+ * It is no longer computed *here*, though. The provider owns the single solve
+ * per document (`acceptSchedule`), and this page renders that same object - the
+ * one `setDoc` freezes elapsed rows out of. Two call sites meant two results
+ * that only agreed because the engine happens to be deterministic and
+ * synchronous; what this screen showed had to *be* what history recorded, not
+ * merely match it. All that is left here is turning an empty document into the
+ * right sentence, which is a UI decision and belongs in the UI.
  */
-function useSchedule(doc) {
-  return useMemo(() => {
-    if (doc.employees.length === 0) return { error: t.needEmployees };
-    if (doc.missions.length === 0) return { error: t.needMissions };
-    try {
-      // `Date.now()` enters here, in the UI, and reaches the engine only as the
-      // absolute `loggedBefore` instant the adapter resolves - the engine still
-      // owns no clock (ADR 009). Recomputing on `doc` alone is deliberate: the
-      // schedule should move when the plan moves, not tick over on its own.
-      return { result: runPlanner({ ...toPlannerInput(doc, Date.now()), onInvariantViolation: 'report' }) };
-    } catch (e) {
-      return { error: e.message };
-    }
-  }, [doc]);
+function scheduleMessage(doc, schedule) {
+  if (doc.employees.length === 0) return { error: t.needEmployees };
+  if (doc.missions.length === 0) return { error: t.needMissions };
+  return schedule;
 }
 
 const jumpToNow = () => document.getElementById('now-slot')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -110,9 +106,9 @@ function SummaryTable({ result, highlightId }) {
 
 export default function SchedulePage() {
   const {
-    doc, pinShift, clearPin, clearAllPins, clearPinByWarning, clearStalePins, applyCorrection, decodeFailed,
+    doc, schedule, pinShift, clearPin, clearAllPins, clearPinByWarning, clearStalePins, applyCorrection, decodeFailed,
   } = usePlan();
-  const { result, error } = useSchedule(doc);
+  const { result, error } = scheduleMessage(doc, schedule);
 
   /**
    * ADR 012: a window the plan has rolled past is *exported*, not dropped. So

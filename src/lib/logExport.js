@@ -23,10 +23,21 @@ import { isElapsedBeforePeriod, resolvePinWindow } from './planner.js';
  * so `shiftsToCsv` can render them unchanged.
  *
  * Sorted chronologically, then by mission and employee id, so two exports of
- * the same document are byte-identical. A pin naming an employee or mission the
- * document no longer has is skipped rather than exported with a blank name: it
- * cannot be read back as a record of anything, and a row that says only "someone
- * was somewhere" is worse than an honest omission.
+ * the same document are byte-identical.
+ *
+ * **Names come off the pin's own record, not the live lists.** That is the
+ * whole correction: reading them live meant a rename between the shift and the
+ * export rewrote what the file claimed had happened, and a deletion had this
+ * function skip the row entirely - rationalised at the time as "a row that says
+ * only 'someone was somewhere' is worse than an honest omission", which was
+ * true while these pins were residue and false the moment they became the
+ * durable record. The record is stamped when the assignment becomes history
+ * (`freezePastShifts`, `captureHistory`), so it says what was true then.
+ *
+ * The live lists are still consulted, but only as a fallback for a pin that
+ * predates the record - a link shared before this existed, whose elapsed pins
+ * have not been through an edit since. Those are exactly the pins for which the
+ * live data is the only data there is.
  */
 export function outOfPeriodLog(doc) {
   const missionById = new Map(doc.missions.map((m) => [m.id, m]));
@@ -40,15 +51,16 @@ export function outOfPeriodLog(doc) {
     .flatMap((p) => {
       const mission = missionById.get(p.missionId);
       const employee = employeeById.get(p.employeeId);
-      if (!mission || !employee) return [];
+      if (!p.record && (!mission || !employee)) return [];
       const { start, end } = resolvePinWindow(p, mission, doc.start, doc.end);
       if (!(end > start)) return [];
+      const tags = p.record ? p.record.tags : (employee.tags ?? []);
       return [{
-        missionId: mission.id,
-        missionName: mission.name,
-        type: mission.type,
-        employeeId: employee.id,
-        employeeName: employee.name,
+        missionId: p.missionId,
+        missionName: p.record ? p.record.missionName : mission.name,
+        type: p.record ? p.record.missionType : mission.type,
+        employeeId: p.employeeId,
+        employeeName: p.record ? p.record.employeeName : employee.name,
         start,
         end,
         // Every row here is a record of duty, so it is "manual" in the CSV's
@@ -56,7 +68,7 @@ export function outOfPeriodLog(doc) {
         // that matters to a reader months later is in `frozen`.
         pinned: true,
         frozen: Boolean(p.frozen),
-        ...((employee.tags ?? []).length ? { qualifications: [...employee.tags] } : {}),
+        ...(tags.length ? { qualifications: [...tags] } : {}),
       }];
     })
     .sort((a, b) => a.start - b.start

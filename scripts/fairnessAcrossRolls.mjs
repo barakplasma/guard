@@ -33,7 +33,15 @@
 
 import { plan } from '../src/lib/planner.js';
 import { toPlannerInput } from '../src/lib/planSchema.js';
-import { freezeElapsedBeforeEdit } from '../src/lib/pins.js';
+import { acceptSchedule, freezeElapsedBeforeEdit } from '../src/lib/pins.js';
+
+/**
+ * The app's own path, spelled out: accept a schedule for `prev`, then freeze
+ * elapsed rows out of *that* result. `freezeElapsedBeforeEdit` no longer solves
+ * for itself, so every caller has to say which answer it is recording.
+ */
+const freezeBefore = (prev, next, now) => freezeElapsedBeforeEdit(prev, next, now, acceptSchedule(prev, now).result);
+
 
 const MINUTE = 60 * 1000;
 const HOUR = 60 * MINUTE;
@@ -125,7 +133,7 @@ for (let i = 0; i <= ROLLS; i++) {
   // Roll: the present moves a day, then the window follows it.
   now += ROLL;
   const next = { ...doc, start: doc.start + ROLL, end: doc.end + ROLL };
-  doc = freezeElapsedBeforeEdit(doc, next, now);
+  doc = freezeBefore(doc, next, now);
 }
 
 console.log('\n"window spread" is what the app shows: the gap between busiest and idlest');

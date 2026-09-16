@@ -3,10 +3,19 @@ import assert from 'node:assert/strict';
 import {
   applyClearPin, applyClearPinsForMission, applyMissionAssignees, applySwap,
   clearStalePins, countStalePins, cutPin, freezeElapsedBeforeEdit, freezePastShifts, pinCovers,
+  acceptSchedule,
 } from '../src/lib/pins.js';
 import { WARN } from '../src/lib/planner.js';
 import { plan } from '../src/lib/planner.js';
 import { planSchema, prunePins, toPlannerInput } from '../src/lib/planSchema.js';
+
+/**
+ * The app's own path, spelled out: accept a schedule for `prev`, then freeze
+ * elapsed rows out of *that* result. `freezeElapsedBeforeEdit` no longer solves
+ * for itself, so every caller has to say which answer it is recording.
+ */
+const freezeBefore = (prev, next, now) => freezeElapsedBeforeEdit(prev, next, now, acceptSchedule(prev, now).result);
+
 
 const DAY = 24 * 60 * 60 * 1000;
 const HOUR = 3600 * 1000;
@@ -365,7 +374,7 @@ test('freezing the past adds nothing for a whole-mission pin whose hours have el
     pins: [{ missionId: 'm1', employeeId: 'e1', start: null, end: null }],
   });
   const next = { ...prev, title: 'edited' };
-  const merged = freezeElapsedBeforeEdit(prev, next, START + 3 * HOUR);
+  const merged = freezeBefore(prev, next, START + 3 * HOUR);
   assert.deepEqual(merged.pins, prev.pins, 'the pinned hours were already decided by hand');
 });
 
@@ -393,7 +402,7 @@ test('freezeElapsedBeforeEdit locks in the past even on an edit that never went 
   // An edit elsewhere in the document - e.g. adding an employee from the
   // Employees page - made after the first hour has already elapsed.
   const next = withExtraEmployee(prev);
-  const merged = freezeElapsedBeforeEdit(prev, next, START + HOUR);
+  const merged = freezeBefore(prev, next, START + HOUR);
 
   assertFirstHourPreserved(prev, merged);
 });
@@ -403,7 +412,7 @@ test('freezeElapsedBeforeEdit lets an intentional clear of a frozen shift stick'
   const firstHour = firstHourOf(prev);
 
   // An earlier edit already froze the elapsed shift.
-  const frozen = freezeElapsedBeforeEdit(prev, prev, START + HOUR);
+  const frozen = freezeBefore(prev, prev, START + HOUR);
   assert.equal(frozen.pins.length, 1, 'the elapsed shift got pinned');
 
   // The user clears that pin on purpose, then this clear is applied the same
@@ -413,17 +422,17 @@ test('freezeElapsedBeforeEdit lets an intentional clear of a frozen shift stick'
   });
   assert.equal(cleared.pins.length, 0);
 
-  const result = freezeElapsedBeforeEdit(frozen, cleared, START + HOUR);
+  const result = freezeBefore(frozen, cleared, START + HOUR);
   assert.equal(result.pins.length, 0, 'the clear must survive, not be undone by the next freeze pass');
 });
 
 test('freezeElapsedBeforeEdit lets clearAllPins wipe frozen shifts too', () => {
   const prev = twoHourLocalDoc();
-  const frozen = freezeElapsedBeforeEdit(prev, prev, START + HOUR);
+  const frozen = freezeBefore(prev, prev, START + HOUR);
   assert.ok(frozen.pins.length > 0, 'sanity check: something was actually frozen');
 
   const clearedAll = { ...frozen, pins: [] };
-  const result = freezeElapsedBeforeEdit(frozen, clearedAll, START + HOUR);
+  const result = freezeBefore(frozen, clearedAll, START + HOUR);
   assert.equal(result.pins.length, 0, 'clearAllPins is not fought by the freeze step');
 });
 
@@ -432,14 +441,64 @@ test('freezeElapsedBeforeEdit is a no-op before anything has elapsed', () => {
     missions: [{ id: 'm1', name: 'Gate', type: 'local', start: null, end: null, count: 1 }],
   });
   const next = { ...prev, title: 'renamed' };
-  const result = freezeElapsedBeforeEdit(prev, next, START - HOUR);
+  const result = freezeBefore(prev, next, START - HOUR);
   assert.equal(result, next, 'nothing elapsed yet, so next is returned unchanged');
 });
 
 test('freezeElapsedBeforeEdit skips freezing when the previous document has no employees or missions yet', () => {
   const prev = doc({ employees: [], missions: [] });
   const next = { ...prev, title: 'x' };
-  assert.equal(freezeElapsedBeforeEdit(prev, next, START + HOUR), next);
+  assert.equal(freezeBefore(prev, next, START + HOUR), next);
+});
+
+/* --- the freeze records an accepted answer, it does not compute one ----- */
+
+test('freezeElapsedBeforeEdit records the result it was handed, not one it computes', () => {
+  // The point of ADR 011's prerequisite. Today's engine is deterministic and
+  // synchronous, so solving `prev` again reproduces the screen and this defect
+  // is invisible. Hand it a result that deliberately disagrees with what the
+  // engine would produce and the difference becomes visible: what gets written
+  // into the permanent record must be the answer somebody accepted.
+  const prev = twoHourLocalDoc();
+  const computed = acceptSchedule(prev, START + HOUR).result;
+  const first = computed.shifts.find((sh) => sh.start === START);
+  const other = prev.employees.find((e) => e.id !== first.employeeId);
+
+  const accepted = {
+    ...computed,
+    shifts: computed.shifts.map((sh) => (sh.start === START
+      ? { ...sh, employeeId: other.id, employeeName: other.name }
+      : sh)),
+  };
+
+  const merged = freezeElapsedBeforeEdit(prev, { ...prev, title: 'edited' }, START + HOUR, accepted);
+  const pinned = merged.pins.filter((pin) => pin.start === START);
+  assert.equal(pinned.length, 1);
+  assert.equal(pinned[0].employeeId, other.id, 'the accepted answer is what became history');
+  assert.notEqual(pinned[0].employeeId, first.employeeId);
+});
+
+test('freezeElapsedBeforeEdit refuses to run without an accepted result', () => {
+  // Not a defaulted parameter. A caller with no accepted answer has nothing to
+  // record, and quietly solving for one is the whole defect - so the omission
+  // has to be loud rather than silently reconstruct a past nobody was shown.
+  const prev = twoHourLocalDoc();
+  assert.throws(
+    () => freezeElapsedBeforeEdit(prev, prev, START + HOUR),
+    /accepted result/,
+  );
+});
+
+test('freezeElapsedBeforeEdit does not freeze a result carrying an engine bug', () => {
+  // The guarantee CLAUDE.md states as "history freezing does not freeze invalid
+  // output". It used to hold because the freeze solved in strict mode and
+  // caught the throw; the accepted result is computed in report mode, so it
+  // holds through the warning instead.
+  const prev = twoHourLocalDoc();
+  const accepted = acceptSchedule(prev, START + HOUR).result;
+  const broken = { ...accepted, warnings: [...accepted.warnings, { code: WARN.ENGINE_BUG }] };
+  const next = { ...prev, title: 'edited' };
+  assert.equal(freezeElapsedBeforeEdit(prev, next, START + HOUR, broken), next);
 });
 
 /* --- mission roster -------------------------------------------------- */
