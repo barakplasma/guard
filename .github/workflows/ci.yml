@@ -33,9 +33,14 @@ jobs:
         # Advisory, never blocking: DISABLE_ERRORS reports every finding in the
         # job summary and still exits 0. What gates a pull request is the
         # `check` job below - oxlint, the scheduler tests and the build. The
-        # baseline this branch establishes is worth keeping clean, but a link
-        # that was reachable yesterday or a new rule in a linter this repo does
-        # not otherwise run should not hold a merge.
+        # clean baseline is worth keeping, but a link that was reachable
+        # yesterday or a new rule in a linter this repo does not otherwise run
+        # should not hold a merge.
+        #
+        # It does still *fix*, and commits what it fixes, which is the point: a
+        # formatting change a bot can make is not worth a human's attention. Note
+        # that the commit step's `if:` implies `success()`, so this only works
+        # while the step exits 0 - which is the second thing DISABLE_ERRORS buys.
         #
         # Which linters run is configured in .mega-linter.yml, not here: a
         # MegaLinter env variable *replaces* the file's value rather than adding
@@ -141,6 +146,7 @@ jobs:
           node tests/mui-pickers.e2e.mjs
           node tests/short-shifts.e2e.mjs
           node tests/assignment-badges.e2e.mjs
+          node tests/carried-duty.e2e.mjs
           node tests/mobile-viewports.mjs
         env:
           BASE: http://localhost:4173

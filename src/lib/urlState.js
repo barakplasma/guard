@@ -32,6 +32,9 @@ const inTs = (v) => (v === 0 || v == null ? null : v);
 /** The mission tuple as it stood before per-mission shift lengths were added. */
 const MISSION_TUPLE_WAS = 7;
 
+/** The pin tuple as it stood before pins could carry their own history record. */
+const PIN_TUPLE_WAS = 5;
+
 /**
  * Drop trailing "not set" slots from a positional tuple, never shortening it
  * past `keep`.
@@ -61,7 +64,13 @@ export function encodePlan(doc) {
     st: doc.strategy,
     ns: doc.nightStart,
     ne: doc.nightEnd,
-    emp: doc.employees.map((x) => trimTail([x.id, x.name, outTs(x.start), outTs(x.end), x.tags ?? []], 4)),
+    // Positions 5 and 6 are carried duty (ADR 006's table, ADR 015). Written
+    // only when non-zero, so an employee who has carried nothing encodes to
+    // exactly the bytes they always did.
+    emp: doc.employees.map((x) => trimTail([
+      x.id, x.name, outTs(x.start), outTs(x.end), x.tags ?? [],
+      x.carriedMinutes || null, x.carriedStints || null,
+    ], 4)),
     // Everything past `count` is *appended* to the mission tuple. Field order
     // is the wire format here, so appending is safe and reordering is not: an
     // older link simply has no seventh element and reads back as `null`, i.e.
@@ -76,8 +85,22 @@ export function encodePlan(doc) {
       // Position 13: on-call. Written only when true, so plans that never
       // heard of the flag encode to the exact bytes they always did.
       x.onCall ? 1 : null,
+      // Position 14: excluded employee ids. Empty arrays are trimmed by
+      // `trimTail`, so the same holds - a mission excluding nobody encodes
+      // exactly as it did before this field existed (ADR 006, ADR 014).
+      x.excludeEmployees ?? [],
     ], MISSION_TUPLE_WAS)),
-    pin: doc.pins.map((x) => [x.missionId, x.employeeId, outTs(x.start), outTs(x.end), x.frozen ? 1 : 0]),
+    // Position 5 is the history record (ADR 006's table, ADR 012's correction),
+    // written only once a pin has become a record of duty. One nested array
+    // rather than four appended positions on purpose: the mission type encodes
+    // as `0` for local, and `trimTail` cannot tell a meaningful trailing zero
+    // from an unset one. Nested, the whole stamp is either there or it is not.
+    pin: doc.pins.map((x) => trimTail([
+      x.missionId, x.employeeId, outTs(x.start), outTs(x.end), x.frozen ? 1 : 0,
+      x.record
+        ? [x.record.employeeName, x.record.missionName, TYPE_CODE[x.record.missionType] ?? 0, x.record.tags ?? []]
+        : null,
+    ], PIN_TUPLE_WAS)),
     ...(doc.tags?.length ? { tg: doc.tags.map((t) => [t.id, t.name, t.minNightRestMinutes]) } : {}),
   };
   return compressToEncodedURIComponent(JSON.stringify(compact));
@@ -116,11 +139,13 @@ export function decodePlan(blob) {
       nightStart: raw.ns ?? undefined,
       nightEnd: raw.ne ?? undefined,
       tags: (raw.tg ?? []).map(([id, name, minNightRestMinutes]) => ({ id, name, minNightRestMinutes })),
-      employees: (raw.emp ?? []).map(([id, name, s, e, tags]) => ({
+      employees: (raw.emp ?? []).map(([id, name, s, e, tags, carriedMinutes, carriedStints]) => ({
         id, name, start: inTs(s), end: inTs(e), tags,
+        carriedMinutes: carriedMinutes ?? 0,
+        carriedStints: carriedStints ?? 0,
       })),
       missions: (raw.mis ?? []).map((
-        [id, name, type, s, e, count, nightCount, shiftMinutes, nightShiftMinutes, dayStart, dayEnd, requires, excludes, onCall],
+        [id, name, type, s, e, count, nightCount, shiftMinutes, nightShiftMinutes, dayStart, dayEnd, requires, excludes, onCall, excludeEmployees],
       ) => ({
         id,
         name,
@@ -140,9 +165,23 @@ export function decodePlan(blob) {
         requires: requires == null ? [] : Array.from({ length: Math.ceil(requires.length / 2) }, (_, i) => ({ tag: requires[i * 2], count: requires[i * 2 + 1] })),
         excludes: excludes ?? [],
         onCall: onCall === 1,
+        excludeEmployees: excludeEmployees ?? [],
       })),
-      pins: (raw.pin ?? []).map(([missionId, employeeId, s, e, f]) => ({
-        missionId, employeeId, start: inTs(s), end: inTs(e), frozen: Boolean(f),
+      pins: (raw.pin ?? []).map(([missionId, employeeId, s, e, f, rec]) => ({
+        missionId,
+        employeeId,
+        start: inTs(s),
+        end: inTs(e),
+        frozen: Boolean(f),
+        // A link written before pins could carry a record has no sixth element
+        // and reads back as `null`, which is exactly what it always meant: this
+        // pin is an instruction, not yet a record.
+        record: rec == null ? null : {
+          employeeName: rec[0] ?? '',
+          missionName: rec[1] ?? '',
+          missionType: CODE_TYPE[rec[2]] ?? 'local',
+          tags: rec[3] ?? [],
+        },
       })),
     });
     return { ok: true, plan: doc };

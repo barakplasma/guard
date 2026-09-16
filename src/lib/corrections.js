@@ -22,6 +22,7 @@
  */
 
 import { missingQualifications } from './crew.js';
+import { isExcluded } from './planner.js';
 import { restCost, restMetrics } from './rest.js';
 
 const overlaps = (a, b) => a.start < b.end && b.start < a.end;
@@ -41,8 +42,8 @@ const covering = (rows, missionId, start, end) =>
 const freeOf = (rows, employeeId, start, end) =>
   !rows.some((r) => r.employeeId === employeeId && overlaps(r, { start, end }));
 
-/** Is `employee` excluded from `mission` by a qualification? */
-const excluded = (mission, employee) => (mission.excludes ?? []).some((t) => (employee.tags ?? []).includes(t));
+/** Excluded from `mission`, by qualification or by name - see `isExcluded`. */
+const excluded = isExcluded;
 
 /**
  * Unmet required-qualification windows over the raw rows, one per mission

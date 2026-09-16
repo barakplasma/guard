@@ -15,7 +15,7 @@ import { usePlan } from '../state/PlanContext.jsx';
 import { sortByHebrewName } from '../lib/sort.js';
 import { nextTopOfHour } from '../lib/planSchema.js';
 import { t } from '../strings.js';
-import { MissionQualifications } from '../components/Qualifications.jsx';
+import { MissionQualifications, MissionExcludedEmployees } from '../components/Qualifications.jsx';
 
 function MissionCard({ mission, doc, onChange, onRemove, onDuplicate, onAssign }) {
   // Anyone holding a pin on this mission is on its roster. A whole-mission
@@ -225,6 +225,7 @@ function MissionCard({ mission, doc, onChange, onRemove, onDuplicate, onAssign }
         </Stack>
 
         <MissionQualifications mission={mission} onChange={onChange} />
+        <MissionExcludedEmployees mission={mission} onChange={onChange} />
         {openEnded && (
           <Typography variant="caption" color="text.secondary">
             {t.missionNoEndHelp}

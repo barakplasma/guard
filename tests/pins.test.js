@@ -3,12 +3,21 @@ import assert from 'node:assert/strict';
 import {
   applyClearPin, applyClearPinsForMission, applyMissionAssignees, applySwap,
   clearStalePins, countStalePins, cutPin, freezeElapsedBeforeEdit, freezePastShifts, pinCovers,
-  pruneStalePins,
+  acceptSchedule,
 } from '../src/lib/pins.js';
 import { WARN } from '../src/lib/planner.js';
 import { plan } from '../src/lib/planner.js';
-import { toPlannerInput } from '../src/lib/planSchema.js';
+import { planSchema, prunePins, toPlannerInput } from '../src/lib/planSchema.js';
 
+/**
+ * The app's own path, spelled out: accept a schedule for `prev`, then freeze
+ * elapsed rows out of *that* result. `freezeElapsedBeforeEdit` no longer solves
+ * for itself, so every caller has to say which answer it is recording.
+ */
+const freezeBefore = (prev, next, now) => freezeElapsedBeforeEdit(prev, next, now, acceptSchedule(prev, now).result);
+
+
+const DAY = 24 * 60 * 60 * 1000;
 const HOUR = 3600 * 1000;
 const START = new Date(2026, 0, 5, 8, 0, 0, 0).getTime();
 
@@ -365,7 +374,7 @@ test('freezing the past adds nothing for a whole-mission pin whose hours have el
     pins: [{ missionId: 'm1', employeeId: 'e1', start: null, end: null }],
   });
   const next = { ...prev, title: 'edited' };
-  const merged = freezeElapsedBeforeEdit(prev, next, START + 3 * HOUR);
+  const merged = freezeBefore(prev, next, START + 3 * HOUR);
   assert.deepEqual(merged.pins, prev.pins, 'the pinned hours were already decided by hand');
 });
 
@@ -393,7 +402,7 @@ test('freezeElapsedBeforeEdit locks in the past even on an edit that never went 
   // An edit elsewhere in the document - e.g. adding an employee from the
   // Employees page - made after the first hour has already elapsed.
   const next = withExtraEmployee(prev);
-  const merged = freezeElapsedBeforeEdit(prev, next, START + HOUR);
+  const merged = freezeBefore(prev, next, START + HOUR);
 
   assertFirstHourPreserved(prev, merged);
 });
@@ -403,7 +412,7 @@ test('freezeElapsedBeforeEdit lets an intentional clear of a frozen shift stick'
   const firstHour = firstHourOf(prev);
 
   // An earlier edit already froze the elapsed shift.
-  const frozen = freezeElapsedBeforeEdit(prev, prev, START + HOUR);
+  const frozen = freezeBefore(prev, prev, START + HOUR);
   assert.equal(frozen.pins.length, 1, 'the elapsed shift got pinned');
 
   // The user clears that pin on purpose, then this clear is applied the same
@@ -413,17 +422,17 @@ test('freezeElapsedBeforeEdit lets an intentional clear of a frozen shift stick'
   });
   assert.equal(cleared.pins.length, 0);
 
-  const result = freezeElapsedBeforeEdit(frozen, cleared, START + HOUR);
+  const result = freezeBefore(frozen, cleared, START + HOUR);
   assert.equal(result.pins.length, 0, 'the clear must survive, not be undone by the next freeze pass');
 });
 
 test('freezeElapsedBeforeEdit lets clearAllPins wipe frozen shifts too', () => {
   const prev = twoHourLocalDoc();
-  const frozen = freezeElapsedBeforeEdit(prev, prev, START + HOUR);
+  const frozen = freezeBefore(prev, prev, START + HOUR);
   assert.ok(frozen.pins.length > 0, 'sanity check: something was actually frozen');
 
   const clearedAll = { ...frozen, pins: [] };
-  const result = freezeElapsedBeforeEdit(frozen, clearedAll, START + HOUR);
+  const result = freezeBefore(frozen, clearedAll, START + HOUR);
   assert.equal(result.pins.length, 0, 'clearAllPins is not fought by the freeze step');
 });
 
@@ -432,14 +441,64 @@ test('freezeElapsedBeforeEdit is a no-op before anything has elapsed', () => {
     missions: [{ id: 'm1', name: 'Gate', type: 'local', start: null, end: null, count: 1 }],
   });
   const next = { ...prev, title: 'renamed' };
-  const result = freezeElapsedBeforeEdit(prev, next, START - HOUR);
+  const result = freezeBefore(prev, next, START - HOUR);
   assert.equal(result, next, 'nothing elapsed yet, so next is returned unchanged');
 });
 
 test('freezeElapsedBeforeEdit skips freezing when the previous document has no employees or missions yet', () => {
   const prev = doc({ employees: [], missions: [] });
   const next = { ...prev, title: 'x' };
-  assert.equal(freezeElapsedBeforeEdit(prev, next, START + HOUR), next);
+  assert.equal(freezeBefore(prev, next, START + HOUR), next);
+});
+
+/* --- the freeze records an accepted answer, it does not compute one ----- */
+
+test('freezeElapsedBeforeEdit records the result it was handed, not one it computes', () => {
+  // The point of ADR 011's prerequisite. Today's engine is deterministic and
+  // synchronous, so solving `prev` again reproduces the screen and this defect
+  // is invisible. Hand it a result that deliberately disagrees with what the
+  // engine would produce and the difference becomes visible: what gets written
+  // into the permanent record must be the answer somebody accepted.
+  const prev = twoHourLocalDoc();
+  const computed = acceptSchedule(prev, START + HOUR).result;
+  const first = computed.shifts.find((sh) => sh.start === START);
+  const other = prev.employees.find((e) => e.id !== first.employeeId);
+
+  const accepted = {
+    ...computed,
+    shifts: computed.shifts.map((sh) => (sh.start === START
+      ? { ...sh, employeeId: other.id, employeeName: other.name }
+      : sh)),
+  };
+
+  const merged = freezeElapsedBeforeEdit(prev, { ...prev, title: 'edited' }, START + HOUR, accepted);
+  const pinned = merged.pins.filter((pin) => pin.start === START);
+  assert.equal(pinned.length, 1);
+  assert.equal(pinned[0].employeeId, other.id, 'the accepted answer is what became history');
+  assert.notEqual(pinned[0].employeeId, first.employeeId);
+});
+
+test('freezeElapsedBeforeEdit refuses to run without an accepted result', () => {
+  // Not a defaulted parameter. A caller with no accepted answer has nothing to
+  // record, and quietly solving for one is the whole defect - so the omission
+  // has to be loud rather than silently reconstruct a past nobody was shown.
+  const prev = twoHourLocalDoc();
+  assert.throws(
+    () => freezeElapsedBeforeEdit(prev, prev, START + HOUR),
+    /accepted result/,
+  );
+});
+
+test('freezeElapsedBeforeEdit does not freeze a result carrying an engine bug', () => {
+  // The guarantee CLAUDE.md states as "history freezing does not freeze invalid
+  // output". It used to hold because the freeze solved in strict mode and
+  // caught the throw; the accepted result is computed in report mode, so it
+  // holds through the warning instead.
+  const prev = twoHourLocalDoc();
+  const accepted = acceptSchedule(prev, START + HOUR).result;
+  const broken = { ...accepted, warnings: [...accepted.warnings, { code: WARN.ENGINE_BUG }] };
+  const next = { ...prev, title: 'edited' };
+  assert.equal(freezeElapsedBeforeEdit(prev, next, START + HOUR, broken), next);
 });
 
 /* --- mission roster -------------------------------------------------- */
@@ -496,16 +555,26 @@ const stale = (over = {}) => doc({
   ...over,
 });
 
-test('countStalePins counts everything outside the period, both sides', () => {
-  assert.equal(countStalePins(stale()), 3);
+test('countStalePins counts what has elapsed, not what is merely outside', () => {
+  // Three pins sit outside the period and only two of them are history. The
+  // third is beyond the end - an assignment somebody made for later, which the
+  // engine ignores but which is a plan rather than a record. Counting it here
+  // would put it in the export as completed duty and then delete it.
+  assert.equal(countStalePins(stale()), 2);
   assert.equal(countStalePins(doc()), 0);
 });
 
-test('clearStalePins removes them all and leaves live pins alone', () => {
+test('clearStalePins removes elapsed history and leaves everything else alone', () => {
   const cleaned = clearStalePins(stale());
-  assert.equal(cleaned.pins.length, 1);
-  assert.equal(cleaned.pins[0].employeeId, 'e2');
-  assert.equal(cleaned.pins[0].start, START + HOUR);
+  assert.equal(cleaned.pins.length, 2, 'the live pin and the one beyond the end both survive');
+  assert.ok(
+    cleaned.pins.some((p) => p.start === START + HOUR),
+    'the live pin is untouched',
+  );
+  assert.ok(
+    cleaned.pins.some((p) => p.start === START + 9 * HOUR),
+    'and so is the assignment beyond the end - that is a plan, not residue',
+  );
 });
 
 test('clearStalePins returns the same document when there is nothing to clear', () => {
@@ -533,24 +602,24 @@ test('a whole-window pin is never stale, whatever the period is', () => {
   assert.equal(clearStalePins(d), d);
 });
 
-test('the automatic prune drops finished history but never future assignments', () => {
+test('no edit removes recorded duty on its own (ADR 012)', () => {
+  // There used to be an automatic prune here, and it was correct while
+  // out-of-period pins were residue. Once a rolled-past window is *exported*,
+  // those pins are the only durable record, and the prune deleted 288 of them
+  // per unrelated edit - see scripts/rollForwardLoss.mjs. Removal is explicit
+  // now, and this asserts that nothing does it silently.
   const prev = stale();
-  const pruned = pruneStalePins(prev, { ...prev, title: 'renamed' });
-  assert.equal(pruned.pins.length, 2, 'the two pre-period pins go');
-  assert.ok(pruned.pins.some((p) => p.start === START + 9 * HOUR), 'the post-period one stays');
-  assert.ok(pruned.pins.some((p) => p.start === START + HOUR), 'so does the live one');
-});
-
-test('the automatic prune refuses to act while the period itself is being edited', () => {
-  // The date fields emit an edit on every intermediate value that parses, so a
-  // half-typed year must never be able to delete history: setDoc navigates
-  // with replace, and there is no way back.
-  const prev = stale();
-  const mid = { ...prev, start: START + 500 * HOUR, end: START + 504 * HOUR };
-  assert.equal(pruneStalePins(prev, mid), mid, 'nothing removed while the window moves');
-
-  // Once the window is standing still again, the ordinary cleanup resumes.
-  assert.equal(pruneStalePins(mid, { ...mid, title: 'x' }).pins.length, 0);
+  const rolled = { ...prev, start: START + 500 * HOUR, end: START + 504 * HOUR };
+  assert.equal(
+    planSchema.parse(prunePins(rolled)).pins.length,
+    prev.pins.length,
+    'rolling the window past history keeps all of it',
+  );
+  assert.equal(
+    planSchema.parse(prunePins({ ...rolled, title: 'x' })).pins.length,
+    prev.pins.length,
+    'and so does the next ordinary edit, which is where the loss used to land',
+  );
 });
 
 test('the planner counts stale pins once instead of warning about each', () => {
@@ -580,9 +649,15 @@ test('a pin inside the period that its mission cannot host is still a real warni
 /** One employee, one mission, one pin - varied per case. */
 const residue = (mission, pin) => doc({ missions: [mission], pins: [pin] });
 
+/**
+ * What the warning reports as *clearable*, which is the number the button acts
+ * on. Deliberately `elapsed` rather than `count`: the warning counts everything
+ * the engine is ignoring, on both sides of the window, and only the elapsed
+ * half is history the button may export and remove.
+ */
 const outOfPeriodCount = (d) => {
   const w = plan(toPlannerInput(d)).warnings.find((x) => x.code === WARN.PIN_OUT_OF_PERIOD);
-  return w ? w.count : 0;
+  return w ? w.elapsed : 0;
 };
 
 const BEFORE = { start: START - 10 * HOUR, end: START - 9 * HOUR };
@@ -624,7 +699,8 @@ test('a live remote pin is never collected, however stale its range reads', () =
 test('the reported count is exactly what the button will remove', () => {
   // The button only exists alongside this warning, so a count taken anywhere
   // that cannot see a dropped mission would strand that history with no way to
-  // reach it. Both sides share one predicate; this is that contract.
+  // reach it. One shared predicate keeps the three honest - what the warning
+  // reports as clearable is what the export carries is what the button removes.
   const cases = [
     residue({ id: 'm1', name: 'M', type: 'local', ...BEFORE, count: 1 },
       { missionId: 'm1', employeeId: 'e1', start: null, end: null, frozen: true }),
@@ -635,6 +711,29 @@ test('the reported count is exactly what the button will remove', () => {
     stale(),
   ];
   for (const d of cases) assert.equal(outOfPeriodCount(d), countStalePins(d));
+});
+
+test('an assignment beyond the period end is never called history', () => {
+  // The bug this pins: `isOutOfPeriod` is true on both sides of the window, so
+  // an assignment made for next week was written into the history CSV as
+  // completed duty and then deleted by the button. Somebody's plan, consumed by
+  // narrowing the period.
+  const later = { start: START + 7 * DAY, end: START + 7 * DAY + 4 * HOUR };
+  const d = doc({
+    missions: [{ id: 'next', name: 'Next week', type: 'local', ...later, count: 1 }],
+    pins: [{ missionId: 'next', employeeId: 'e1', ...later, frozen: false }],
+  });
+  assert.equal(outOfPeriodCount(d), 0, 'the warning reports nothing clearable');
+  assert.equal(countStalePins(d), 0, 'the button does not offer to remove it');
+  assert.equal(clearStalePins(d).pins.length, 1, 'and pressing it anyway leaves it alone');
+
+  // It is still reported, because the engine is not scheduling it and the user
+  // should know. That is the half that stays two-sided.
+  const result = plan({ ...toPlannerInput(d), onInvariantViolation: 'report' });
+  const warning = result.warnings.find((w) => w.code === 'pin-out-of-period');
+  assert.ok(warning, 'the warning still names it');
+  assert.equal(warning.count, 1, 'counted among what is being ignored');
+  assert.equal(warning.elapsed, 0, 'but none of it is clearable history');
 });
 
 test('clearing residue never changes a single shift', () => {

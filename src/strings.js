@@ -189,6 +189,10 @@ export const t = {
   stints: 'משמרות',
   minGap: 'הפסקה מזערית',
   spread: 'פער בין העמוס לפנוי ביותר',
+  // Duty stood before this period (ADR 015). Shown only for someone who carries
+  // any, so the ordinary rota - where nobody does - reads exactly as it did.
+  carriedBefore: (minutes) => `כולל ${minutes} מתקופות קודמות`,
+  spreadWithCarried: (window, total) => `פער בחלון: ${window} · פער כולל תקופות קודמות: ${total}`,
 
   // sharing
   shareSection: 'שיתוף וייצוא',
@@ -225,6 +229,13 @@ export const t = {
   warnEmployeeOutside: (name) => `הזמינות של ${name} נמצאת מחוץ לתקופה.`,
   warnPinConflict: (name) => `${name} משובץ ידנית לשתי משימות חופפות — השיבוץ הישן בוטל.`,
   warnPinOverflow: (name) => `אין מספיק מקומות למשימה — השיבוץ הידני של ${name} בוטל.`,
+  // The rolled-past log (ADR 008's defect 2, ADR 012). Read-only on purpose:
+  // these hours are outside the period, so the engine cannot schedule them and
+  // there is nothing here to edit - the point is to see what the export is
+  // about to carry away before pressing the button that carries it.
+  pastLogTitle: 'היסטוריה מחוץ לתקופה',
+  pastLogNote: 'משמרות שהתקופה כבר עברה אותן. לקריאה בלבד — הן נשמרות בקובץ הייצוא.',
+
   // A manual assignment now outranks a stale availability window instead of
   // being cancelled by one, so this is informational: the shift stands, and the
   // availability is the thing that looks wrong. No repair button is offered -
@@ -238,10 +249,21 @@ export const t = {
   // of these behind, and one alert per pin reads as a malfunction rather than
   // the harmless residue it is. The wording says "ignored", not "failed" -
   // nothing is broken, the plan simply no longer covers those hours.
-  warnPinOutOfPeriod: (count) => (count === 1
-    ? 'שיבוץ ידני אחד נמצא מחוץ לתקופת הסידור ולכן לא נלקח בחשבון.'
-    : `${count} שיבוצים ידניים נמצאים מחוץ לתקופת הסידור ולכן לא נלקחו בחשבון.`),
-  removeStalePins: 'נקה שיבוצים ישנים',
+  //
+  // Two numbers, because only one of them is history. An assignment past the
+  // period's *end* is a plan somebody made for later, not a record of duty
+  // done - so the button that exports and clears must not touch it, and the
+  // message must not imply that it will (ADR 012).
+  warnPinOutOfPeriod: (count, elapsed = count) => {
+    const outside = count === 1
+      ? 'שיבוץ ידני אחד נמצא מחוץ לתקופת הסידור ולכן לא נלקח בחשבון.'
+      : `${count} שיבוצים ידניים נמצאים מחוץ לתקופת הסידור ולכן לא נלקחו בחשבון.`;
+    if (elapsed === 0) return `${outside} כולם מתוכננים לאחר סוף התקופה ויישמרו כמות שהם.`;
+    if (elapsed === count) return outside;
+    return `${outside} ${elapsed} מהם היסטוריה שהתקופה עברה אותה; השאר מתוכננים לאחר סופה ויישמרו.`;
+  },
+  removeStalePins: 'ייצא ונקה שיבוצים ישנים',
+  excludedEmployees: 'לא לשבץ את',
 
   // assignment badges: a manual assignment is a locked decision, an
   // automatically preserved elapsed one is history - the two must never read

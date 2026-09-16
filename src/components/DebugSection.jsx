@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import {
   Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, Divider, Stack, Typography,
 } from '@mui/material';
@@ -6,6 +7,7 @@ import CodeIcon from '@mui/icons-material/Code';
 import { WARN } from '../lib/planner.js';
 import { planToReadableText } from '../lib/planText.js';
 import { whatsappText } from '../lib/exportText.js';
+import { outOfPeriodLog } from '../lib/logExport.js';
 import useCopyToast from '../hooks/useCopyToast.jsx';
 import { t } from '../strings.js';
 import { ERROR_FINDINGS, findingText } from '../lib/findings.js';
@@ -41,7 +43,7 @@ function warningText(warning, doc) {
     case WARN.PIN_CONFLICT: return t.warnPinConflict(employee);
     case WARN.PIN_OVERFLOW: return t.warnPinOverflow(employee);
     case WARN.PIN_UNAVAILABLE: return t.warnPinUnavailable(employee);
-    case WARN.PIN_OUT_OF_PERIOD: return t.warnPinOutOfPeriod(warning.count);
+    case WARN.PIN_OUT_OF_PERIOD: return t.warnPinOutOfPeriod(warning.count, warning.elapsed);
     case WARN.PIN_AVAILABILITY_OVERRIDDEN: return t.warnPinAvailabilityOverridden(employee);
     default: return warning.code;
   }
@@ -54,6 +56,10 @@ function warningText(warning, doc) {
  */
 function warningAction(warning, key, onClearPinByWarning, onClearStalePins) {
   if (warning.code === WARN.PIN_OUT_OF_PERIOD) {
+    // No button when there is no history to export. Everything outside the
+    // period is then an assignment made for after it ends, which this must
+    // never offer to remove - it is a plan, not a record (ADR 012).
+    if (warning.elapsed === 0) return undefined;
     return (
       <Button color="inherit" size="small" onClick={onClearStalePins} data-testid="remove-stale-pins">
         {t.removeStalePins}
@@ -114,6 +120,27 @@ export default function DebugSection({ doc, result, onClearPinByWarning, onClear
   const planText = planToReadableText(doc);
   const scheduleText = whatsappText(result, { title: doc.title });
 
+  /**
+   * Duty the period has rolled past (ADR 008's defect 2, ADR 012).
+   *
+   * It sits here rather than on the schedule itself because this is where the
+   * `PIN_OUT_OF_PERIOD` alert counts it and where the button that exports and
+   * removes it lives. Pressing that button used to be an act of faith - it says
+   * how many assignments it is about to carry away and nothing about whose they
+   * were.
+   *
+   * Read-only by construction: these hours are outside the period, so the engine
+   * ignores them and there is nothing here that an edit could mean. Rendered
+   * through the same formatter as the shareable text, so it reads the way the
+   * rota reads, and as a `pre` rather than a table - a table of an unbounded
+   * number of past shifts is the column-overflow problem this codebase keeps
+   * finding on a phone.
+   */
+  const pastLog = useMemo(() => {
+    const rows = outOfPeriodLog(doc);
+    return rows.length ? whatsappText({ shifts: rows }, { title: t.pastLogTitle }) : null;
+  }, [doc]);
+
   return (
     <>
     <Accordion variant="outlined" disableGutters sx={{ mt: 2 }}>
@@ -146,6 +173,26 @@ export default function DebugSection({ doc, result, onClearPinByWarning, onClear
               </Alert>
             );
           })}
+
+          {pastLog && (
+            <>
+              <Divider sx={{ my: 1.25 }} />
+              <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: 'center', mb: 0.5 }}>
+                <Typography variant="caption" color="text.secondary" fontWeight={700} sx={{ flex: 1 }}>
+                  {t.pastLogTitle}
+                </Typography>
+                <Button size="small" onClick={() => copy(pastLog)} data-testid="copy-past-log">
+                  {t.copyPlanData}
+                </Button>
+              </Stack>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                {t.pastLogNote}
+              </Typography>
+              <Box component="pre" data-testid="past-log-text" sx={preSx}>
+                {pastLog}
+              </Box>
+            </>
+          )}
 
           <Divider sx={{ my: 1.25 }} />
 

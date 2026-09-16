@@ -64,9 +64,35 @@ test('pins survive the round trip, including whole-mission ones', () => {
   const { plan: back } = decodePlan(encodePlan(doc));
   assert.equal(back.pins.length, 2);
   assert.deepEqual(back.pins[0], {
-    missionId: 'm2', employeeId: 'e1', start: null, end: null, frozen: false,
+    missionId: 'm2', employeeId: 'e1', start: null, end: null, frozen: false, record: null,
   });
   assert.equal(back.pins[1].start, START + HOUR);
+});
+
+test('a pin carrying a history record round-trips it whole', () => {
+  // The record is what makes an elapsed pin readable after the guard or the
+  // mission has been deleted, so it has to survive the one storage this app
+  // has. Position 5 of the pin tuple (ADR 006).
+  const base = sample();
+  const record = {
+    employeeName: 'דנה', missionName: 'שער ראשי', missionType: 'remote', tags: ['t1', 't2'],
+  };
+  const doc = { ...base, pins: [{ ...base.pins[0], frozen: true, record }] };
+  const { plan: back } = decodePlan(encodePlan(doc));
+  assert.deepEqual(back.pins[0].record, record);
+  assert.equal(back.pins[0].frozen, true);
+});
+
+test('a link written before pins carried records still decodes as instructions', () => {
+  // The append-only discipline: a five-element pin tuple has no sixth position,
+  // which reads back as "no record" - which is exactly what those links meant.
+  const doc = sample();
+  const blob = encodePlan(doc);
+  const { plan: back } = decodePlan(blob);
+  assert.ok(back.pins.every((pin) => pin.record === null));
+  // And a document whose pins carry no record encodes to the bytes it always
+  // did, so every link already shared keeps its string.
+  assert.equal(encodePlan(back), blob);
 });
 
 test('a shared link reproduces an identical schedule', () => {

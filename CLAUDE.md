@@ -98,7 +98,23 @@ new employee or a widened availability window from silently reshuffling history 
 locks it in. `PlanContext`'s `setDoc` does that by running `freezeElapsedBeforeEdit`
 (`src/lib/pins.js`) on every mutation, before the edit is applied: whatever the engine had already
 decided for an already-elapsed, auto-assigned shift becomes a real pin, indistinguishable from one
-a person swapped by hand. This has to sit in `setDoc`, not a `SchedulePage` render effect — every
+a person swapped by hand.
+
+**The freeze consumes an accepted result; it never solves for one.** There is exactly one solve
+per document, in `acceptSchedule` (`src/lib/pins.js`), which `PlanContext` caches by document
+identity — the schedule screen renders that object and `setDoc` freezes elapsed rows out of *that
+same object*. Identity, not equivalence: a second solve reproduces the screen only because the
+engine happens to be deterministic and synchronous, and under an async solver with a time limit it
+would write into the permanent record a past nobody was ever shown (ADR 011's prerequisite). So
+`freezeElapsedBeforeEdit` takes the result as a **required** argument and throws without one — a
+caller with no accepted answer has nothing to record. Two things follow. The freeze runs with `now`
+as `loggedBefore`, exactly as the display does; the old omission was justified by an argument that
+only holds for elapsed segments already carrying a record, and those come back as pinned rows the
+freeze discards anyway. And "does not freeze invalid output" now holds through `freezePastShifts`'s
+`engine-bug` check rather than a caught throw, because the accepted result is computed in report
+mode.
+
+This has to sit in `setDoc`, not a `SchedulePage` render effect — every
 mutator (`addEmployee`, `updateMission`, a swap, …) funnels through it, so an edit made from the
 Employees or Missions page freezes history exactly like one made from the schedule screen. The
 freeze snapshot is taken from the *previous* document, not the one the edit produces: a shift
@@ -125,16 +141,134 @@ inside `normalizePins`. A mission that fell out of the period is already gone fr
 `missionById`, so its pins vanish before anything in there can count them — and since the button
 that clears residue only exists alongside this warning, a count taken in there would strand that
 history with no way to reach it. Sharing one predicate with `clearStalePins` is what keeps the
-number honest: what the warning reports is exactly what the button removes, and
+number honest: what the warning reports as *clearable* is exactly what the button removes, and
 `tests/pins.test.js` asserts that.
 
-Cleanup comes in two halves, and the asymmetry is deliberate. `clearStalePins` is the button:
-explicit, and it takes both sides of the window. `pruneStalePins` runs inside `setDoc` and is
-much more timid — it declines entirely when the edit moves `start`/`end`, because the date
-fields emit an edit on every intermediate value that parses and a half-typed year would take
-real history with it, unrecoverably (`setDoc` navigates with `replace`; there is no way back).
-It also only ever drops pins that finished *before* the period starts: a pin past the end is
-one the user is probably about to extend to cover.
+**Only the past is history, and the predicate says which.** `isOutOfPeriod` is true on *both*
+sides of the window, which is right for the engine — it schedules neither — and wrong for anything
+that then calls a pin a record of duty that happened. Keyed on it, the export wrote next week's
+assignment into the history CSV as completed duty and the button beside the warning deleted it:
+somebody's plan, consumed by narrowing the period. So `isElapsedBeforePeriod` governs everything
+that calls a pin history — the CSV, `countStalePins`, `clearStalePins` — while the warning still
+counts both sides, because an assignment the engine is ignoring is worth knowing about whichever
+way it fell. That is why the warning carries two numbers, `count` and `elapsed`, and why the button
+only renders when there is history to export (ADR 012's correction).
+
+There is no automatic cleanup, and that is deliberate. `pruneStalePins` used to run inside `setDoc`
+and was right while out-of-period pins were residue; ADR 012 inverts that by making them the only
+durable record, so it is gone and `src/lib/pins.js` keeps the reasoning where it used to live.
+Nothing removes recorded duty without an export any more.
+
+**A record cannot be a set of live references.** A pin is two ids and a range, all three of which
+are resolved at read time — names from the employee and mission lists, a null bound from the
+mission's window. Right while it is an instruction to the engine, wrong the moment it is the record
+of a shift that happened. Removing a guard who had left deleted 24 of 96 recorded rows; removing a
+mission took 48; a rename left all 96 and made 24 of them name somebody who had not been there
+(`scripts/historyRecordLoss.mjs`). So a pin that has become history carries a `record` — the
+employee's name, the mission's name and type, and the qualifications held *at the time* — stamped
+once and never refreshed, with its bounds resolved to literal instants at the same moment.
+`freezePastShifts` stamps what it writes; `captureHistory` catches the hand-made pins, which become
+history only when the period rolls past them. `captureHistory` runs in `setDoc` **before**
+`prunePins`, reads `prev` for the names and `next`'s period for the question, because one edit can
+roll the window forward *and* remove the guard now behind it, and reading either document for both
+halves loses that case. `prunePins` keeps anything carrying a record — a recorded pin is safe to
+leave dangling, since `normalizePins` skips stale references and the bounds no longer need their
+mission. `outOfPeriodLog` reads the record, falling back to the live lists only for pins written
+before the field existed (ADR 012's second correction; pin tuple position 5 in ADR 006).
+
+### Duty does not stop counting when the window rolls past it
+
+The rota is planned 72 hours at a time and rolled forward, and `balanced` evens
+out the window it is *given* — so without help, an hour stops counting the moment
+it falls behind the window. A guard away for two days came back permanently 36
+hours behind, and the summary reported a spread of **0.0h** at every roll while
+it happened. A number that is silent about a problem is a gap; a number that says
+there is no problem is a wrong answer.
+
+So duty already stood is an input to fairness, from **two sources, summed**: pins
+that now lie outside the period, and `carriedMinutes`/`carriedStints` on the
+employee. The first is read from the *raw* missions, exactly like the
+`PIN_OUT_OF_PERIOD` count and for the same reason — a mission that has itself
+dropped out of the period is already gone from `missionById`, and the hours its
+pins record are no less real.
+
+Reading both is what keeps `clearStalePins` a change of **representation**, not of
+schedule: it converts the first into the second and the total does not move, so no
+shift moves. `tests/pins.test.js` asserted that before the field existed and still
+does. A fairness rule that only works after somebody presses a cleanup button is
+not a fairness rule, and the first attempt at this had exactly that shape.
+
+The two strategies read different units on purpose. `balanced` evens out hours, so
+it reads `carriedMinutes`; `rotation` counts shifts and never consults hours, so it
+reads `carriedStints` — carrying minutes would say nothing there. `carriedStints`
+is an approximation and says so: an out-of-period pin has no grid left to name a
+slot on, so a turn is one plan shift length, at least one.
+
+`st.minutes` is in **minutes** despite everything around it being epoch
+milliseconds — `occupy` divides by `MINUTE` on the way in. Seeding it cost an
+hour to a factor of 60,000.
+
+The debt is **normalized against the least-worked person and clamped to
+`MAX_UNBROKEN_MINUTES`** (`carriedDebts`), and both halves are load-bearing
+rather than tidy. In absolute hours, a newcomer joining a roster where everyone
+else has stood five hundred hours stood **72 of a 72-hour window without a
+break**; normalizing fixes that, because a roster where everybody has stood five
+hundred hours is a roster in balance. Unclamped — even with runs capped — that
+newcomer still takes 62 of a 72-hour window against everyone else's 20, so the
+clamp bounds how far one window may be tilted by a debt too old to settle here.
+
+The clamp is the *same quantity* as ADR 016's run cap, in code rather than by
+coincidence: repaying a debt is what builds a run, so a window may not owe
+anyone more continuous duty than it is willing to hand them.
+
+### Nobody stands more than six hours if anyone else is free
+
+`balanced`'s first tier is `midRun` (ADR 016), above the minutes key, and it
+exists because evening out hours is *exactly* what builds an unbroken run —
+whoever is behind is the cheapest candidate for the next slot and the one after
+it. Before it, where somebody joined a period part-way through, **half of those
+plans put a guard on post for 24 hours or more**, up to a full 72
+(`scripts/unbrokenRunSurvey.mjs`).
+
+Six hours is measured, not felt: at six no golden fixture changes and no test
+fails; at three, one golden moves. `occupy` tracks the stretch, so a person
+mid-run is mid-run however they got there, pins included.
+
+It does not reach zero and cannot. Of the plans that still hand somebody 24h+,
+**100% have nobody spare at all** — everyone present is on post every slot and
+there is no one to hand over to. Those are staffing shortages, and
+`long-unbroken-run` is the right answer to them.
+
+This also removed what looked like a hard limit. Before it, repayment rate and
+run length were one quantity and the honest reading was that a greedy
+minutes-first walk could not have both — which was the sharpest argument this
+repo had for ADR 011, and was wrong. The second objective just needed a tier of
+its own rather than a setting of the first.
+
+While a debt is repaid the window spread is deliberately wide. That is the trade
+working, not failing, and the summary prints both figures so it does not read as a
+fault. Neither the caption nor the split figure appears when nobody carries
+anything: `buildStats` returns the object it always returned, which is what keeps
+every golden fixture and every shared link unchanged. Adding the fields
+unconditionally broke four goldens for a feature those plans do not use — the fix
+was the wire format's own discipline, write it only when it carries a value, not a
+looser test.
+
+### Asking the engine structural questions
+
+`segmentGrid`, `acceptedPins` and `countAt` are exported so nothing outside
+`planner.js` has to rebuild where a shift begins, which pins survived, or how many
+people a mission wants at 03:00. A second implementation of any of those is wrong
+eventually, in a way neither side reveals on its own reading — the same argument
+that makes one shared `segmentsOf` non-negotiable *inside* the engine, carried past
+the module boundary.
+
+`segmentGrid` is **type-agnostic**, and that is a trap worth knowing before using
+it. It cuts a remote mission on the house grid like any other, because it reads
+shift lengths and never looks at `type`; the engine gets away with that by never
+asking — phase 2 claims remote and daily missions whole. A caller that read those
+segments as shifts would hand a remote mission a different crew every hour.
+`tests/planner.segmentGrid.test.js` pins it.
 
 ### Strategies
 
@@ -272,7 +406,8 @@ npm run lint && npm test && npm run build
 ```
 
 For anything touching the UI, exports, sharing, or offline behaviour, also run the browser check
-(`tests/e2e.mjs`, instructions in `README.md`) — several bugs found during development were
+(`tests/e2e.mjs`, instructions in `README.md`; the other `*.e2e.mjs` files are focused scenarios
+run the same way) — several bugs found during development were
 invisible to the unit tests: MUI dropping test ids, a zod schema rejecting a freshly added mission,
 and a 24-hour remote mission rendering as `22:00–22:00`.
 
@@ -280,9 +415,57 @@ For layout changes run `tests/mobile-viewports.mjs` too (same server, three phon
 viewports). It fails on horizontal overflow and on any table cell whose content is wider than its
 column — the shape of every mobile layout bug reported so far.
 
+CI also runs **MegaLinter's JavaScript flavor** on every pull request (`ci.yml`, configured in
+`.mega-linter.yml`). It is **advisory, never blocking** — the job sets `DISABLE_ERRORS`, so every
+finding lands in the job summary and the step still exits 0. What gates a pull request is the
+`check` job: `oxlint`, the scheduler tests, the build. MegaLinter earns its place on what oxlint
+does not cover — workflows, YAML, shell, the Dockerfile, Markdown, secrets and dependency
+scanning — and not by holding a merge over a style opinion.
+
+**Which linters run is configured in `.mega-linter.yml` and nowhere else.** A MegaLinter env
+variable on the workflow step *replaces* the file's value rather than adding to it, so a
+`DISABLE_LINTERS: ACTION_ZIZMOR` on the step silently discarded every entry in the file — which is
+how `standard` kept running, and rewriting, after being disabled there.
+
+The job runs with `APPLY_FIXES: all` and commits what a linter rewrites, **on purpose**: a
+formatting fix that a bot can make is not worth a human's or an agent's attention. Two mechanics
+make that work, and both look like bugs until you know them. The commit step's `if:` implies
+`success()`, so while MegaLinter exited non-zero every fix it computed was written to the report
+folder and thrown away — `DISABLE_ERRORS` is what lets them land. And the push is made with
+`GITHUB_TOKEN`, which by design does **not** trigger a new workflow run, so the commit it lands
+carries no checks of its own and the pull request reads `unstable` until the next real push. That
+is acceptable only because these fixes are formatting; the commit underneath was verified green. That is what
+makes the exclusions below matter, though — a linter this repo does not agree with does not just
+report its opinion, it lands it. Three of them are load-bearing and will look arbitrary to anyone
+tidying up:
+
+- **`JAVASCRIPT_STANDARD` is off.** It enforces a no-semicolon style this repo does not use, and
+  under `APPLY_FIXES` it does not report the difference, it *rewrites* and commits — one run
+  reformatted 20 source files that way. Its single actual error was `self` and `caches` being
+  undefined in a service worker, which is what a service worker is. JavaScript here is `oxlint`'s
+  job, which carries three documented rule exceptions in `.oxlintrc.json`.
+- **`SPELL_CSPELL` is off permanently.** All 140 of its findings were Hebrew product words,
+  iCalendar keywords, British spellings or deliberate identifiers like `emps` and `sleepable` —
+  not one was a typo.
+- **`tests/fixtures/` is excluded from `JSON_PRETTIER`.** The goldens are written as one minified
+  line each by `scripts/writeGoldens.mjs`; prettier wants each of them exploded to ~180 lines.
+  Neither format is wrong, but two generators that disagree means every intentional golden
+  regeneration is followed by a bot commit re-flowing it, and the next `writeGoldens` run undoes
+  that again. The exclusion picks one owner. Every other JSON file here is already prettier-clean,
+  so nothing else needed excluding.
+
+`jscpd`, `markdownlint` and `lychee` stay named in `DISABLE_ERRORS_LINTERS` even though
+`DISABLE_ERRORS` already covers them: those three are advisory *by nature* — a style opinion, a
+duplication heuristic, a link that was reachable yesterday — so they should stay non-blocking even
+if the run is ever made to gate again. `.github/zizmor.yml` requires actions to be pinned to a ref
+rather than a hash, which rejects `@main` while keeping the rolling major tags the workflows
+deliberately track.
+
+Note that **actionlint only lints the shell inside `run:` blocks when `shellcheck` is on `PATH`**:
+running it locally without shellcheck installed reports clean and CI does not.
+
 `lz-string` is CommonJS: import it as a default and destructure, or the Node test run breaks while
 the Vite build keeps working.
-
 
 ## Daily missions, qualifications, and output checks
 

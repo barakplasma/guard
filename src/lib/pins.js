@@ -12,7 +12,7 @@
  * miss one of them.
  */
 
-import { plan as runPlanner, isOutOfPeriod, resolvePinWindow } from './planner.js';
+import { plan as runPlanner, isElapsedBeforePeriod, resolvePinWindow } from './planner.js';
 import { toPlannerInput, dailyOccurrences } from './planSchema.js';
 
 /** Resolve a pin's effective range, following the null-inheritance chain. */
@@ -149,13 +149,124 @@ export function applyClearPinsForMission(doc, { missionId, employeeId }) {
  */
 export function freezePastShifts(doc, result, now) {
   if (result.warnings?.some((w) => w.code === 'engine-bug')) return doc;
+  const tagsById = new Map(doc.employees.map((e) => [e.id, e.tags ?? []]));
   const newPins = result.shifts
     .filter((s) => !s.pinned && s.end <= now)
     .map((s) => ({
-      missionId: s.missionId, employeeId: s.employeeId, start: s.start, end: s.end, frozen: true,
+      missionId: s.missionId,
+      employeeId: s.employeeId,
+      start: s.start,
+      end: s.end,
+      frozen: true,
+      // Stamped here, at the instant the shift becomes a record, rather than
+      // later when the record is read. Anything read later is read through the
+      // *current* employee and mission lists, so a rename between the shift and
+      // the export would have the CSV claim somebody else stood that post - and
+      // a deletion would have it claim nobody did. The row already carries both
+      // names; the qualifications come off the document because the engine has
+      // no reason to put them on a shift.
+      record: {
+        employeeName: s.employeeName,
+        missionName: s.missionName,
+        missionType: s.type,
+        tags: [...(tagsById.get(s.employeeId) ?? [])],
+      },
     }));
   if (newPins.length === 0) return doc;
   return { ...doc, pins: [...doc.pins, ...newPins] };
+}
+
+/**
+ * Stamp every pin that has become a record of duty with what it needs to be
+ * read on its own (ADR 012's correction).
+ *
+ * `freezePastShifts` stamps the pins *it* writes, which is most of them. This
+ * catches the rest: an assignment somebody made by hand, which was an
+ * instruction to the engine when it was written and becomes history the moment
+ * the period rolls past it. Until it is stamped, it is three live references -
+ * an employee id, a mission id, and very often a null bound that inherits the
+ * mission's window - and deleting any of those takes the record with it.
+ *
+ * The two documents are read for different things, deliberately. Whether a pin
+ * is now history is asked of **`next`'s** period, because that is the window the
+ * document is about to have; who and what it names is read out of **`prev`'s**
+ * lists, because that is where the answer still exists. One edit can do both -
+ * roll the window forward and delete the guard who is now behind it - and
+ * reading either document for both halves loses that case in one direction or
+ * the other.
+ *
+ * Bounds are resolved to literal instants at the same time. An inherited bound
+ * is another live reference: a mission that is later moved, or deleted, would
+ * otherwise take the recorded hours with it. History does not follow anything.
+ */
+export function captureHistory(prev, next) {
+  const missionById = new Map(prev.missions.map((m) => [m.id, m]));
+  const employeeById = new Map(prev.employees.map((e) => [e.id, e]));
+  let changed = false;
+
+  const pins = next.pins.map((pin) => {
+    if (pin.record) return pin;
+    const mission = missionById.get(pin.missionId);
+    const employee = employeeById.get(pin.employeeId);
+    // Nothing left to copy from. The pin is already a dangling reference, so
+    // there is no record here to preserve - `prunePins` clears it as before.
+    if (!mission || !employee) return pin;
+    if (!isElapsedBeforePeriod(pin, mission, next.start, next.end)) return pin;
+
+    const { start, end } = resolvePinWindow(pin, mission, next.start, next.end);
+    changed = true;
+    return {
+      ...pin,
+      start,
+      end,
+      record: {
+        employeeName: employee.name,
+        missionName: mission.name,
+        missionType: mission.type,
+        tags: [...(employee.tags ?? [])],
+      },
+    };
+  });
+
+  return changed ? { ...next, pins } : next;
+}
+
+/**
+ * Solve `doc` and *accept* the answer: the one place a schedule comes into
+ * existence, and the only thing history is ever allowed to be built from.
+ *
+ * The freeze below used to call the engine itself, which was safe only by
+ * accident. With a deterministic, synchronous engine, solving `prev` a second
+ * time reproduces what the screen showed. With an asynchronous solver, a time
+ * limit, a different incumbent or a version bump it does not - and the freeze
+ * would then write into the permanent record assignments nobody ever saw. The
+ * rule that replaces it is blunt: **history is appended from an accepted
+ * result, never reconstructed by solving again.** So the solve lives here,
+ * every caller holds on to what comes back, and `freezeElapsedBeforeEdit`
+ * takes a result rather than producing one.
+ *
+ * `now` reaches the engine as `loggedBefore` (ADR 009), exactly as it does for
+ * the schedule screen, because this *is* the schedule screen's call - the
+ * provider caches one of these per document and hands the same object to both.
+ * The previous code deliberately omitted it, on the grounds that the engine
+ * would otherwise decline to plan the very hours being frozen. That is only
+ * true of elapsed segments which already carry a record, and those come back as
+ * pinned rows that `freezePastShifts` discards anyway; an elapsed segment with
+ * nothing recorded on it is still planned in full. What the omission actually
+ * bought was a freeze that disagreed with the display about partly-recorded
+ * segments - the engine leaves those alone on purpose, because today's
+ * headcount is not evidence about the past.
+ *
+ * @returns `{ result }`, `{ error }` when the engine threw, or `{}` when there
+ * is nothing to solve yet.
+ */
+export function acceptSchedule(doc, now) {
+  if (doc.employees.length === 0 || doc.missions.length === 0) return {};
+  try {
+    return { result: runPlanner({ ...toPlannerInput(doc, now), onInvariantViolation: 'report' }) };
+  } catch (e) {
+    return { error: e.message };
+  }
 }
 
 /**
@@ -165,20 +276,28 @@ export function freezePastShifts(doc, result, now) {
  * `setDoc`), not just ones made from the schedule screen, so an edit on the
  * Employees or Missions page can't reshuffle history either.
  *
+ * `result` must be the accepted schedule for `prev` - what `acceptSchedule`
+ * returned and what the screen was showing. It is required rather than
+ * defaulted: a caller that cannot supply one has no accepted answer to record,
+ * and silently solving for it again is the defect this parameter exists to
+ * close.
+ *
  * The snapshot is taken from `prev` on purpose. Freezing what `next` looks
  * like instead would immediately re-pin a shift the caller just cleared on
  * purpose - `applyClearPin`/`clearAllPins` remove a pin from `next`, but that
  * same shift is already pinned in `prev`, so `freezePastShifts` skips it
  * there and the clear survives.
+ *
+ * Invalid output is still never frozen. That used to hold because the freeze
+ * solved in strict mode and caught the throw; the accepted result is computed
+ * in report mode, so it holds through `freezePastShifts`'s `engine-bug` check
+ * instead - the same guarantee, read off the warnings rather than a stack.
  */
-export function freezeElapsedBeforeEdit(prev, next, now = Date.now()) {
-  if (prev.employees.length === 0 || prev.missions.length === 0) return next;
-  let result;
-  try {
-    result = runPlanner(toPlannerInput(prev));
-  } catch {
-    return next;
+export function freezeElapsedBeforeEdit(prev, next, now = Date.now(), result) {
+  if (arguments.length < 4) {
+    throw new TypeError('freezeElapsedBeforeEdit requires the accepted result for `prev`');
   }
+  if (!result) return next;
   const frozenPrev = freezePastShifts(prev, result, now);
   if (frozenPrev === prev) return next;
   const newPins = frozenPrev.pins.slice(prev.pins.length);
@@ -252,9 +371,17 @@ export function applyMissionAssignees(doc, missionId, employeeIds) {
 }
 
 /** Is this pin residue from a period the plan has moved past? */
+/**
+ * Is this pin *history* - an assignment that finished before the period began?
+ *
+ * Deliberately not "outside the period", which is also true beyond the end. An
+ * assignment for next week is a plan, not a record: exporting it as completed
+ * duty is a lie, and deleting it destroys work nobody asked to lose. The engine
+ * ignores both sides and the warning counts both; only this half is clearable.
+ */
 function isStale(doc, pin) {
   const mission = doc.missions.find((m) => m.id === pin.missionId);
-  return isOutOfPeriod(pin, mission, doc.start, doc.end);
+  return isElapsedBeforePeriod(pin, mission, doc.start, doc.end);
 }
 
 /**
@@ -273,7 +400,46 @@ function isStale(doc, pin) {
  */
 export function clearStalePins(doc) {
   const pins = doc.pins.filter((p) => !isStale(doc, p));
-  return pins.length === doc.pins.length ? doc : { ...doc, pins };
+  if (pins.length === doc.pins.length) return doc;
+  return { ...doc, pins, employees: carryForward(doc, doc.pins.filter((p) => isStale(doc, p))) };
+}
+
+/**
+ * Roll the duty that is being removed into each guard's carried totals
+ * (ADR 015).
+ *
+ * The export bounds the document; this keeps the one number the engine still
+ * needs out of what the export takes away. Without it, clearing residue also
+ * clears the evidence that one guard has stood twice as many hours as another,
+ * and the next window starts everyone level - with the app reporting a
+ * perfectly even spread over a debt it can no longer see.
+ *
+ * This is a change of **representation, not of schedule**. `plan()` already
+ * counts these same pins towards the same totals, so the sum is identical
+ * before and after and no shift moves - which is the button's whole safety
+ * argument and what `tests/pins.test.js` asserts. The arithmetic below
+ * deliberately mirrors the engine's, including the stint approximation: an
+ * out-of-period pin has no grid to name a slot on any more, so a turn is one
+ * plan shift length, at least one.
+ */
+function carryForward(doc, removed) {
+  const slot = Math.max(1, doc.shiftMinutes) * 60 * 1000;
+  const minutes = new Map();
+  const stints = new Map();
+  for (const pin of removed) {
+    const { start, end } = pinRange(doc, pin);
+    if (!(end > start)) continue;
+    minutes.set(pin.employeeId, (minutes.get(pin.employeeId) ?? 0) + (end - start));
+    stints.set(pin.employeeId, (stints.get(pin.employeeId) ?? 0) + Math.max(1, Math.round((end - start) / slot)));
+  }
+  if (minutes.size === 0) return doc.employees;
+  return doc.employees.map((e) => (minutes.has(e.id)
+    ? {
+      ...e,
+      carriedMinutes: (e.carriedMinutes ?? 0) + Math.round(minutes.get(e.id) / 60000),
+      carriedStints: (e.carriedStints ?? 0) + stints.get(e.id),
+    }
+    : e));
 }
 
 /** How many pins `clearStalePins` would remove. */
@@ -282,33 +448,24 @@ export function countStalePins(doc) {
 }
 
 /**
- * The automatic half of the same cleanup, deliberately timid on two counts.
+ * There is no automatic cleanup any more, and that is the point.
  *
- * It refuses to act when the edit moves the period, because the period fields
- * fire an edit on every intermediate value that parses - typing a year in the
- * end-date box walks through several - and a momentarily wild window would
- * take real history with it, unrecoverably. So the window has to be standing
- * still for this to run at all.
+ * `pruneStalePins` used to run inside `setDoc` and drop assignments that had
+ * finished before the period start. It was deliberately timid - it declined to
+ * act on the edit that *moved* the window, because the date fields emit an edit
+ * on every intermediate value that parses - and under the old model it was
+ * right: out-of-period pins were residue, and its own comment said that
+ * collecting them after a deliberate roll "is the point".
  *
- * And it only ever drops pins that finished *before* the period starts. A pin
- * beyond the end is far more likely to be wanted: extending the end to cover
- * it is the documented workflow, so treating it as residue would delete the
- * assignment a moment before the user reaches for it. Those are left to the
- * explicit button, where someone has said out loud that they want them gone.
+ * ADR 012 inverts that. A rolled-past window is **exported**, which makes those
+ * same pins the only durable record of who actually stood post. The timidity
+ * was what hid the damage: rolling the window looked safe, and the deletion
+ * landed on the *next* edit, when the window was standing still again.
+ * `scripts/rollForwardLoss.mjs` measured it at 288 assignments destroyed by
+ * adding an employee.
  *
- * The guard only holds for the edit that moves the window, which leaves one
- * accepted gap: land a nonsense period and then edit something else before
- * correcting it, and that edit collects real history. Closing it would need a
- * notion of a *settled* window, which this app has no way to form - the engine
- * has no clock, and there is no undo to fall back on. Note that rolling the
- * period forward deliberately and then editing anything is not that gap: the
- * history really is residue by then, and collecting it is the point.
+ * So nothing removes recorded duty on its own. Every pin the prune could have
+ * taken had already elapsed, so there is no narrower version of it left to
+ * keep. Removal is now explicit, goes through `outOfPeriodLog` first, and is
+ * the user's decision - see `clearStalePins` above.
  */
-export function pruneStalePins(prev, next) {
-  if (prev.start !== next.start || prev.end !== next.end) return next;
-  const pins = next.pins.filter((p) => {
-    if (!isStale(next, p)) return true;
-    return (p.end ?? next.end) > next.start;
-  });
-  return pins.length === next.pins.length ? next : { ...next, pins };
-}

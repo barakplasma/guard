@@ -39,6 +39,7 @@ export const DEFAULT_STRATEGY = STRATEGY.BALANCED;
 /* ------------------------------------------------------------------ */
 
 /**
+ * 0. not already mid-unbroken-run -> nobody stands three days straight
  * 1. fewest minutes so far      -> even rotation
  * 2. earliest `lastEnd`         -> maximizes the gap since last on duty
  * 3. fewest minutes on *this* mission -> rotates people across mission types,
@@ -49,17 +50,54 @@ export const DEFAULT_STRATEGY = STRATEGY.BALANCED;
  *
  * A remote mission is claimed once and held end to end, so the per-mission
  * variety term is meaningless there and is skipped.
+ *
+ * Duty carried in from outside the period (ADR 015) enters through key 1, as a
+ * head start on `minutes` seeded in `makeState` - and **clamped there**, for
+ * reasons that record sets out at length. The short version: this key picks the
+ * fewest minutes for every slot, so an unclamped debt makes whoever is behind
+ * the cheapest candidate for as many consecutive slots as the debt is long.
  */
+/**
+ * Past this many unbroken minutes, somebody goes to the back of the queue - and
+ * is still taken if nobody else is free (ADR 016).
+ *
+ * Evening out total duty is exactly what produces an unbroken run: whoever is
+ * behind has the fewest minutes, so they are the cheapest candidate for the next
+ * slot, and the one after that, until they are level. Nothing else in this
+ * comparator says a person has to sleep, and `scripts/unbrokenRunSurvey.mjs`
+ * measured what that costs - where somebody joins a period part-way through,
+ * **half of those plans put a guard on post for twenty-four hours or more**, up
+ * to a full seventy-two.
+ *
+ * Six hours, and the number is measured rather than felt. At six, every golden
+ * fixture is unchanged and every test passes, so no rota that was fine becomes
+ * different; at three, one golden moves. Six also leaves ordinary rotas alone -
+ * two thirds of them never reach three hours in a stretch.
+ *
+ * It does not eliminate long runs and cannot: of the cases that survive it,
+ * **100% have nobody spare at all** while the joiner is away, so every person
+ * present is on post every slot and there is no one to hand over to. Those runs
+ * are forced by the roster, not chosen by this comparator, and the
+ * `long-unbroken-run` finding is the right answer to them.
+ */
+export const MAX_UNBROKEN_MINUTES = 6 * 60;
+
+/** Is this candidate already past that, in a stretch ending at this slot? */
+const midRun = (st, ctx) => (st.runEnd === ctx.start
+  && (st.runMinutes ?? 0) >= MAX_UNBROKEN_MINUTES ? 1 : 0);
+
 const balanced = {
   id: STRATEGY.BALANCED,
   compare(a, b, ctx) {
     if (ctx.kind === 'daily') return compareDaily(a, b, ctx, false);
     if (ctx.kind === 'remote') {
-      return a.minutes - b.minutes
+      return midRun(a, ctx) - midRun(b, ctx)
+        || a.minutes - b.minutes
         || a.lastEnd - b.lastEnd
         || a.seq - b.seq;
     }
-    return a.minutes - b.minutes
+    return midRun(a, ctx) - midRun(b, ctx)
+      || a.minutes - b.minutes
       || a.lastEnd - b.lastEnd
       || (a.missionMinutes.get(ctx.mission.id) ?? 0) - (b.missionMinutes.get(ctx.mission.id) ?? 0)
       || a.seq - b.seq;
@@ -105,7 +143,10 @@ function ringKeys(st, ctx) {
     else slots.add(iv.slotStart);
     if (iv.end > lastEnd) lastEnd = iv.end;
   }
-  return { turns: slots.size + remotes, lastEnd };
+  // Turns already taken outside this period ride along with the ones inside it
+  // (ADR 015): `rotation` counts shifts rather than hours, so carrying minutes
+  // would say nothing here and carrying turns says exactly the right thing.
+  return { turns: slots.size + remotes + (st.carriedStints ?? 0), lastEnd };
 }
 
 /** Daily fairness counts completed occurrences, never future pins or hours. */

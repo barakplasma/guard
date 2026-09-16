@@ -21,6 +21,17 @@ export const employeeSchema = z.object({
   name: z.string().max(80),
   start: ts.nullable().default(null),
   end: ts.nullable().default(null),
+  // Duty already stood, outside whatever period the document now covers
+  // (ADR 015). The rota is planned 72 hours at a time and rolled forward, and
+  // the engine evens out the window it is given - so once an hour falls behind
+  // the window it stops counting, and a guard who came back from two days away
+  // stays permanently behind while the app reports a perfectly even spread.
+  // This is the one number that has to survive the roll. A summary rather than
+  // the shifts themselves, so it costs a few bytes per person and outlives the
+  // export that clears them.
+  carriedMinutes: z.number().int().min(0).default(0),
+  // The same, in the unit `rotation` counts: shifts stood, not hours.
+  carriedStints: z.number().int().min(0).default(0),
 });
 
 /** Minutes past midnight, the unit both night boundaries are written in. */
@@ -34,6 +45,11 @@ export const missionSchema = z.object({
   id,
   requires: z.array(z.object({ tag: id, count: z.number().int().min(1).max(999) })).default([]),
   excludes: z.array(id).default([]).transform((tags) => [...new Set(tags)]),
+  // Excluded *people*, by id, alongside excluded qualifications above.
+  // A qualification cannot say "not this particular person", and minting a tag
+  // to name one individual pollutes the same list that drives required coverage
+  // and night rest - so this is its own field (ADR 014).
+  excludeEmployees: z.array(id).default([]).transform((ids) => [...new Set(ids)]),
   name: z.string().max(80),
   type: z.enum(['remote', 'local', 'daily']),
   dayStart: minuteOfDay.nullable().default(null),
@@ -69,6 +85,30 @@ export const missionSchema = z.object({
   onCall: z.boolean().default(false),
 });
 
+/**
+ * What a pin needs to stay readable once it is the record of a shift that
+ * happened (ADR 012's correction).
+ *
+ * A pin is a pair of ids and a range, all three of which are *live references*:
+ * the names come from the employee and mission lists, and a null bound inherits
+ * the mission's window. That is right while the pin is an instruction to the
+ * engine, and wrong the moment it becomes history, because history cannot be
+ * allowed to change when the things it points at do. Delete the guard and the
+ * record of their duty goes with them; rename them and the exported CSV quietly
+ * claims a different person stood that post.
+ *
+ * So a pin that records duty carries its own copy of everything it needs to be
+ * read: the two names, the mission's type, and the qualifications the person
+ * held *at the time*, which is the thing a reader months later is actually
+ * asking about. Written once and never refreshed - a stamp, not a cache.
+ */
+export const pinRecordSchema = z.object({
+  employeeName: z.string().max(120).default(''),
+  missionName: z.string().max(120).default(''),
+  missionType: z.enum(['local', 'remote', 'daily']).default('local'),
+  tags: z.array(id).default([]),
+});
+
 export const pinSchema = z.object({
   missionId: id,
   employeeId: id,
@@ -79,6 +119,10 @@ export const pinSchema = z.object({
   // person actually chose, it must not be invalidated by a later availability
   // edit - see planner.js's normalizePins.
   frozen: z.boolean().default(false),
+  // Absent on a pin that is still an instruction; present from the moment it
+  // becomes a record. `null` rather than optional so the absence is a value the
+  // wire format can carry and the codec can round-trip.
+  record: pinRecordSchema.nullable().default(null),
 });
 
 export const planSchema = z.object({
@@ -141,13 +185,26 @@ export function emptyPlan(now = Date.now()) {
 }
 
 /**
- * Drop pins whose employee or mission no longer exists. Called after any delete
- * so the document never carries dangling references around in the URL.
+ * Drop pins whose employee or mission no longer exists, so the document does not
+ * carry dangling instructions around in the URL.
+ *
+ * **Except a pin carrying a record.** That one is not an instruction any more,
+ * it is the evidence that somebody stood a post, and deleting the guard from
+ * the roster is not a statement that they never did. This used to delete it:
+ * remove a person who left, or a mission that ended, and the only account of
+ * their duty went with them - before anyone had a chance to export it. Nothing
+ * removes recorded duty except the explicit button beside the warning, which
+ * exports first (ADR 012).
+ *
+ * A recorded pin is safe to keep dangling: `normalizePins` skips stale
+ * references, and `captureHistory` resolved its bounds to literal instants
+ * before stamping it, so nothing downstream needs the mission it points at.
  */
 export function prunePins(doc) {
   const employeeIds = new Set(doc.employees.map((e) => e.id));
   const missionIds = new Set(doc.missions.map((m) => m.id));
-  const pins = doc.pins.filter((p) => employeeIds.has(p.employeeId) && missionIds.has(p.missionId));
+  const pins = doc.pins.filter((p) => p.record
+    || (employeeIds.has(p.employeeId) && missionIds.has(p.missionId)));
   return pins.length === doc.pins.length ? doc : { ...doc, pins };
 }
 
@@ -221,8 +278,22 @@ export function dailyOccurrences(doc, mission) {
 }
 
 /** Shape the document into the planner engine's input. */
-export function toPlannerInput(doc) {
+/**
+ * The only route from the plan document into the engine.
+ *
+ * `now` is where the clock enters, and it enters *here* rather than in
+ * `planner.js` for the same reason the night windows are resolved here: the
+ * engine does interval arithmetic on absolute instants and owns no clock. It
+ * becomes `loggedBefore`, the boundary before which time is a log rather than
+ * a schedule (ADR 009).
+ *
+ * Omitting `now` means "nothing has elapsed", which is what every caller
+ * written before this parameter meant - so the golden fixtures, the export
+ * tests and the URL round-trips all keep their exact previous results.
+ */
+export function toPlannerInput(doc, now) {
   return {
+    loggedBefore: now ?? -Infinity,
     start: doc.start,
     end: doc.end,
     shiftMinutes: doc.shiftMinutes,
@@ -235,12 +306,15 @@ export function toPlannerInput(doc) {
       tags: e.tags ?? [],
       start: e.start ?? undefined,
       end: e.end ?? undefined,
+      carriedMinutes: e.carriedMinutes ?? 0,
+      carriedStints: e.carriedStints ?? 0,
     })),
     missions: doc.missions.map((m) => ({
       id: m.id,
       name: m.name,
       requires: m.requires ?? [],
       excludes: m.excludes ?? [],
+      excludeEmployees: m.excludeEmployees ?? [],
       type: m.type,
       start: m.start ?? undefined,
       end: m.end ?? undefined,

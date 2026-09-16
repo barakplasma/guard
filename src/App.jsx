@@ -99,6 +99,14 @@ function Shell() {
 export default function App() {
   // HashRouter keeps everything - route and plan blob - after the "#", so the
   // app needs no server rewrite rules and works from a file:// path too.
+  //
+  // It is load-bearing for two more things than that, both easy to lose by
+  // "tidying" this into a BrowserRouter (ADR 010). A fragment is never sent to
+  // a server, so the plan is subject to no request-line length ceiling, and
+  // every guard's name stays out of the access log of whatever serves the site.
+  // Note that `location.search` here is the search *inside* the hash, not a
+  // document query string - which is exactly what an earlier reading of this
+  // got wrong.
   return (
     <HashRouter>
       <Shell />
