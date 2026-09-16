@@ -8,6 +8,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  megalinter:
+    name: MegaLinter (JavaScript)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Run MegaLinter
+        uses: oxsecurity/megalinter/flavors/javascript@v10
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VALIDATE_ALL_CODEBASE: false
+
   check:
     runs-on: ubuntu-latest
     # An explicit timeout on every job: the default is 360 minutes, so one hung
