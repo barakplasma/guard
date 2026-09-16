@@ -30,6 +30,28 @@ const sample = () => planSchema.parse({
   ],
 });
 
+function legacyPayload(doc, { includeStrategy = false, includeFrozen = false } = {}) {
+  return {
+    v: doc.version,
+    t: doc.title,
+    s: doc.start,
+    e: doc.end,
+    m: doc.shiftMinutes,
+    ...(includeStrategy ? { st: doc.strategy } : {}),
+    emp: doc.employees.map((employee) => [
+      employee.id, employee.name, employee.start ?? 0, employee.end ?? 0,
+    ]),
+    mis: doc.missions.map((mission) => [
+      mission.id, mission.name, mission.type === 'remote' ? 1 : 0,
+      mission.start ?? 0, mission.end ?? 0, mission.count,
+    ]),
+    pin: doc.pins.map((pin) => [
+      pin.missionId, pin.employeeId, pin.start ?? 0, pin.end ?? 0,
+      ...(includeFrozen ? [pin.frozen ? 1 : 0] : []),
+    ]),
+  };
+}
+
 test('encode -> decode round-trips the document exactly', () => {
   const doc = sample();
   const result = decodePlan(encodePlan(doc));
@@ -122,18 +144,7 @@ test('a link encoded before the frozen flag existed decodes as unfrozen', () => 
   // Old links only have 4 elements per pin tuple; the decoder must not choke
   // on the missing 5th slot, and must treat it as an ordinary, unfrozen pin.
   const doc = sample();
-  const legacyCompact = {
-    v: doc.version,
-    t: doc.title,
-    s: doc.start,
-    e: doc.end,
-    m: doc.shiftMinutes,
-    emp: doc.employees.map((x) => [x.id, x.name, x.start ?? 0, x.end ?? 0]),
-    mis: doc.missions.map((x) => (
-      [x.id, x.name, x.type === 'remote' ? 1 : 0, x.start ?? 0, x.end ?? 0, x.count]
-    )),
-    pin: doc.pins.map((x) => [x.missionId, x.employeeId, x.start ?? 0, x.end ?? 0]),
-  };
+  const legacyCompact = legacyPayload(doc);
   const legacyBlob = lzString.compressToEncodedURIComponent(JSON.stringify(legacyCompact));
   const { ok, plan: back } = decodePlan(legacyBlob);
   assert.equal(ok, true);
@@ -166,18 +177,7 @@ test('a link encoded before strategies existed decodes as the original behaviour
   // way to schedule, so they have to keep meaning that - silently switching a
   // shared plan to a different strategy would reshuffle everybody.
   const doc = sample();
-  const legacyCompact = {
-    v: doc.version,
-    t: doc.title,
-    s: doc.start,
-    e: doc.end,
-    m: doc.shiftMinutes,
-    emp: doc.employees.map((x) => [x.id, x.name, x.start ?? 0, x.end ?? 0]),
-    mis: doc.missions.map((x) => [
-      x.id, x.name, x.type === 'remote' ? 1 : 0, x.start ?? 0, x.end ?? 0, x.count,
-    ]),
-    pin: doc.pins.map((x) => [x.missionId, x.employeeId, x.start ?? 0, x.end ?? 0]),
-  };
+  const legacyCompact = legacyPayload(doc);
   const blob = lzString.compressToEncodedURIComponent(JSON.stringify(legacyCompact));
 
   const result = decodePlan(blob);
@@ -277,19 +277,9 @@ test('a link encoded before night headcounts existed decodes as the original beh
   // or `ne`. It must still parse, and must schedule identically to the same
   // plan with the fields left unset.
   const doc = sample();
-  const legacy = lzString.compressToEncodedURIComponent(JSON.stringify({
-    v: 1,
-    t: doc.title,
-    s: doc.start,
-    e: doc.end,
-    m: doc.shiftMinutes,
-    st: doc.strategy,
-    emp: doc.employees.map((x) => [x.id, x.name, x.start ?? 0, x.end ?? 0]),
-    mis: doc.missions.map((x) => [
-      x.id, x.name, x.type === 'remote' ? 1 : 0, x.start ?? 0, x.end ?? 0, x.count,
-    ]),
-    pin: doc.pins.map((x) => [x.missionId, x.employeeId, x.start ?? 0, x.end ?? 0, 0]),
-  }));
+  const legacy = lzString.compressToEncodedURIComponent(JSON.stringify(
+    legacyPayload(doc, { includeStrategy: true, includeFrozen: true }),
+  ));
 
   const back = decodePlan(legacy);
   assert.equal(back.ok, true);

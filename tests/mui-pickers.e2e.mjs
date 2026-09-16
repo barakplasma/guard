@@ -12,7 +12,7 @@
 import assert from 'node:assert/strict';
 import { planSchema } from '../src/lib/planSchema.js';
 import { encodePlan, decodePlan } from '../src/lib/urlState.js';
-import { baseUrl as base, captureFailure, launchBrowser, screenshotDirectory, watchErrors } from './e2eHelpers.mjs';
+import { assertResponsive, baseUrl as base, captureFailure, launchBrowser, screenshotDirectory, watchErrors } from './e2eHelpers.mjs';
 const shots = screenshotDirectory('/tmp/guard-mui-pickers');
 const browser = await launchBrowser();
 try {
@@ -63,10 +63,7 @@ try {
   assert.equal(await page.getByTestId('plan-start-clear').count(), 0,
     'a required bound offers no clear button');
 
-  for (const width of [360, 412, 1280]) {
-    await page.setViewportSize({ width, height: 915 });
-    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `no overflow at ${width}px`);
-  }
+  await assertResponsive(page, assert);
 
   // A 12-hour device gets the same 24-hour value. Every rendered time in the
   // app goes through format.js with hourCycle 'h23', and the field's value is

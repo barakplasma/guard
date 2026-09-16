@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { planSchema } from '../src/lib/planSchema.js';
 import { encodePlan, decodePlan } from '../src/lib/urlState.js';
-import { baseUrl as base, captureFailure, launchBrowser, screenshotDirectory, watchErrors } from './e2eHelpers.mjs';
+import { assertResponsive, baseUrl as base, captureFailure, launchBrowser, screenshotDirectory, watchErrors } from './e2eHelpers.mjs';
 const shots = screenshotDirectory('/tmp/guard-mui-controls');
 const browser = await launchBrowser();
 try {
@@ -64,10 +64,7 @@ try {
   await toggle.press('Space');
   assert.equal(await toggle.getAttribute('aria-expanded'), 'false');
   await page.getByTestId('tab-missions').tap();
-  for (const width of [360, 412, 1280]) {
-    await page.setViewportSize({ width, height: 915 });
-    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `no overflow at ${width}px`);
-  }
+  await assertResponsive(page, assert);
   await page.setViewportSize({ width: 412, height: 915 });
   await assign.scrollIntoViewIfNeeded();
   await assign.fill('י');

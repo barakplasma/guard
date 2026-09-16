@@ -12,17 +12,13 @@ const HOUR = 3600 * 1000;
 const START = new Date(2026, 0, 5, 8, 0, 0, 0).getTime();
 
 /** A small, fully determined schedule the assertions can be written against. */
-function schedule() {
+function schedule({ count = 1, hours = 2, missionName = 'שער', employees = ['אבי', 'דנה', 'יוסי'] } = {}) {
   return plan({
     start: START,
-    end: START + 2 * HOUR,
+    end: START + hours * HOUR,
     shiftMinutes: 60,
-    employees: [
-      { id: 'e1', name: 'אבי' },
-      { id: 'e2', name: 'דנה' },
-      { id: 'e3', name: 'יוסי' },
-    ],
-    missions: [{ id: 'm1', name: 'שער', type: 'local', count: 1 }],
+    employees: employees.map((name, index) => ({ id: `e${index + 1}`, name })),
+    missions: [{ id: 'm1', name: missionName, type: 'local', count }],
   });
 }
 
@@ -42,16 +38,7 @@ test('CSV has a header row and one row per shift', () => {
 });
 
 test('CSV emits a separate row for every simultaneous mission assignment', () => {
-  const result = plan({
-    start: START,
-    end: START + HOUR,
-    shiftMinutes: 60,
-    employees: [
-      { id: 'e1', name: 'אבי' },
-      { id: 'e2', name: 'דנה' },
-    ],
-    missions: [{ id: 'm1', name: 'שער כפול', type: 'local', count: 2 }],
-  });
+  const result = schedule({ count: 2, hours: 1, missionName: 'שער כפול', employees: ['אבי', 'דנה'] });
   const lines = shiftsToCsv(result).replace(/^﻿/, '').trimEnd().split('\r\n');
 
   assert.equal(result.shifts.length, 2);
@@ -110,16 +97,7 @@ test('WhatsApp text uses a simple time - names table, not a bulleted mission row
 });
 
 test('WhatsApp text joins two names with ו and puts the time range in the header for a single-occurrence mission', () => {
-  const result = plan({
-    start: START,
-    end: START + HOUR,
-    shiftMinutes: 60,
-    employees: [
-      { id: 'e1', name: 'אבי' },
-      { id: 'e2', name: 'דנה' },
-    ],
-    missions: [{ id: 'm1', name: 'שער כפול', type: 'local', count: 2 }],
-  });
+  const result = schedule({ count: 2, hours: 1, missionName: 'שער כפול', employees: ['אבי', 'דנה'] });
   const lines = whatsappText(result, { title: 'סופ״ש' }).split('\n');
 
   assert.ok(lines.some((l) => /^\*8:00–9:00 שער כפול\*$/.test(l)), 'the single occurrence carries its range in the header');
@@ -320,16 +298,7 @@ test('the two-line range keeps the end date on the end line', async () => {
 
 /** Two people sharing every shift of a single mission, so co-workers are non-empty. */
 function schedulePair() {
-  return plan({
-    start: START,
-    end: START + HOUR,
-    shiftMinutes: 60,
-    employees: [
-      { id: 'e1', name: 'אבי' },
-      { id: 'e2', name: 'דנה' },
-    ],
-    missions: [{ id: 'm1', name: 'שער', type: 'local', count: 2 }],
-  });
+  return schedule({ count: 2, hours: 1, employees: ['אבי', 'דנה'] });
 }
 
 test('an ICS calendar is wrapped in VCALENDAR/VERSION 2.0', () => {

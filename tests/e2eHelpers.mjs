@@ -28,3 +28,11 @@ export async function captureFailure(browser, path) {
     await page.screenshot({ path });
   }
 }
+
+export async function assertResponsive(page, assert, widths = [360, 412, 1280], height = 915) {
+  for (const width of widths) {
+    await page.setViewportSize({ width, height });
+    const fits = await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
+    assert.ok(fits, `no overflow at ${width}px`);
+  }
+}
