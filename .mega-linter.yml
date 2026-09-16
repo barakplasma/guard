@@ -9,8 +9,7 @@
 # That is why DISABLE_LINTERS lives here and nowhere else.
 
 # Let zizmor authenticate when it resolves action references. The workflow token
-# remains scoped by the job's explicit permissions. Inert while the linter is
-# disabled below, and kept so that re-enabling it is a one-line change.
+# remains scoped by the job's explicit permissions.
 ACTION_ZIZMOR_UNSECURED_ENV_VARIABLES:
   - GITHUB_TOKEN
 
@@ -19,13 +18,6 @@ ACTION_ZIZMOR_UNSECURED_ENV_VARIABLES:
 GITHUB_COMMENT_REPORTER: false
 
 DISABLE_LINTERS:
-  # zizmor reports 48 findings against the workflows as they stand - unpinned
-  # action references, the checkout credential left on disk, and workflow-wide
-  # write permissions. They are real and are being fixed in the pull request
-  # that reworks the workflow permissions, which also adds .github/zizmor.yml.
-  # Enabling it here first would bury this branch's own diff in that backlog.
-  - ACTION_ZIZMOR
-
   # Spell-checking is off permanently. This app is Hebrew-only and the codebase
   # is full of protocol tokens and domain shorthand, so cspell's 140 findings
   # were: Hebrew words (סידור, משמרות, שיבוץ), iCalendar keywords (DTSTART,
@@ -37,14 +29,24 @@ DISABLE_LINTERS:
 
   # `standard` enforces a style this repository does not use - it wants no
   # semicolons, and every file here has them. With APPLY_FIXES it does not
-  # report that, it *rewrites*: one run reformatted 20 source files, and its
-  # single actual error was `self` and `caches` undefined in a service worker,
-  # which is what a service worker is. Linting JavaScript here is oxlint's job
-  # (`npm run lint`, .oxlintrc.json), which already gates every pull request in
-  # the `check` job and carries three documented rule exceptions. Two linters
-  # with different opinions about the same files end with the louder one
-  # winning - and under APPLY_FIXES the louder one wins by committing.
+  # report that, it *rewrites* and commits: one run reformatted 20 source files,
+  # and its single actual error was `self` and `caches` being undefined in a
+  # service worker, which is what a service worker is. Linting JavaScript here
+  # is oxlint's job (`npm run lint`, .oxlintrc.json), which already gates every
+  # pull request in the `check` job and carries three documented rule
+  # exceptions. Two linters with different opinions about the same files end
+  # with the louder one winning - and under APPLY_FIXES the louder one wins by
+  # committing.
   - JAVASCRIPT_STANDARD
+
+# Kept named even though DISABLE_ERRORS already makes the whole run advisory:
+# these three are advisory *by nature* - a style opinion, a duplication
+# heuristic, a link that was reachable yesterday - so they should stay
+# non-blocking even if the run is ever made to gate again.
+DISABLE_ERRORS_LINTERS:
+  - COPYPASTE_JSCPD
+  - MARKDOWN_MARKDOWNLINT
+  - SPELL_LYCHEE
 
 # Two generators, one file. The goldens are written as one minified line each by
 # scripts/writeGoldens.mjs; prettier wants each of them exploded to ~180 lines.

@@ -415,11 +415,12 @@ tidying up:
   that again. The exclusion picks one owner. Every other JSON file here is already prettier-clean,
   so nothing else needed excluding.
 
-`ACTION_ZIZMOR` is off here for a reason with an end date rather than a permanent one: it reports
-48 findings against the workflows as they stand, and the branch that reworks the workflow
-permissions fixes them and adds a `.github/zizmor.yml` requiring actions to be pinned to a ref
-rather than a hash (which rejects `@main` while keeping the rolling major tags the workflows
-deliberately track). Re-enable it by deleting one line once that lands.
+`jscpd`, `markdownlint` and `lychee` stay named in `DISABLE_ERRORS_LINTERS` even though
+`DISABLE_ERRORS` already covers them: those three are advisory *by nature* — a style opinion, a
+duplication heuristic, a link that was reachable yesterday — so they should stay non-blocking even
+if the run is ever made to gate again. `.github/zizmor.yml` requires actions to be pinned to a ref
+rather than a hash, which rejects `@main` while keeping the rolling major tags the workflows
+deliberately track.
 
 Note that **actionlint only lints the shell inside `run:` blocks when `shellcheck` is on `PATH`**:
 running it locally without shellcheck installed reports clean and CI does not.

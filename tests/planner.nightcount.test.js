@@ -2,12 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { plan } from '../src/lib/planner.js';
 import { planSchema, toPlannerInput, nightWindows } from '../src/lib/planSchema.js';
-
-const HOUR = 3600 * 1000;
-
-function localTime(y, m, d, h = 0, min = 0) {
-  return new Date(y, m, d, h, min, 0, 0).getTime();
-}
+import { HOUR, localTime } from './testHelpers.js';
 
 /** 06:00, so an eight-hour grid falls on 06:00 / 14:00 / 22:00. */
 const START = localTime(2026, 0, 5, 6, 0);

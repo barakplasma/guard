@@ -88,6 +88,25 @@ export function restCost(employee, tags, nights, shifts, start, end, lo, hi) {
   return cost;
 }
 
+function measuredNights(shifts, employees, tags, nights, start, end, sleepable) {
+  const out = [];
+  for (const employee of employees) {
+    const needed = target(employee, tags);
+    if (!needed) continue;
+    const own = shifts.filter((shift) => shift.employeeId === employee.id
+      && !sleepable.has(shift.missionId));
+    for (const night of nights) {
+      const lo = Math.max(start, night.start), hi = Math.min(end, night.end);
+      if (hi <= lo) continue;
+      const { total, longest } = measureRest(
+        own, Math.max(lo, employee.start ?? lo), Math.min(hi, employee.end ?? hi),
+      );
+      out.push({ employee, night, start: lo, end: hi, needed, total, longest });
+    }
+  }
+  return out;
+}
+
 /**
  * Per-employee, per-night total and continuous rest in minutes, alongside the
  * configured minimum. Pure reporting - the planner and the findings panel read
@@ -95,19 +114,11 @@ export function restCost(employee, tags, nights, shifts, start, end, lo, hi) {
  * quote a driver's before/after impact from it.
  */
 export function restMetrics(shifts, employees, tags, nights, start, end, sleepable = new Set()) {
-  const out = [];
-  for (const e of employees) {
-    const needed = target(e, tags);
-    if (!needed) continue;
-    const own = shifts.filter((s) => s.employeeId === e.id && !sleepable.has(s.missionId));
-    for (const night of nights) {
-      const lo = Math.max(start, night.start), hi = Math.min(end, night.end);
-      if (hi <= lo) continue;
-      const { total, longest } = measureRest(own, Math.max(lo, e.start ?? lo), Math.min(hi, e.end ?? hi));
-      out.push({ employeeId: e.id, start: lo, end: hi, needed, totalMinutes: total, longestMinutes: longest });
-    }
-  }
-  return out;
+  return measuredNights(shifts, employees, tags, nights, start, end, sleepable)
+    .map(({ employee, start: lo, end: hi, needed, total, longest }) => ({
+      employeeId: employee.id, start: lo, end: hi, needed,
+      totalMinutes: total, longestMinutes: longest,
+    }));
 }
 
 /** Total minutes by which employees fall short of their configured minimum. */
@@ -121,20 +132,13 @@ export function restDeficit(metrics) {
  * slept through, so it does not interrupt the rest being measured here.
  */
 export function assessRest(shifts, employees, tags, nights, start, end, sleepable = new Set()) {
-  const out = [];
-  for (const e of employees) {
-    const needed = target(e, tags);
-    if (!needed) continue;
-    const own = shifts.filter((s) => s.employeeId === e.id && !sleepable.has(s.missionId))
-      .sort((a, b) => a.start - b.start);
-    for (const night of nights) {
-      const lo = Math.max(start, night.start), hi = Math.min(end, night.end);
-      if (hi <= lo) continue;
-      const { total, longest } = measureRest(own, Math.max(lo, e.start ?? lo), Math.min(hi, e.end ?? hi));
-      const partial = lo !== night.start || hi !== night.end || (e.start ?? start) > lo || (e.end ?? end) < hi;
-      if (partial || total < needed) out.push({ code: partial ? 'rest-incomplete' : 'rest-unsatisfied', employeeId: e.id,
-        start: lo, end: hi, needed, got: total, longestMinutes: longest });
-    }
-  }
-  return out;
+  return measuredNights(shifts, employees, tags, nights, start, end, sleepable)
+    .flatMap(({ employee, night, start: lo, end: hi, needed, total, longest }) => {
+      const partial = lo !== night.start || hi !== night.end
+        || (employee.start ?? start) > lo || (employee.end ?? end) < hi;
+      return partial || total < needed ? [{
+        code: partial ? 'rest-incomplete' : 'rest-unsatisfied', employeeId: employee.id,
+        start: lo, end: hi, needed, got: total, longestMinutes: longest,
+      }] : [];
+    });
 }

@@ -1,6 +1,6 @@
 import { IconButton, InputAdornment, TextField } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
-import { fromClockInput, toClockInput } from '../lib/localInput.js';
+import { commitTemporalInput, fromClockInput, toClockInput } from '../lib/localInput.js';
 import { t } from '../strings.js';
 
 /**
@@ -20,11 +20,7 @@ export default function DailyClockField({
       size="small"
       label={label}
       value={toClockInput(value)}
-      onChange={(event) => {
-        const next = fromClockInput(event.target.value);
-        if (next != null) onChange(next);
-        else if (nullable && event.target.value === '') onChange(null);
-      }}
+      onChange={(event) => commitTemporalInput(event.target.value, fromClockInput, nullable, onChange)}
       slotProps={{
         inputLabel: { shrink: true },
         htmlInput: { 'data-testid': testId, step: 60, dir: 'ltr' },

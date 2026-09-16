@@ -1,20 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { plan } from '../src/lib/planner.js';
-
-const HOUR = 3600 * 1000;
-
-function localTime(y, m, d, h = 0, min = 0) {
-  return new Date(y, m, d, h, min, 0, 0).getTime();
-}
+import { HOUR, localTime, people } from './testHelpers.js';
 
 const START = localTime(2026, 0, 5, 8, 0);
 
 /** Ring order is document order, so name them for their place in it. */
-const ring = (n) => Array.from({ length: n }, (_, i) => ({
-  id: `e${i + 1}`,
-  name: `Emp${String(i + 1).padStart(2, '0')}`,
-}));
+const ring = people;
 
 /** Every recorded rest gap, so two strategies can be compared on the worst one. */
 const gaps = (r) => r.stats.perEmployee.map((p) => p.minGapMinutes).filter((g) => g != null);

@@ -1,20 +1,16 @@
 /** Acceptance coverage for searchable 19-person rosters and standard MUI disclosure/pickers. */
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync } from 'node:fs';
-import { chromium } from 'playwright';
 import { planSchema } from '../src/lib/planSchema.js';
 import { encodePlan, decodePlan } from '../src/lib/urlState.js';
-const base = process.env.BASE || 'http://127.0.0.1:4173';
-const shots = process.env.SHOT_DIR || '/tmp/guard-mui-controls';
-mkdirSync(shots, { recursive: true });
-const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROME || (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined) });
+import { assertResponsive, baseUrl as base, captureFailure, launchBrowser, screenshotDirectory, watchErrors } from './e2eHelpers.mjs';
+const shots = screenshotDirectory('/tmp/guard-mui-controls');
+const browser = await launchBrowser();
 try {
   const context = await browser.newContext({ viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true, locale: 'he-IL', timezoneId: 'Asia/Jerusalem' });
   const page = await context.newPage();
   page.setDefaultTimeout(8000);
   const errors = [];
-  page.on('pageerror', (error) => errors.push(error.message));
-  page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+  watchErrors(page, errors);
   // The last name is deliberately far longer than a narrow agenda column: it is
   // the case that used to arrive on screen as "ש..." and made the rota useless.
   const names = ['אבי', 'דנה', 'יוסי', 'מיכל', 'רון', 'תמר', 'נועה', 'גיל', 'עמית', 'שיר', 'אורי', 'נטע', 'רותם', 'עדי', 'יעל', 'יובל', 'אלון', 'זוהר',
@@ -68,10 +64,7 @@ try {
   await toggle.press('Space');
   assert.equal(await toggle.getAttribute('aria-expanded'), 'false');
   await page.getByTestId('tab-missions').tap();
-  for (const width of [360, 412, 1280]) {
-    await page.setViewportSize({ width, height: 915 });
-    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `no overflow at ${width}px`);
-  }
+  await assertResponsive(page, assert);
   await page.setViewportSize({ width: 412, height: 915 });
   await assign.scrollIntoViewIfNeeded();
   await assign.fill('י');
@@ -80,9 +73,6 @@ try {
   assert.deepEqual(errors, []);
   console.log('PASS 19-person search, partial pins, unavailable replacements, swaps, accordion keyboard/ARIA, responsive layouts');
 } catch (error) {
-  for (const context of browser.contexts()) for (const page of context.pages()) {
-    console.error((await page.locator('body').innerText()).slice(0, 5000));
-    await page.screenshot({ path: `${shots}/failure.png` });
-  }
+  await captureFailure(browser, `${shots}/failure.png`);
   throw error;
 } finally { await browser.close(); }

@@ -114,31 +114,30 @@ function seatsAt(input, mission, t) {
   return night ? mission.nightCount : mission.count;
 }
 
-test('nobody is ever double-booked', () => {
+function forEveryPlan(assertion, numRuns = 300) {
   fc.assert(fc.property(planArb, (spec) => {
     const input = build(spec);
     if (input.missions.length === 0) return;
-    const { shifts } = plan(input);
+    assertion(input, plan(input));
+  }), { numRuns });
+}
 
-    const byEmployee = new Map();
-    for (const s of shifts) {
-      if (!byEmployee.has(s.employeeId)) byEmployee.set(s.employeeId, []);
-      byEmployee.get(s.employeeId).push(s);
-    }
-    for (const list of byEmployee.values()) {
+test('nobody is ever double-booked', () => {
+  forEveryPlan((input, { shifts }) => {
+
+    const employeeIds = new Set(shifts.map((shift) => shift.employeeId));
+    for (const employeeId of employeeIds) {
+      const list = shifts.filter((shift) => shift.employeeId === employeeId);
       list.sort((a, b) => a.start - b.start);
       for (let i = 1; i < list.length; i++) {
         assert.ok(list[i].start >= list[i - 1].end, 'overlapping shifts for one person');
       }
     }
-  }), { numRuns: 300 });
+  });
 });
 
 test('coverage never exceeds a mission headcount', () => {
-  fc.assert(fc.property(planArb, (spec) => {
-    const input = build(spec);
-    if (input.missions.length === 0) return;
-    const { shifts } = plan(input);
+  forEveryPlan((input, { shifts }) => {
 
     for (const mission of input.missions) {
       const own = shifts.filter((s) => s.missionId === mission.id);
@@ -150,14 +149,11 @@ test('coverage never exceeds a mission headcount', () => {
         assert.ok(cover <= seats, `mission ${mission.id} overstaffed at ${p}: ${cover}/${seats}`);
       }
     }
-  }), { numRuns: 300 });
+  });
 });
 
 test('every assignment falls inside the person\'s availability and the mission window', () => {
-  fc.assert(fc.property(planArb, (spec) => {
-    const input = build(spec);
-    if (input.missions.length === 0) return;
-    const { shifts } = plan(input);
+  forEveryPlan((input, { shifts }) => {
 
     for (const s of shifts) {
       const e = input.employees.find((x) => x.id === s.employeeId);
@@ -176,14 +172,11 @@ test('every assignment falls inside the person\'s availability and the mission w
       assert.ok(s.start >= Math.max(m.start, input.start), 'shift starts before the mission');
       assert.ok(s.end <= Math.min(m.end, input.end), 'shift ends after the mission');
     }
-  }), { numRuns: 300 });
+  });
 });
 
 test('remote missions are held end to end by the same people', () => {
-  fc.assert(fc.property(planArb, (spec) => {
-    const input = build(spec);
-    if (input.missions.length === 0) return;
-    const { shifts } = plan(input);
+  forEveryPlan((input, { shifts }) => {
 
     for (const m of input.missions.filter((x) => x.type === 'remote')) {
       const own = shifts.filter((s) => s.missionId === m.id);
@@ -194,7 +187,7 @@ test('remote missions are held end to end by the same people', () => {
         assert.equal(s.end, to);
       }
     }
-  }), { numRuns: 300 });
+  });
 });
 
 test('every local shift lies inside one slot of its own mission grid', () => {
@@ -203,32 +196,24 @@ test('every local shift lies inside one slot of its own mission grid', () => {
   // slots as a single 88-hour block - and one that named a slot it is not
   // inside would break both `mergeRows` and the ring's turn count. Remote
   // holds are the documented exception: the slot is the mission itself.
-  fc.assert(fc.property(planArb, (spec) => {
-    const input = build(spec);
-    if (input.missions.length === 0) return;
-    const { shifts } = plan(input);
+  forEveryPlan((input, { shifts }) => {
 
     for (const s of shifts) {
       assert.ok(Number.isFinite(s.slotStart) && Number.isFinite(s.slotEnd), 'every row names a slot');
       assert.ok(s.slotStart <= s.start, 'a row starts before the slot it claims');
       assert.ok(s.slotEnd >= s.end, 'a row outruns the slot it claims');
     }
-  }), { numRuns: 300 });
+  });
 });
 
 test('identical input produces identical output', () => {
-  fc.assert(fc.property(planArb, (spec) => {
-    const input = build(spec);
-    if (input.missions.length === 0) return;
-    assert.equal(JSON.stringify(plan(input)), JSON.stringify(plan(input)));
-  }), { numRuns: 200 });
+  forEveryPlan((input, result) => {
+    assert.equal(JSON.stringify(result), JSON.stringify(plan(input)));
+  }, 200);
 });
 
 test('the timeline always tiles the plan window exactly', () => {
-  fc.assert(fc.property(planArb, (spec) => {
-    const input = build(spec);
-    if (input.missions.length === 0) return;
-    const { timeline } = plan(input);
+  forEveryPlan((input, { timeline }) => {
     if (timeline.length === 0) return;
 
     assert.equal(timeline[0].start, input.start);
@@ -236,16 +221,15 @@ test('the timeline always tiles the plan window exactly', () => {
     for (let i = 1; i < timeline.length; i++) {
       assert.equal(timeline[i].start, timeline[i - 1].end);
     }
-  }), { numRuns: 200 });
+  }, 200);
 });
 
 
 test('daily rows equal an occurrence even with contested pins and mixed grids', () => {
-  fc.assert(fc.property(planArb, (spec) => {
-    const input = build(spec);
-    for (const s of plan(input).shifts.filter((row) => row.type === 'daily')) {
+  forEveryPlan((input, { shifts }) => {
+    for (const s of shifts.filter((row) => row.type === 'daily')) {
       const mission = input.missions.find((m) => m.id === s.missionId);
       assert.ok(mission.occurrences.some((w) => s.start === Math.max(input.start, w.start) && s.end === Math.min(input.end, w.end)));
     }
-  }), { numRuns: 200 });
+  }, 200);
 });

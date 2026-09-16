@@ -40,6 +40,8 @@
 
 - Prefer the Material UI components already installed (`@mui/material` and `@mui/icons-material`) whenever practical. For numeric inputs, use the shared MUI Number Spinner composition backed by Base UI rather than custom controls or native spinner styling.
 
+- When the user asks to inspect another collaborator's newer PR work first, pause implementation and complete that review before resuming.
+
 ## Ponytail (lazy senior dev mode)
 
 <!-- Source: https://github.com/DietrichGebert/ponytail — keep in sync with upstream AGENTS.md -->
