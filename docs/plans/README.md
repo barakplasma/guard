@@ -32,8 +32,9 @@ be taken or left on its own:
 
 - **008** is the bug list, and stands alone. A headcount edit rewrote history
   (**fixed**), history outside the period was silently deleted (**fixed**) and
-  is still not displayable (open), and the staffing pass reports shortages that
-  are not real (partly fixed by #40).
+  is now shown read-only beside the button that exports it (**fixed**), and the
+  staffing pass reports shortages that are not real (partly fixed by #40, and
+  its size corrected: 88% of what it reports short is genuinely short).
 - **009** fixes the first two by never re-deciding elapsed time. Its core rule
   is **implemented**: the clock enters at the adapter as an absolute instant,
   an elapsed segment carrying a record defers to it, and the headcount cap stops
@@ -81,10 +82,9 @@ be taken or left on its own:
 
 Suggested order, updated now that 009's core rule has landed:
 
-1. ~~012's export plus 008's defect 2~~ - **the data loss is closed.** Nothing
-   removes recorded duty automatically, and the out-of-period button exports
-   before it clears. What remains is showing elapsed assignments outside the
-   period read-only, which is no longer urgent.
+1. ~~012's export plus 008's defect 2~~ - **closed, both halves.** Nothing
+   removes recorded duty automatically, the out-of-period button exports before
+   it clears, and what it would carry away is now shown read-only beside it.
 2. ~~010's fragment move~~ (not needed - already in the fragment) and
    ~~014's first half~~ (**done** - per-person exclusions).
 3. **011** - the MiniZinc model, which closes the shortage class #40 narrowed

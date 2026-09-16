@@ -1,7 +1,7 @@
 # ADR 008: Three defects to fix regardless of any refactor
 
 - Status: Defect 1 **fixed** (ADR 009's core rule). Defect 2's data loss
-  **fixed**; its visibility half is open. Defect 3 partly fixed on `main` by
+  **fixed**, visibility half **fixed**. Defect 3 partly fixed on `main` by
   #40 and re-rated by ADR 013.
 - Date: 2026-09-15
 
@@ -107,10 +107,23 @@ export carries and what the button removes are one set, asserted in
 "ייצא ונקה שיבוצים ישנים" and clears nothing if the download could not be
 produced.
 
-**Still open:** the agenda cannot yet *show* elapsed assignments outside the
-period. They survive and can be exported, but a rolled window still looks empty
-until someone opens the CSV. That is the remainder of this defect, and it is no
-longer urgent now that nothing is being destroyed.
+**Now closed.** Assignments the period has rolled past are shown, read-only,
+in the findings section - beside the alert that counts them and the button that
+exports and removes them. That placement is the point rather than a convenience:
+pressing that button used to be an act of faith, since it said how many
+assignments it was about to carry away and nothing about whose they were.
+
+Read-only by construction, not by discipline. These hours are outside the
+period, the engine ignores them, and there is nothing an edit there could mean;
+what it renders is text, so there is no control to disable. It goes through the
+same formatter as the shareable message, so it reads the way the rota reads and
+carries the date - which is the part that matters for a shift the window has
+moved past.
+
+A `pre` rather than a table, deliberately. An unbounded number of past shifts in
+a four-column table is the phone overflow this codebase keeps rediscovering.
+`tests/carried-duty.e2e.mjs` asserts it at 360px, including that nothing inside
+it is editable.
 
 ## Defect 3: the staffing pass is incomplete
 

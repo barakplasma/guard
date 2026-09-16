@@ -229,6 +229,13 @@ export const t = {
   warnEmployeeOutside: (name) => `הזמינות של ${name} נמצאת מחוץ לתקופה.`,
   warnPinConflict: (name) => `${name} משובץ ידנית לשתי משימות חופפות — השיבוץ הישן בוטל.`,
   warnPinOverflow: (name) => `אין מספיק מקומות למשימה — השיבוץ הידני של ${name} בוטל.`,
+  // The rolled-past log (ADR 008's defect 2, ADR 012). Read-only on purpose:
+  // these hours are outside the period, so the engine cannot schedule them and
+  // there is nothing here to edit - the point is to see what the export is
+  // about to carry away before pressing the button that carries it.
+  pastLogTitle: 'היסטוריה מחוץ לתקופה',
+  pastLogNote: 'משמרות שהתקופה כבר עברה אותן. לקריאה בלבד — הן נשמרות בקובץ הייצוא.',
+
   // A manual assignment now outranks a stale availability window instead of
   // being cancelled by one, so this is informational: the shift stands, and the
   // availability is the thing that looks wrong. No repair button is offered -
