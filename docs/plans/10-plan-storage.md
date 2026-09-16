@@ -56,12 +56,12 @@ handle a few thousand characters comfortably and degrade past that.
 Measured, seventeen guards, ten seats, hourly, whole period elapsed and logged:
 
 | days | log entries | URL chars |
-|---|---|---|
-| 1 | 240 | 2,745 |
-| 3 | 720 | 7,064 |
-| 7 | 1,680 | 15,605 |
-| 14 | 3,360 | 30,462 |
-| 30 | 7,200 | 65,481 |
+|------|-------------|-----------|
+| 1    | 240         | 2,745     |
+| 3    | 720         | 7,064     |
+| 7    | 1,680       | 15,605    |
+| 14   | 3,360       | 30,462    |
+| 30   | 7,200       | 65,481    |
 
 ADR 012 bounds this. The horizon is 72 hours and a rolled-past window is
 exported rather than retained, so the live document never exceeds one window -

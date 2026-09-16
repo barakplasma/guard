@@ -63,11 +63,11 @@ got there, pins included.
 run is already under the threshold is untouched, so the threshold decides how
 much existing behaviour moves:
 
-| threshold | goldens that change | tests that fail |
-|---|---|---|
-| 3 hours  | 1 | 2 |
-| **6 hours**  | **0** | **0** |
-| 12 hours | 0 | 0 |
+| threshold   | goldens that change | tests that fail |
+|-------------|---------------------|-----------------|
+| 3 hours     | 1                   | 2               |
+| **6 hours** | **0**               | **0**           |
+| 12 hours    | 0                   | 0               |
 
 Six is the smallest value that costs nothing in the fixtures, and smaller is
 better here: it is the bound on how long anybody stands. Twelve buys nothing
@@ -95,11 +95,11 @@ a staffing shortage wearing a different hat.
 that changes what it is for. With runs capped directly, a carried debt can be
 repaid much faster without buying a stretch:
 
-| debt cap | longest run | 36h debt after 8 rolls |
-|---|---|---|
-| 2 hours | 5h | 30h |
-| **6 hours** | **6h** | **0h — fully settled** |
-| unclamped | 6h | 0h |
+| debt cap    | longest run | 36h debt after 8 rolls |
+|-------------|-------------|------------------------|
+| 2 hours     | 5h          | 30h                    |
+| **6 hours** | **6h**      | **0h — fully settled** |
+| unclamped   | 6h          | 0h                     |
 
 So ADR 015's cap moves from two shift slots to six hours, and its fairness
 measurement goes from "about an hour a roll" to **settled in eight rolls with no

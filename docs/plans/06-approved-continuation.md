@@ -17,18 +17,18 @@ Retain the existing schema version for backward reading in the current build.
 Trim trailing unset extension fields and omit unused tag definitions so documents
 without the extensions retain their previous encoding.
 
-| Tuple | Position | Meaning | Unset |
-|-------|----------|---------|-------|
-| mission | 0–6 | id, name, type, start, end, count, nightCount | existing conventions |
-| mission | 7–8 | day/night shift minutes | 0 |
-| mission | 9–10 | daily start/end minutes | null; zero is midnight |
-| mission | 11 | flat qualification requirement pairs | [] |
-| mission | 12 | excluded tag ids | [] |
-| mission | 13 | on-call flag | absent; `1` when on-call |
-| mission | 14 | excluded employee ids | [] |
-| employee | 4 | qualification ids | [] |
-| employee | 5–6 | carried duty minutes, carried stints | absent; written only when non-zero |
-| plan | key `tg` | qualification definitions | omitted |
+| Tuple    | Position | Meaning                                       | Unset                              |
+|----------|----------|-----------------------------------------------|------------------------------------|
+| mission  | 0–6      | id, name, type, start, end, count, nightCount | existing conventions               |
+| mission  | 7–8      | day/night shift minutes                       | 0                                  |
+| mission  | 9–10     | daily start/end minutes                       | null; zero is midnight             |
+| mission  | 11       | flat qualification requirement pairs          | []                                 |
+| mission  | 12       | excluded tag ids                              | []                                 |
+| mission  | 13       | on-call flag                                  | absent; `1` when on-call           |
+| mission  | 14       | excluded employee ids                         | []                                 |
+| employee | 4        | qualification ids                             | []                                 |
+| employee | 5–6      | carried duty minutes, carried stints          | absent; written only when non-zero |
+| plan     | key `tg` | qualification definitions                     | omitted                            |
 
 Mission types encode as local `0`, remote `1`, and daily `2`. Future extension
 fields must follow these reservations. Decode through the document schema;

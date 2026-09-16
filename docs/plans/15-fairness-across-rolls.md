@@ -101,11 +101,11 @@ slot, and the one after that, until they are level. Repayment rate and run
 length are the same quantity seen twice, and the measurement says so plainly -
 same fixture, same 36-hour debt, only the clamp changed:
 
-| debt cap | longest unbroken run | debt left after 8 rolls |
-|---|---|---|
-| 1 slot  | 2h  | 36h — repays nothing |
-| 2 slots | 5h  | 30h — about an hour a roll |
-| 4 slots | 11h | 10h — about 3.5h a roll |
+| debt cap | longest unbroken run | debt left after 8 rolls    |
+|----------|----------------------|----------------------------|
+| 1 slot   | 2h                   | 36h — repays nothing       |
+| 2 slots  | 5h                   | 30h — about an hour a roll |
+| 4 slots  | 11h                  | 10h — about 3.5h a roll    |
 
 Every hour of repayment cost an hour of unbroken duty, and there was no setting
 that bought both.
@@ -113,11 +113,11 @@ that bought both.
 **ADR 016 then removed the trade**, by capping the run directly instead of
 capping what causes it. With that in place the same table reads:
 
-| debt cap | longest unbroken run | debt left after 8 rolls |
-|---|---|---|
-| 2 hours | 5h | 30h |
-| **6 hours** | **6h** | **0h — fully settled** |
-| unclamped | 6h | 0h |
+| debt cap    | longest unbroken run | debt left after 8 rolls |
+|-------------|----------------------|-------------------------|
+| 2 hours     | 5h                   | 30h                     |
+| **6 hours** | **6h**               | **0h — fully settled**  |
+| unclamped   | 6h                   | 0h                      |
 
 **Six hours is what ships**, one line in `carriedDebts`, and it is the same
 quantity as ADR 016's run cap in code rather than by coincidence: repaying a

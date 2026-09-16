@@ -4,17 +4,17 @@ Nothing here is shipped or imported by `src/`. It exists so ADR 011's
 acceptance criteria can be *measured* rather than argued about, and so the cost
 of the model is visible before anything replaces the hand-written engine.
 
-| file | what it is |
-| --- | --- |
-| `rota.mzn` | the model: one segment grid, hard rules, four named objectives |
-| `solve.mjs` | the lexicographic driver - four solves of one model, each capped by the last |
-| `fromPlan.mjs` | plan input -> instance, and an answer back to shift rows |
-| `oracle.mjs` | brute force over every feasible assignment, plus the random instances |
-| `check.mjs` | model vs. oracle on small random instances |
-| `vsEngine.mjs` | model vs. the engine, at the instants it calls short — a *weaker* question |
-| `vsPlan.mjs` | model vs. the engine over a whole horizon — the honest comparison |
-| `scaling.mjs` | how far it goes, and on which backend |
-| `browser.mjs` + `browser/` | the real WebAssembly path, served without COOP/COEP |
+| file                       | what it is                                                                   |
+|----------------------------|------------------------------------------------------------------------------|
+| `rota.mzn`                 | the model: one segment grid, hard rules, four named objectives               |
+| `solve.mjs`                | the lexicographic driver - four solves of one model, each capped by the last |
+| `fromPlan.mjs`             | plan input -> instance, and an answer back to shift rows                     |
+| `oracle.mjs`               | brute force over every feasible assignment, plus the random instances        |
+| `check.mjs`                | model vs. oracle on small random instances                                   |
+| `vsEngine.mjs`             | model vs. the engine, at the instants it calls short — a *weaker* question   |
+| `vsPlan.mjs`               | model vs. the engine over a whole horizon — the honest comparison            |
+| `scaling.mjs`              | how far it goes, and on which backend                                        |
+| `browser.mjs` + `browser/` | the real WebAssembly path, served without COOP/COEP                          |
 
 ## Running it
 

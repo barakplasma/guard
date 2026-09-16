@@ -50,14 +50,14 @@ Pinned in `tests/logExport.test.js` and `tests/pins.test.js`.
 
 72 hours, whole window elapsed and logged:
 
-| shape | log entries | URL chars |
-|---|---|---|
-| 8 guards, 4 seats, 2 posts, hourly | 288 | 3,287 |
-| **17 guards, 10 seats, 3 posts, hourly** | **648** | **6,744** |
-| 30 guards, 16 seats, 4 posts, hourly | 1,152 | 10,987 |
-| 50 guards, 24 seats, 4 posts, hourly | 1,728 | 15,429 |
-| 17 guards, 10 seats, 3 posts, 2-hour | 324 | 3,778 |
-| 30 guards, 16 seats, 4 posts, 2-hour | 576 | 6,148 |
+| shape                                    | log entries | URL chars |
+|------------------------------------------|-------------|-----------|
+| 8 guards, 4 seats, 2 posts, hourly       | 288         | 3,287     |
+| **17 guards, 10 seats, 3 posts, hourly** | **648**     | **6,744** |
+| 30 guards, 16 seats, 4 posts, hourly     | 1,152       | 10,987    |
+| 50 guards, 24 seats, 4 posts, hourly     | 1,728       | 15,429    |
+| 17 guards, 10 seats, 3 posts, 2-hour     | 324         | 3,778     |
+| 30 guards, 16 seats, 4 posts, 2-hour     | 576         | 6,148     |
 
 An earlier revision compared these against an ~8 KB request-line ceiling and
 concluded the current shape sat at 84% of its budget. **That ceiling does not
