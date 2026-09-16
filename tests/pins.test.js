@@ -30,6 +30,22 @@ const doc = (over = {}) => ({
   ...over,
 });
 
+function twoHourLocalDoc() {
+  return doc({
+    end: START + 2 * HOUR,
+    missions: [{ id: 'm1', name: 'Gate', type: 'local', start: null, end: null, count: 1 }],
+  });
+}
+
+function firstHourOf(d) {
+  return plan(toPlannerInput(d)).shifts.find((shift) => shift.start === START);
+}
+
+const withExtraEmployee = (d) => ({
+  ...d,
+  employees: [...d.employees, { id: 'e4', name: 'D', start: null, end: null }],
+});
+
 /* --- coverage -------------------------------------------------------- */
 
 test('a null-range pin inherits the mission window, which inherits the plan', () => {
@@ -346,10 +362,7 @@ test('freezing the past adds nothing for a whole-mission pin whose hours have el
 });
 
 test('a frozen shift survives an unrelated later edit to the document', () => {
-  const d = doc({
-    end: START + 2 * HOUR,
-    missions: [{ id: 'm1', name: 'Gate', type: 'local', start: null, end: null, count: 1 }],
-  });
+  const d = twoHourLocalDoc();
   const before = plan(toPlannerInput(d));
   const firstHour = before.shifts.find((s) => s.start === START);
 
@@ -358,10 +371,7 @@ test('a frozen shift survives an unrelated later edit to the document', () => {
   // Adding a new employee reshuffles the balancer's choices for a local
   // mission - this is exactly the kind of edit that would otherwise rewrite
   // who already worked the first hour.
-  const edited = {
-    ...frozen,
-    employees: [...frozen.employees, { id: 'e4', name: 'D', start: null, end: null }],
-  };
+  const edited = withExtraEmployee(frozen);
   const after = plan(toPlannerInput(edited));
   const stillFirstHour = after.shifts.find((s) => s.start === START);
 
@@ -377,19 +387,12 @@ test('freezeElapsedBeforeEdit locks in the past even on an edit that never went 
   // schedule is viewed again the past has already been reshuffled. Basing the
   // freeze on `prev` - the document as it stood right before this edit -
   // means it doesn't matter which page made the edit.
-  const prev = doc({
-    end: START + 2 * HOUR,
-    missions: [{ id: 'm1', name: 'Gate', type: 'local', start: null, end: null, count: 1 }],
-  });
-  const before = plan(toPlannerInput(prev));
-  const firstHour = before.shifts.find((s) => s.start === START);
+  const prev = twoHourLocalDoc();
+  const firstHour = firstHourOf(prev);
 
   // An edit elsewhere in the document - e.g. adding an employee from the
   // Employees page - made after the first hour has already elapsed.
-  const next = {
-    ...prev,
-    employees: [...prev.employees, { id: 'e4', name: 'D', start: null, end: null }],
-  };
+  const next = withExtraEmployee(prev);
   const merged = freezeElapsedBeforeEdit(prev, next, START + HOUR);
 
   const after = plan(toPlannerInput(merged));
@@ -399,12 +402,8 @@ test('freezeElapsedBeforeEdit locks in the past even on an edit that never went 
 });
 
 test('freezeElapsedBeforeEdit lets an intentional clear of a frozen shift stick', () => {
-  const prev = doc({
-    end: START + 2 * HOUR,
-    missions: [{ id: 'm1', name: 'Gate', type: 'local', start: null, end: null, count: 1 }],
-  });
-  const before = plan(toPlannerInput(prev));
-  const firstHour = before.shifts.find((s) => s.start === START);
+  const prev = twoHourLocalDoc();
+  const firstHour = firstHourOf(prev);
 
   // An earlier edit already froze the elapsed shift.
   const frozen = freezeElapsedBeforeEdit(prev, prev, START + HOUR);
@@ -422,10 +421,7 @@ test('freezeElapsedBeforeEdit lets an intentional clear of a frozen shift stick'
 });
 
 test('freezeElapsedBeforeEdit lets clearAllPins wipe frozen shifts too', () => {
-  const prev = doc({
-    end: START + 2 * HOUR,
-    missions: [{ id: 'm1', name: 'Gate', type: 'local', start: null, end: null, count: 1 }],
-  });
+  const prev = twoHourLocalDoc();
   const frozen = freezeElapsedBeforeEdit(prev, prev, START + HOUR);
   assert.ok(frozen.pins.length > 0, 'sanity check: something was actually frozen');
 
