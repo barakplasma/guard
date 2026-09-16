@@ -1,7 +1,24 @@
 # ADR 004: Independently validate generated schedules
 
-- Status: Accepted (implemented)
+- Status: **Superseded by ADR 017. Failed in practice.** The implementation
+  remains temporarily as migration instrumentation while the hand-written
+  scheduler is still live; it is not the target architecture.
 - Date: 2026-09-10
+
+## Supersession
+
+The independent JavaScript checker found real defects, but the decision to
+maintain it as a second schedule-legality authority failed in practice. It
+covered assignment geometry while qualification fulfilment, rest-score
+correctness, fairness optimality and false infeasibility remained outside it.
+New scheduler rules required matching checker logic, invalid results still
+travelled through the normal result branch as warning conventions, and illegal
+interval-row states remained representable until after generation.
+
+ADR 017 replaces this with one MiniZinc constraint core used for both
+optimization and fixed-candidate validation, plus an assignment representation
+that cannot express double booking. This record remains useful historical
+evidence, not an architecture to extend.
 
 ## Context
 

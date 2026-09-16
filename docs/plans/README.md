@@ -10,7 +10,7 @@ pending implementation plans.
 | [001](01-whole-mission-pin-on-local-mission.md)  | Represent local pins within rotation slots.                                |
 | [002](02-per-mission-shift-length.md)            | Give each local mission an explicit rotation grid.                         |
 | [003](03-daily-missions-and-per-job-rotation.md) | Hold daily missions by calendar occurrence.                                |
-| [004](04-schedule-constraints.md)                | Independently validate generated schedules.                                |
+| [004](04-schedule-constraints.md)                | Independent JS schedule checker. *(Failed; superseded by 017)*             |
 | [005](05-qualifications-and-tags.md)             | Select qualified crews with preferred night rest.                          |
 | [006](06-approved-continuation.md)               | Extend shared plan URLs without reordering existing fields.                |
 | [007](07-on-call-missions.md)                    | Count on-call missions toward night rest.                                  |
@@ -23,6 +23,7 @@ pending implementation plans.
 | [014](14-exclusions-and-flexibility.md)          | Exclude individuals; keep scarce people free. *(First half implemented)*   |
 | [015](15-fairness-across-rolls.md)               | Duty does not stop counting when the window rolls past it. *(Implemented)* |
 | [016](16-unbroken-runs.md)                       | Nobody stands more than six hours if anyone else is free. *(Implemented)*  |
+| [017](17-illegal-states-and-solver-boundaries.md)| Typed boundaries; MiniZinc owns optimization and legality. *(Accepted)*     |
 
 ## How these fit together
 
@@ -41,8 +42,9 @@ flowchart TB
         A010["010 · the plan stays in the URL<br/><i>it was already in the fragment</i>"]
     end
 
-    subgraph open ["Waiting on a decision"]
+    subgraph open ["Accepted, implementation open"]
         A011["011 · MiniZinc on HiGHS<br/><i>prototyped and measured</i>"]
+        A017["017 · typed boundaries<br/>MiniZinc owns legality"]
     end
 
     subgraph frame ["Operating model"]
@@ -57,6 +59,8 @@ flowchart TB
     A012 -- "the fragment is enough" --> A010
     A012 -- "sizes the model" --> A011
     A009 --> A011
+    A004["004 · independent JS checker<br/><i>failed in practice</i>"] -. "superseded" .-> A017
+    A011 --> A017
     A015 -- "found while measuring it" --> A016
     A016 -- "lets 015 repay in full" --> A015
     A014 -. "second half needs a solver" .-> A011
@@ -65,14 +69,15 @@ flowchart TB
     classDef todo fill:#fff4e5,stroke:#ed6c02,color:#7a3e00
     classDef info fill:#e8eefb,stroke:#1565c0,color:#0d3c78
     class A009,A015,A014,A016 done
-    class A011 todo
+    class A011,A017 todo
     class A008,A010,A012,A013 info
 ```
 
 Each record states the context, decision, consequences, rejected alternatives,
 and implementation or test evidence. Acceptance dates record this design, not a
 claim about deployment. Superseding decisions should identify the affected ADR.
-ADRs 001-007 are implemented. **011 is accepted provisionally and 012's
+ADRs 001-003 and 005-007 are implemented; 004 failed and is superseded by 017.
+**011 is accepted provisionally, 017 is accepted, and 012's
 retention question is decided; the rest are proposed**, and are split so each can
 be taken or left on its own:
 
@@ -139,6 +144,14 @@ be taken or left on its own:
   hours, at which no golden fixture changes and no test fails. What survives it
   is a staffing shortage rather than a scheduling one - 100% of the remaining
   cases have nobody spare at all.
+
+- **017** explicitly supersedes 004, whose independent JavaScript checker
+  failed in practice as a second legality authority. Permissive URL/editor
+  drafts are parsed once into a strict typed problem; MiniZinc owns both
+  optimization and fixed-candidate checking through one shared constraint
+  core; and one mission value per employee/segment makes double booking
+  unrepresentable. The old checker stays only as migration instrumentation
+  until the hand-written scheduler is removed.
 
 Suggested order, updated now that 009's core rule has landed:
 

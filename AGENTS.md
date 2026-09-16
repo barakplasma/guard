@@ -41,6 +41,9 @@
 - Prefer the Material UI components already installed (`@mui/material` and `@mui/icons-material`) whenever practical. For numeric inputs, use the shared MUI Number Spinner composition backed by Base UI rather than custom controls or native spinner styling.
 
 - When the user asks to inspect another collaborator's newer PR work first, pause implementation and complete that review before resuming.
+- When a newer ADR replaces a decision that failed in practice, label the old
+  ADR explicitly as failed and superseded; do not soften it into a transition
+  or leave two apparent authorities.
 
 ## Ponytail (lazy senior dev mode)
 
