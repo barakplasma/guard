@@ -141,6 +141,9 @@ number being optimised.
 
 ## Evidence
 
+`tests/planner.unbrokenRuns.test.js` pins the four cases that matter: the
+reported shape, a saturated roster staying fully staffed, an ordinary rota
+untouched, and a pinned stretch counting towards the run.
 `scripts/unbrokenRunSurvey.mjs` for the survey, `scripts/unbrokenRuns.mjs` for
 the worked case that found it, `scripts/fairnessAcrossRolls.mjs` for what it
 does to ADR 015. Implementation: `MAX_UNBROKEN_MINUTES` and the `midRun` tier in
