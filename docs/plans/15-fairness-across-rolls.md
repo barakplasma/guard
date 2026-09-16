@@ -99,9 +99,19 @@ had given up. It returns to zero on its own once the debt is settled, so this
 costs nothing in the steady state - which is the case that was already fine and
 had to stay fine.
 
-Worth knowing while reading those numbers: the app shows the window figure, so
-during repayment it displays a spread that looks like a fault and is a fix. That
-is a user interface problem this record does not solve.
+Worth knowing while reading those numbers: the app used to show only the window
+figure, so during repayment it displayed a spread that looks like a fault and is
+a fix. **The summary now prints both** - "פער בחלון" beside "פער כולל תקופות
+קודמות" - and a guard who carries anything gets a second line under their name
+saying how much. Neither appears at all when nobody carries anything, which is
+the ordinary rota.
+
+That last part is not cosmetic. `buildStats` returns the object it always
+returned for a plan with no carried duty, fields and all, so every golden
+fixture passes untouched and every link already shared renders exactly as it
+did. The first attempt added the fields unconditionally and broke four goldens
+for a feature those plans do not use - the right fix was the wire format's own
+discipline (write it only when it carries a value), not a looser test.
 
 **`carriedStints` is an approximation and says so.** An out-of-period pin has no
 grid left to name a slot on, so a turn is counted as one plan shift length, at
@@ -134,4 +144,6 @@ stating rather than discovering.
 `makeState` and the stale-pin walk in `planOnce` (`src/lib/planner.js`),
 `ringKeys` (`src/lib/strategies.js`), `carryForward` (`src/lib/pins.js`),
 `employeeSchema` and `toPlannerInput` (`src/lib/planSchema.js`), and positions
-5-6 in `src/lib/urlState.js`. Tests in `tests/planner.carriedDuty.test.js`.
+5-6 in `src/lib/urlState.js`. `buildStats` and `SummaryTable` for the display
+half. Tests in `tests/planner.carriedDuty.test.js` and
+`tests/carried-duty.e2e.mjs`.

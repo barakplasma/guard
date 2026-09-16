@@ -189,6 +189,10 @@ export const t = {
   stints: 'משמרות',
   minGap: 'הפסקה מזערית',
   spread: 'פער בין העמוס לפנוי ביותר',
+  // Duty stood before this period (ADR 015). Shown only for someone who carries
+  // any, so the ordinary rota - where nobody does - reads exactly as it did.
+  carriedBefore: (minutes) => `כולל ${minutes} מתקופות קודמות`,
+  spreadWithCarried: (window, total) => `פער בחלון: ${window} · פער כולל תקופות קודמות: ${total}`,
 
   // sharing
   shareSection: 'שיתוף וייצוא',

@@ -560,7 +560,7 @@ function occupy(st, mission, start, end, slotStart, counter) {
  * @returns {{
  *   shifts: {missionId:string,missionName:string,type:string,employeeId:string,employeeName:string,start:number,end:number,slotStart:number,slotEnd:number,pinned:boolean,frozen:boolean}[],
  *   timeline: {start:number,end:number,onDuty:{employeeId:string,missionId:string}[],offDuty:string[],unavailable:string[]}[],
- *   stats: {perEmployee:{employeeId:string,name:string,minutes:number,stints:number,minGapMinutes:number|null}[], spreadMinutes:number},
+ *   stats: {perEmployee:{employeeId:string,name:string,minutes:number,stints:number,minGapMinutes:number|null,carriedMinutes?:number,carriedStints?:number,totalMinutes?:number,totalStints?:number}[], spreadMinutes:number, totalSpreadMinutes?:number},
  *   warnings: object[],
  *   rest: {employeeId:string,start:number,end:number,needed:number,totalMinutes:number,longestMinutes:number}[],
  *   proposals: object[],
@@ -1311,10 +1311,39 @@ function buildStats(shifts, employees, sleepable) {
       if (minGapMinutes == null || gap < minGapMinutes) minGapMinutes = gap;
     }
 
-    return { employeeId: e.id, name: e.name, minutes, stints: own.length, minGapMinutes };
+    // Duty stood outside this period (ADR 015) rides alongside rather than
+    // inside `minutes`: the window figure is what the agenda below it shows, so
+    // conflating the two would make the table disagree with itself. What the
+    // strategy actually ranks on is `totalMinutes`.
+    //
+    // Present only when there is some, which is the same discipline the wire
+    // format follows and for the same reason: a plan that carries nothing must
+    // produce exactly the object it always produced, or every golden fixture
+    // changes shape for a feature it does not use.
+    const carriedMinutes = e.carriedMinutes ?? 0;
+    const carriedStints = e.carriedStints ?? 0;
+    const row = { employeeId: e.id, name: e.name, minutes, stints: own.length, minGapMinutes };
+    if (!carriedMinutes && !carriedStints) return row;
+    return {
+      ...row,
+      carriedMinutes,
+      carriedStints,
+      totalMinutes: minutes + carriedMinutes,
+      totalStints: own.length + carriedStints,
+    };
   });
 
   const totals = perEmployee.map((p) => p.minutes);
   const spreadMinutes = totals.length ? Math.max(...totals) - Math.min(...totals) : 0;
-  return { perEmployee, spreadMinutes };
+  if (!perEmployee.some((p) => p.carriedMinutes || p.carriedStints)) {
+    return { perEmployee, spreadMinutes };
+  }
+  // The number the engine is actually evening out. While a debt is being repaid
+  // the two diverge, and the window one reads as a fault when it is a fix.
+  const overall = perEmployee.map((p) => p.totalMinutes ?? p.minutes);
+  return {
+    perEmployee,
+    spreadMinutes,
+    totalSpreadMinutes: Math.max(...overall) - Math.min(...overall),
+  };
 }

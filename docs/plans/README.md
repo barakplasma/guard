@@ -123,6 +123,6 @@ deliberately outside `npm test`. ADR 011's model is measured by
 `node prototype/minizinc/check.mjs` and `node prototype/minizinc/vsEngine.mjs`,
 which need a `minizinc` binary on `PATH` and are outside `npm test` for that
 reason. Browser acceptance uses
-`tests/e2e.mjs`, `tests/mobile-viewports.mjs`, and `tests/features.e2e.mjs`
-against a local built preview. Set `CHROME` to a headless Chromium binary and
+`tests/e2e.mjs`, `tests/mobile-viewports.mjs`, `tests/features.e2e.mjs` and
+`tests/carried-duty.e2e.mjs` against a local built preview. Set `CHROME` to a headless Chromium binary and
 `SHOT_DIR` outside the repository.
