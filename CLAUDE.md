@@ -168,6 +168,20 @@ slot on, so a turn is one plan shift length, at least one.
 milliseconds — `occupy` divides by `MINUTE` on the way in. Seeding it cost an
 hour to a factor of 60,000.
 
+The debt is **normalized against the least-worked person and clamped to two
+shift slots** (`carriedDebts`), and both halves are load-bearing rather than
+tidy. In absolute hours, a newcomer joining a roster where everyone else has
+stood five hundred hours stood **72 of a 72-hour window without a break**.
+Unclamped, repaying a 36-hour gap bought **72 unbroken hours** — the
+eighty-eight-hour failure `rotation` was fixed for, arriving through the
+fairness key instead. That second one is not a bug in the seeding: under a
+greedy minutes-first rule, repayment rate and unbroken-run length are the same
+quantity seen twice, so the cap is the only knob and ADR 015 carries the
+measured curve. Two slots is chosen against the engine's own bar —
+`invariants.js` calls three consecutive slots a `long-unbroken-run`.
+`scripts/unbrokenRuns.mjs` is the guard rail; it also records a **forty-hour**
+run that `balanced` already produces on `main`, with no carried duty involved.
+
 While a debt is repaid the window spread is deliberately wide. That is the trade
 working, not failing, and the summary prints both figures so it does not read as a
 fault. Neither the caption nor the split figure appears when nobody carries

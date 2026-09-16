@@ -12,6 +12,10 @@ import { clearStalePins } from '../src/lib/pins.js';
  * evens out the window it is given - so without this, an hour stops counting
  * the moment it falls behind the window, and a guard who came back from leave
  * stays permanently behind while the app reports a perfectly even spread.
+ *
+ * The last two tests are the ones that matter most. Both pin a way this feature
+ * was actively dangerous before it was measured, and both would look like
+ * over-testing to anyone who had not seen the numbers.
  */
 
 const HOUR = 60 * 60 * 1000;
@@ -146,6 +150,60 @@ test('clearing residue moves the number without moving a shift', () => {
     'and its four hours are now carried on the person',
   );
   assert.deepEqual(run(cleared).shifts, run(d).shifts, 'the schedule is untouched');
+});
+
+test('a newcomer is not handed every hour there is', () => {
+  // A guard joining a roster where everyone else has stood five hundred hours
+  // is five hundred hours behind, and `balanced` picks the fewest minutes for
+  // every slot. Before debts were measured against the least-worked person
+  // rather than in absolute hours, the newcomer stood 72 of a 72-hour window
+  // without a break while the rest did 18 each.
+  const HOURS = 72;
+  const veteran = (id, name) => ({ id, name, carriedMinutes: 30000 });
+  const d = doc({
+    end: BASE + HOURS * HOUR,
+    employees: [
+      veteran('e1', 'אבי'), veteran('e2', 'בני'), veteran('e3', 'גדי'), veteran('e4', 'דני'),
+      { id: 'e5', name: 'חדש' },
+    ],
+    missions: [{ id: 'm1', name: 'שער', type: 'local', count: 2 }],
+  });
+  const result = run(d);
+  const worked = (id) => minutesOf(result, id) / 60;
+  const spread = Math.max(...['e1', 'e2', 'e3', 'e4', 'e5'].map(worked))
+    - Math.min(...['e1', 'e2', 'e3', 'e4', 'e5'].map(worked));
+  assert.ok(spread <= 4, `everyone does roughly the same, spread was ${spread}h`);
+  assert.ok(worked('e5') < HOURS / 2, 'and the newcomer is not on post for the whole window');
+});
+
+test('a debt cannot buy a long unbroken run', () => {
+  // Repayment and unbroken duty are the same quantity under a greedy
+  // minutes-first rule, so the debt one window may repay is clamped to two
+  // shift slots - the engine's own bar, since `invariants.js` calls three
+  // consecutive slots a `long-unbroken-run`. Unclamped, a 36-hour gap bought
+  // seventy-two unbroken hours.
+  const d = doc({
+    end: BASE + 24 * HOUR,
+    employees: [
+      { id: 'e1', name: 'דנה', carriedMinutes: 36 * 60 },
+      { id: 'e2', name: 'יוסי' }, { id: 'e3', name: 'מיכל' }, { id: 'e4', name: 'אבי' },
+    ],
+    missions: [{ id: 'm1', name: 'שער', type: 'local', count: 1 }],
+  });
+  // דנה is owed 36 hours and the window is 24, so an unclamped debt would give
+  // her all of it in one stretch.
+  const own = run(d).shifts
+    .filter((s) => s.employeeId === 'e1')
+    .sort((a, b) => a.start - b.start);
+  let longest = 0;
+  let run_ = 0;
+  let prevEnd = null;
+  for (const s of own) {
+    run_ = prevEnd === s.start ? run_ + (s.end - s.start) : s.end - s.start;
+    prevEnd = s.end;
+    longest = Math.max(longest, run_);
+  }
+  assert.ok(longest / HOUR <= 6, `longest unbroken stretch was ${longest / HOUR}h`);
 });
 
 test('rotation carries turns, not hours, and only where rest ties', () => {

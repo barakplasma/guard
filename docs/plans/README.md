@@ -72,8 +72,13 @@ be taken or left on its own:
   window. A guard away for two days came back permanently 36 hours behind, and
   the app reported a spread of **0.0h** at every roll while it happened.
   **Implemented:** duty outside the period counts, from the pins themselves and
-  from a per-person carried total that survives ADR 012's export. The gap now
-  closes in four rolls and stays closed.
+  from a per-person carried total that survives ADR 012's export. It is
+  normalized against the least-worked person and clamped to two shift slots,
+  and both of those were bought with measurements: in absolute hours a newcomer
+  stood 72 of a 72-hour window unbroken, and unclamped, repaying a 36-hour gap
+  bought 72 unbroken hours. Under a greedy minutes-first rule repayment rate and
+  unbroken-run length are the same quantity, which is the sharpest argument in
+  these records for 011.
 - **014** adds per-person exclusions - **implemented**, at wire position 14,
   with one shared `isExcluded` predicate replacing five copies of the tag check
   - and the softer rule that scarce qualifications should be kept uncommitted so

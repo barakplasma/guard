@@ -465,26 +465,47 @@ function normalizePins(pins, employeeById, missionById, planStart, planEnd, warn
  * maximization, and `seq` - bumped on every pick - round-robins exact ties so
  * the rotation cannot collapse onto whoever happens to sort first.
  */
-function makeState(employees, strategy, carried = new Map()) {
+/**
+ * Duty stood outside this period, in minutes, as each guard's head start on the
+ * fairness key - normalized against the least-worked person and clamped.
+ *
+ * Both halves matter. **Normalized**, because a roster where everybody has
+ * stood five hundred hours is a roster in balance, and seeding five hundred
+ * against a newcomer's zero hands the newcomer every hour there is - measured,
+ * before the clamp existed: 72 of a 72-hour window, unbroken.
+ *
+ * **Clamped**, because `balanced` picks the fewest minutes for every slot, so an
+ * unclamped debt makes whoever is behind the cheapest candidate for as many
+ * consecutive slots as the debt is long. A guard back from two days' leave was
+ * handed 72 unbroken hours to settle a 36-hour gap: the eighty-eight-hour
+ * failure `rotation` was fixed for, arriving through the fairness key instead.
+ *
+ * The bound is the engine's own quality bar rather than a number invented here -
+ * `invariants.js` calls three consecutive slots a `long-unbroken-run`, so two
+ * slots is the most a debt may buy and a debt can never on its own build a run
+ * this codebase would flag. The cost is that a larger debt settles two slots per
+ * window as the period rolls forward instead of all at once, which is what
+ * `scripts/fairnessAcrossRolls.mjs` measures.
+ */
+function carriedDebts(employees, carried, shiftMinutes) {
+  const total = (e) => (e.carriedMinutes ?? 0) + (carried.get(e.id)?.minutes ?? 0) / MINUTE;
+  if (employees.length === 0) return new Map();
+  const floor = Math.min(...employees.map(total));
+  const cap = 2 * shiftMinutes;
+  return new Map(employees.map((e) => [e.id, Math.min(total(e) - floor, cap)]));
+}
+
+function makeState(employees, strategy, carried = new Map(), shiftMinutes = 60) {
   let seq = 0;
+  const debts = carriedDebts(employees, carried, shiftMinutes);
   return new Map(
     employees.map((e, index) => [
       e.id,
       {
         id: e.id, name: e.name, tags: e.tags ?? [], start: e.start, end: e.end, busy: [], busyUntil: -Infinity,
-        // Seeded with duty already stood outside this period (ADR 015), so
-        // `balanced` evens out a guard's whole record rather than only the
-        // window in front of it. Zero for every document written before the
-        // field existed, which is what keeps those links rendering as they did.
-        //
-        // Two sources, summed: the document's own carried totals, and the
-        // assignments still sitting outside the period. Counting both is what
-        // makes clearing residue a change of *representation* rather than a
-        // change of schedule - the button converts the second into the first
-        // and the total does not move, which `tests/pins.test.js` asserts.
-        // `st.minutes` is minutes, despite everything around it being epoch
-        // milliseconds - `occupy` divides by MINUTE on the way in.
-        minutes: (e.carriedMinutes ?? 0) + (carried.get(e.id)?.minutes ?? 0) / MINUTE,
+        // A head start on the fairness key, normalized and clamped - see
+        // `carriedDebts`, where both of those are the whole safety of ADR 015.
+        minutes: debts.get(e.id) ?? 0,
         carriedStints: (e.carriedStints ?? 0) + (carried.get(e.id)?.stints ?? 0),
         missionMinutes: new Map(), lastEnd: -Infinity, seq: seq++, stints: 0,
         ...(strategy.seed ? strategy.seed(e, index) : null),
@@ -827,7 +848,7 @@ function planOnce({
   }
 
   const strategy = getStrategy(strategyName);
-  const state = makeState(emps, strategy, carried);
+  const state = makeState(emps, strategy, carried, shiftMinutes);
   // On-call duty can be slept through, so pins on such missions must not push
   // anyone's sleep block out of the night, and staffing one must not cost the
   // crew their rest window - see `choose` and `assessRest` below.

@@ -63,13 +63,18 @@ try {
     'someone carrying nothing gets no caption at all',
   );
 
-  // Thirty-six hours ahead, six hourly seats: דנה stands none of them.
-  assert.match(await row.innerText(), /0:00/, 'the one who is ahead is given nothing this window');
+  // Thirty-six hours ahead, six hourly seats: דנה stands fewer of them than
+  // יוסי, but not none. The debt one window may repay is clamped to two shift
+  // slots, because under a greedy minutes-first rule repayment and unbroken
+  // duty are the same quantity - unclamped, this reads 0:00 here and buys
+  // somebody a 72-hour stretch elsewhere (ADR 015).
+  assert.match(await row.innerText(), /2:00/, 'the one who is ahead stands two of the six');
+  assert.match(await page.getByTestId('summary-e2').innerText(), /4:00/, 'and the other four');
 
   const spread = await page.getByText(/פער/).first().innerText();
   assert.match(spread, /פער בחלון/, 'the window spread is labelled as the window');
   assert.match(spread, /פער כולל תקופות קודמות/, 'and the figure being evened out is beside it');
-  assert.match(spread, /30:00/, 'which is 36 carried against 6 worked');
+  assert.match(spread, /34:00/, 'which is 36 carried plus 2 worked, against 4 worked');
 
   assert.ok(
     await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
