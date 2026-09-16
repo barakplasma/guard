@@ -17,12 +17,14 @@
 - The `rotation` strategy means round robin by longest wait, not equal
   hours: whoever has waited longest since their last duty goes next, and
   somebody back from a long mission joins the end of the queue for local
-  missions. Nobody wants equal hours. The wait only matters for six hours:
-  after a six-hour night sleep it makes no difference when someone last
-  guarded, and most schedules are 24 hours or less.
-- Six hours of continuous night sleep is a metric to maximise across as
-  many people as possible, never an enforced minimum. Night shift length
-  is a lever the owner may vary to get more people to six hours.
+  missions. Nobody wants equal hours. The wait only matters until a night's
+  sleep: after one it makes no difference when someone last guarded, and
+  most schedules are 24 hours or less.
+- Eight hours off is the rest target to optimise for, across as many
+  people as possible. Six total hours is a strongly suggested minimum for
+  drivers, which the user may accept in a big pinch; it is reported, never
+  a veto. Night shift length is a lever the owner may vary to get more
+  people to eight hours.
 - Manual assignments must always win over automatic scheduling; show them with a lock icon. Automatically preserved elapsed assignments must use a distinct history icon and require an explicit correction before replacement.
 - Night rest is measured two ways inside the configured night hours: **total**
   rest (the configured per-qualification minimum is enforced and reported
