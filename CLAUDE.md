@@ -125,16 +125,23 @@ inside `normalizePins`. A mission that fell out of the period is already gone fr
 `missionById`, so its pins vanish before anything in there can count them — and since the button
 that clears residue only exists alongside this warning, a count taken in there would strand that
 history with no way to reach it. Sharing one predicate with `clearStalePins` is what keeps the
-number honest: what the warning reports is exactly what the button removes, and
+number honest: what the warning reports as *clearable* is exactly what the button removes, and
 `tests/pins.test.js` asserts that.
 
-Cleanup comes in two halves, and the asymmetry is deliberate. `clearStalePins` is the button:
-explicit, and it takes both sides of the window. `pruneStalePins` runs inside `setDoc` and is
-much more timid — it declines entirely when the edit moves `start`/`end`, because the date
-fields emit an edit on every intermediate value that parses and a half-typed year would take
-real history with it, unrecoverably (`setDoc` navigates with `replace`; there is no way back).
-It also only ever drops pins that finished *before* the period starts: a pin past the end is
-one the user is probably about to extend to cover.
+**Only the past is history, and the predicate says which.** `isOutOfPeriod` is true on *both*
+sides of the window, which is right for the engine — it schedules neither — and wrong for anything
+that then calls a pin a record of duty that happened. Keyed on it, the export wrote next week's
+assignment into the history CSV as completed duty and the button beside the warning deleted it:
+somebody's plan, consumed by narrowing the period. So `isElapsedBeforePeriod` governs everything
+that calls a pin history — the CSV, `countStalePins`, `clearStalePins` — while the warning still
+counts both sides, because an assignment the engine is ignoring is worth knowing about whichever
+way it fell. That is why the warning carries two numbers, `count` and `elapsed`, and why the button
+only renders when there is history to export (ADR 012's correction).
+
+There is no automatic cleanup, and that is deliberate. `pruneStalePins` used to run inside `setDoc`
+and was right while out-of-period pins were residue; ADR 012 inverts that by making them the only
+durable record, so it is gone and `src/lib/pins.js` keeps the reasoning where it used to live.
+Nothing removes recorded duty without an export any more.
 
 ### Duty does not stop counting when the window rolls past it
 
@@ -382,8 +389,10 @@ opinions about the same files, where the louder one wins by reformatting everyth
 here for what `oxlint` does not cover: workflows, YAML, shell, the Dockerfile, Markdown, and a
 secret scan. Every other omission is named in that file with its reason; the spell checkers and
 `jscpd` in particular would fight the Hebrew copy and the deliberately-shared fuzz generators.
-`.yamllint.yml` and `.markdownlint.json` hold the two rule sets that needed relaxing, both for
-stated reasons rather than to silence a complaint.
+`.yamllint.yml` and `.markdownlint.yml` hold the two rule sets that needed relaxing, both for
+stated reasons rather than to silence a complaint — and both in YAML so the reason sits beside the
+rule. Note that **actionlint only lints the shell inside `run:` blocks when `shellcheck` is on
+`PATH`**: running it locally without shellcheck installed reports clean and CI does not.
 
 `lz-string` is CommonJS: import it as a default and destructure, or the Node test run breaks while
 the Vite build keeps working.
