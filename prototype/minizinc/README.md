@@ -336,11 +336,9 @@ worker spin rate**, because that is the number a device can measure about itself
 in 50ms. Open `browser/index.html` on the phone, read the worker spin it prints,
 find the nearest row: that row is the device.
 
-That is a bracket, not a substitute. ADR 011 asks for a measurement on real
-hardware and this is not one. What it does is turn "unknown" into "known within
-a band, with a one-step procedure for closing it" — and `serve.mjs` is that one
-step, because the reason nobody had run this on a phone was that there was no
-URL to open.
+It is a bracket, not a substitute — and once the substitute arrived it showed
+the bracket was indexed on the wrong thing. See **The device, and what it
+disproved** below before using any of these numbers to predict hardware.
 
 Measured:
 
@@ -377,16 +375,49 @@ number came back at +231MB over idle, inside the 250-400MB band measured before,
 so the earlier figure stands - but it stood by luck, and a measurement that can
 quietly fall back to the wrong process is worse than no measurement.
 
+### The device, and what it disproved
+
+**Pixel 10, Chrome 152: the 72-hour ladder takes 12.4 seconds.** First load
+2143ms cold over the network, warm re-solve 3246ms, cancellation immediate, all
+four levels proved optimal, `crossOriginIsolated` false. Read with
+`browser/standalone.html`, which is why that page exists.
+
+The curve above predicted **21.7s** for it, from a worker spin of 2817 against
+this machine's 4284. It came in 1.75x faster than predicted, and faster in
+absolute terms than the unthrottled desktop while benchmarking at two thirds of
+its rate.
+
+The probe was wrong, not the solver. `while (performance.now() - t < ms) n++`
+has a clock read as its loop body; the same loop with the read hoisted out runs
+**85x faster**, so what it measured was `performance.now()` throughput, which
+Chrome clamps differently per platform. It tracked the SIGSTOP throttle
+faithfully — stopping a process halves clock reads and compute alike — which is
+precisely why it looked sound across an eight-row sweep. A number can be
+internally consistent everywhere it was checked and still measure the wrong
+thing.
+
+So the sweep is what it always was: **the throttle response of one machine**.
+It says how this degrades as CPU is taken away, and nothing about another
+device. `standalone.html` no longer extrapolates from a microbenchmark; it lists
+the measurements beside each other, and its fingerprint is fixed work timed once
+instead of iterations counted against the clock — a better proxy, still a proxy.
+
+One thing the phone said that the desktop could not: its worker benchmarked at
+74% of its main thread, against 96% here. **The solver's thread does not
+reliably get the big core on a phone.** It cost nothing in this measurement, and
+it is the reason a foreground-tab figure is the optimistic one.
+
 ### What this says about shipping
 
-The most pessimistic row - 588 spins/ms, seven times slower than this machine -
-puts a 72-hour reschedule at 101 seconds. Against a rota that has to be
-rebalanced inside twenty or thirty minutes when a mission appears, that is
-comfortable. **Speed is not the objection.**
+A 72-hour reschedule costs **12.4 seconds on the phone the rota is run from**.
+Against a rota that has to be rebalanced inside twenty or thirty minutes when a
+mission appears, that is not close to a constraint. **Speed is not the
+objection**, and that reads stronger now than it did from the bracket: the
+101-second worst case was an artefact of the throttle.
 
-*When* it runs is. The app re-solves on every `setDoc`, which is every keystroke
-in a name field, and 6.4 seconds - the fastest row here, on a desktop - already
-makes that impossible. A MiniZinc adapter is therefore not a drop-in for
+*When* it runs is the objection. The app re-solves on every `setDoc`, which is
+every keystroke in a name field, and 12.4 seconds - or 3.2, the warm re-solve of
+one level - makes that impossible. A MiniZinc adapter is therefore not a drop-in for
 `plan()`: the solve has to become explicit and asynchronous first. ADR 012's
 freeze work already pulled the single solve into `acceptSchedule` and made every
 consumer take an accepted result rather than compute one, so the seam exists.

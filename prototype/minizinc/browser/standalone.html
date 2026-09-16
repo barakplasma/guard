@@ -70,21 +70,15 @@ import * as MiniZinc from 'https://cdn.jsdelivr.net/npm/minizinc@4.5.2/dist/mini
 const CDN = 'https://cdn.jsdelivr.net/npm/minizinc@4.5.2/dist/';
 
 /*
- * The desktop curve from `pixelClass.mjs`, so this page can say what a number
- * means without anyone pasting it anywhere. Same fixture, same four solves; the
- * throttle there is SIGSTOP on the renderer, which - unlike CDP throttling -
- * reaches the worker the solver runs on. Keyed on worker spin because that is
- * the one thing a device can measure about itself in 50ms.
+ * Measured elsewhere, for context only - this page no longer extrapolates from
+ * a microbenchmark to another device's solve time, because the first phone to
+ * run it disproved that. Kept so the numbers above have something to sit
+ * beside; see prototype/minizinc/README.md for what each row is.
  */
-const CURVE = [
-  { hours: 24, spin: 4160, ladder: 6.4 },
-  { hours: 24, spin: 2484, ladder: 13.6 },
-  { hours: 24, spin: 966, ladder: 26.9 },
-  { hours: 24, spin: 585, ladder: 43.8 },
-  { hours: 72, spin: 4284, ladder: 14.3 },
-  { hours: 72, spin: 2586, ladder: 29.8 },
-  { hours: 72, spin: 1131, ladder: 59.2 },
-  { hours: 72, spin: 588, ladder: 101.2 },
+const REFERENCE = [
+  { what: 'desktop container, unthrottled', hours: 24, ladder: 6.4 },
+  { what: 'desktop container, unthrottled', hours: 72, ladder: 14.3 },
+  { what: 'Pixel 10, Chrome', hours: 72, ladder: 12.4 },
 ];
 
 const MODEL = "% Guard rota: one segment-grid assignment, solved globally.\n%\n% ADR 011's prototype. This is NOT shipped and is not wired into the app; it\n% exists to be measured against that record's acceptance criteria before\n% anything replaces the hand-written engine.\n%\n% Scope, stated plainly so nobody reads more into it than is here. This models\n% the part ADR 008's defect 3 is about: given a segment grid, who stands where.\n% Hard rules are pins, availability, exclusions and headcount. Not modelled yet:\n% night rest, daily occurrences as distinct holds, remote wholeness, and the\n% per-mission grids themselves - the grid arrives already computed, because\n% building it is domain work the engine does well and a solver has no opinion on.\n%\n% Time is a **segment index**, not an epoch millisecond (ADR 011). The horizon is\n% 72 hours, so the caller maps absolute instants onto 1..nS before it gets here\n% and back again afterwards. Epoch values would blow up every domain for nothing.\n\ninclude \"lex_lesseq.mzn\";\n\nint: nE;                                     % employees\nint: nM;                                     % missions\nint: nS;                                     % segments of the grid\nset of int: E = 1..nE;\nset of int: M = 1..nM;\nset of int: S = 1..nS;\n\narray[M, S] of int: want;                    % seats wanted; 0 where not running\n% Which grid slot each segment belongs to, per mission. Two segments of one\n% mission sharing a slot number are two halves of one shift - an availability\n% edge, a night edge or a pin bound tore the slot in two. The engine stamps\n% every row with this for the same reason (`slotStart`/`slotEnd`): the slot, not\n% the segment, is the unit a turn is counted in and the unit `mergeRows` rejoins\n% on. Without it here the solver would happily rotate people through the halves\n% of a single hour to shave the imbalance, which is not a schedule anybody wants\n% to stand.\narray[M, S] of int: slotOf;\n% Segments that are one indivisible hold, as a group id per mission per segment;\n% 0 means \"not one\". A remote mission is one set of people end to end, and a\n% daily mission is one set per calendar occurrence - the engine expresses that by\n% never walking their segments at all, claiming them whole in phase 2. A model\n% has no phases to hide it in, so it has to be said: crew inside a group cannot\n% change. This one *is* hard. Unlike a torn slot, there is no pin shape that\n% needs a handover mid-hold; `normalizePins` already widens a remote pin to the\n% whole mission before the engine sees it.\narray[M, S] of int: holdOf;\narray[E, S] of bool: avail;                  % free to work this segment\narray[E, M] of bool: allowed;                % not excluded, by tag or by name\narray[E, M, S] of bool: pinned;              % manual assignment: an input fact\n\nint: nReq;                                   % qualification requirements\nset of int: R = 1..nReq;\narray[R] of M: reqMission;\narray[R] of int: reqCount;\narray[R, E] of bool: reqHolds;               % employee holds the required tag\n\n% Interchangeable employees, as a class id per employee; 0 means \"nobody else\n% is like me\". Two guards are interchangeable when nothing in the instance can\n% tell them apart: same availability, same exclusions, same qualifications, and\n% neither of them pinned anywhere. Derived in the driver rather than asked of\n% the caller, because a caller that got it wrong would prune real solutions.\narray[E] of int: symClass;\n\n% --- the decision -----------------------------------------------------------\narray[E, M, S] of var bool: x;\n\n% --- hard rules -------------------------------------------------------------\n\n% A pin is an input fact, not a suggestion. It outranks availability and\n% exclusion both, exactly as normalizePins already treats it - the person\n% editing knows who actually showed up better than a stale window does.\nconstraint forall(e in E, m in M, s in S)(pinned[e, m, s] -> x[e, m, s]);\n\n% Nobody is in two places at once.\nconstraint forall(e in E, s in S)(sum(m in M)(bool2int(x[e, m, s])) <= 1);\n\n% Availability and exclusions bind everyone the user did not pin.\nconstraint forall(e in E, m in M, s in S)(\n  (not avail[e, s] /\\ not pinned[e, m, s]) -> not x[e, m, s]\n);\nconstraint forall(e in E, m in M, s in S)(\n  (not allowed[e, m] /\\ not pinned[e, m, s]) -> not x[e, m, s]\n);\n\nconstraint forall(e in E, m in M, s in 2..nS where\n  holdOf[m, s] > 0 /\\ holdOf[m, s] == holdOf[m, s - 1]\n)(x[e, m, s] == x[e, m, s - 1]);\n\n% Six identical guards are 720 identical schedules, and the solver will walk all\n% of them to prove nothing better exists. Ordering interchangeable employees\n% collapses that to one. It prunes no real solution: by construction the members\n% of a class can be permuted into each other without changing any objective.\nconstraint forall(e in 1..nE - 1 where symClass[e] > 0 /\\ symClass[e] == symClass[e + 1])(\n  lex_lesseq([bool2int(x[e + 1, m, s]) | m in M, s in S],\n             [bool2int(x[e, m, s])     | m in M, s in S])\n);\n\n% A mission never holds more people than it asked for, and nobody is assigned\n% to one that is not running.\nconstraint forall(m in M, s in S)(sum(e in E)(bool2int(x[e, m, s])) <= want[m, s]);\n\n% --- what is being optimised ------------------------------------------------\n% Kept as separate named quantities rather than folded into one weighted sum.\n% A weighted sum needs weights large enough that no amount of fairness can\n% outbid one empty seat, and \"large enough\" depends on the instance - get it\n% wrong and the solver trades away coverage silently. Lexicographic ordering\n% says the same thing without a magic number.\n\n% Every objective below is declared with an explicit domain, and that is not\n% tidiness. `unfilledSeats` is a sum of `want - sum(x)` terms, each non-negative\n% only because of the headcount constraint above - which MiniZinc does not fold\n% into the expression's inferred bounds. Left as `var int` the solver found the\n% optimum in milliseconds and then spent minutes failing to prove nothing beat\n% it, because as far as its bounds were concerned a negative total was still on\n% the table. Naming the floor turns that proof into propagation.\nint: totalSeats = sum(m in M, s in S)(want[m, s]);\nint: maxUnmet = sum(r in R, s in S where want[reqMission[r], s] > 0)(reqCount[r]);\n\n% 1. Required qualifications not covered, summed over every running segment.\nvar 0..maxUnmet: unmetQualifications = sum(r in R, s in S where want[reqMission[r], s] > 0)(\n  max(0, reqCount[r] - sum(e in E where reqHolds[r, e])(bool2int(x[e, reqMission[r], s])))\n);\n\n% 2. Seats left empty.\nvar 0..totalSeats: unfilledSeats = sum(m in M, s in S)(\n  want[m, s] - sum(e in E)(bool2int(x[e, m, s]))\n);\n\n% 3. Crew changing hands inside one slot. Soft rather than hard, because a pin\n% covering half a slot *must* be able to hand over at its own edge - the engine\n% splits segments on accepted pin bounds precisely so it can. A hard equality\n% would make such a pin infeasible or silently swallow the rest of the slot.\nvar 0..nE * nM * nS: slotChurn = sum(e in E, m in M, s in 2..nS where\n    want[m, s] > 0 /\\ want[m, s - 1] > 0 /\\ slotOf[m, s] == slotOf[m, s - 1]\n  )(bool2int(x[e, m, s] != x[e, m, s - 1]));\n\n% 4. Workload imbalance: the gap between the busiest and the idlest.\narray[E] of var 0..nS: load = [sum(m in M, s in S)(bool2int(x[e, m, s])) | e in E];\nvar 0..nS: imbalance = max(load) - min(load);\n\n% --- the lexicographic ladder -----------------------------------------------\n% One model, solved once per level. The driver passes the previous levels'\n% proven optima back in as caps, so each round searches inside the set of\n% solutions the earlier rounds already settled. `-1` means \"not yet fixed\".\n%\n% Doing it this way rather than with three model files means the hard rules\n% above have exactly one definition, which is the whole reason to move this\n% into a model in the first place.\n\nint: level;                    % 1 qualifications, 2 seats, 3 churn, 4 imbalance\nint: capUnmet;\nint: capUnfilled;\nint: capChurn;\n\nconstraint capUnmet    >= 0 -> unmetQualifications <= capUnmet;\nconstraint capUnfilled >= 0 -> unfilledSeats       <= capUnfilled;\nconstraint capChurn    >= 0 -> slotChurn           <= capChurn;\n\nvar 0..totalSeats + maxUnmet + nE * nM * nS: objective =\n  if level == 1 then unmetQualifications\n  elseif level == 2 then unfilledSeats\n  elseif level == 3 then slotChurn\n  else imbalance endif;\n\nsolve minimize objective;\n\noutput [\n  \"objective = \", show(objective), \";\\n\",\n  \"unmetQualifications = \", show(unmetQualifications), \";\\n\",\n  \"unfilledSeats = \", show(unfilledSeats), \";\\n\",\n  \"slotChurn = \", show(slotChurn), \";\\n\",\n  \"imbalance = \", show(imbalance), \";\\n\",\n  \"x = \", show([bool2int(x[e, m, s]) | e in E, m in M, s in S]), \";\\n\",\n];\n";
@@ -100,27 +94,52 @@ const lines = [];
 const say = (s = '') => { lines.push(s); log.textContent = lines.join('\n'); };
 
 /*
- * Two spin rates, not one. The solver runs in a Web Worker, and the whole
- * reason this measurement stayed open is that the desktop harness throttled the
- * main thread and left the worker at full speed - so it reported phone numbers
- * that were desktop numbers. The worker figure is the one that predicts solve
- * time, and it is the axis `pixelClass.mjs` indexes its curve on.
+ * A device fingerprint, measured on both threads.
+ *
+ * This used to count iterations of `while (performance.now() - t < ms) n++`,
+ * and the first real device measurement showed that number is not what anybody
+ * thought. That loop's body *is* a clock read: the same loop with the read
+ * hoisted out runs 85x faster, so what it reports is `performance.now()`
+ * throughput, which Chrome clamps differently per platform, and not the CPU's.
+ *
+ * It measured the desktop throttle honestly - stopping the process halves clock
+ * reads and compute alike - which is why it looked sound until a phone was put
+ * next to it. A Pixel 10 at 2817 of those units solved the 72h ladder in 12.4s
+ * where this machine at 4284 took 14.3s: faster, at two thirds the "rate".
+ *
+ * So: fixed work, timed once, clock read twice. Still only a fingerprint - an
+ * integer loop is a poor proxy for a floating-point MIP solver in WebAssembly,
+ * and no microbenchmark here should be used to predict another device's solve
+ * time. The ladder time below is the measurement; this is just how to tell two
+ * devices apart.
  */
-const spin = (ms) => {
-  const t = performance.now();
-  let n = 0;
-  while (performance.now() - t < ms) n++;
-  return Math.round(n / ms);
-};
+const ITERATIONS = 50e6;
 
-function workerSpin(ms) {
+// `sink` is exported from the loop and read afterwards so an optimiser cannot
+// decide the work is dead and delete the thing being measured.
+let sink = 0;
+function workRate() {
+  const t = performance.now();
+  let x = 0;
+  for (let i = 0; i < ITERATIONS; i++) x = (x + i) | 0;
+  const ms = performance.now() - t;
+  sink += x;
+  return Math.round(ITERATIONS / ms);
+}
+
+function workerRate() {
   return new Promise((resolve) => {
-    const src = 'self.onmessage=(e)=>{const t=performance.now();let n=0;'
-      + 'while(performance.now()-t<e.data)n++;postMessage(Math.round(n/e.data));};';
+    // The same loop, written out rather than shared with the above: a worker
+    // gets source, not a closure, and stringifying the function would couple
+    // this to how the bundler happens to emit it.
+    const src = 'self.onmessage=()=>{const t=performance.now();let x=0;'
+      + 'for(let i=0;i<' + ITERATIONS + ';i++)x=(x+i)|0;'
+      + 'const ms=performance.now()-t;'
+      + 'postMessage({opsPerMs:Math.round(' + ITERATIONS + '/ms),x});};';
     const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
     const w = new Worker(url);
-    w.onmessage = (e) => { resolve(e.data); w.terminate(); URL.revokeObjectURL(url); };
-    w.postMessage(ms);
+    w.onmessage = (e) => { resolve(e.data.opsPerMs); w.terminate(); URL.revokeObjectURL(url); };
+    w.postMessage(1);
   });
 }
 
@@ -171,10 +190,11 @@ async function measure(hours) {
     say(`fixture : ${hours}h, ${segments} segments, 8 guards, 3 missions`);
     say(`device  : ${report.cores ?? '?'} cores, ${report.memoryGB ? report.memoryGB + 'GB+' : 'RAM not reported'}`);
 
-    report.mainSpin = spin(50);
-    report.workerSpin = await workerSpin(50);
-    say(`spin    : ${report.mainSpin}/ms main, ${report.workerSpin}/ms worker`);
-    say('          (the worker figure is the one that predicts solve time)');
+    report.mainWork = workRate();
+    report.workerWork = await workerRate();
+    say(`work    : ${report.mainWork}/ms main, ${report.workerWork}/ms worker`);
+    say('          (a fingerprint for telling devices apart, not a predictor —');
+    say('           the ladder time at the bottom is the measurement)');
     say();
 
     // `init()` is once per page - it throws on a second call, which is exactly
@@ -266,24 +286,21 @@ async function measure(hours) {
       + `<small>first load ${report.initMs == null ? '(already loaded)' : report.initMs + 'ms'}`
       + ` &middot; slowest solve ${(Math.max(...report.levels.map((l) => l.ms)) / 1000).toFixed(1)}s`
       + ` &middot; warm re-solve ${(report.warmMs / 1000).toFixed(1)}s`
-      + ` &middot; worker ${report.workerSpin}/ms</small>`;
+      + ` &middot; worker ${report.workerWork}/ms</small>`;
     say();
     say(`TOTAL   : ${(report.ladderMs / 1000).toFixed(1)}s for the four-solve ladder.`);
 
-    // Interpretation, on the device, so the number does not have to travel to
-    // mean something. The nearest curve row by worker spin is the closest thing
-    // the desktop sweep has to this hardware.
-    const rows = CURVE.filter((r) => r.hours === hours);
-    const near = rows.reduce((best, r) => (
-      Math.abs(Math.log(r.spin / report.workerSpin)) < Math.abs(Math.log(best.spin / report.workerSpin)) ? r : best
-    ), rows[0]);
+    // Context, not extrapolation. An earlier version of this page predicted a
+    // device's solve time from its microbenchmark against a throttled desktop
+    // curve, and the first phone to run it came in 1.75x faster than predicted.
+    // So the other measurements are simply listed beside this one.
     const measured = report.ladderMs / 1000;
-    report.nearestCurveSpin = near.spin;
-    report.nearestCurveLadder = near.ladder;
     say();
-    say(`nearest desktop row: ${near.spin}/ms -> ${near.ladder}s`);
-    say(`this device        : ${report.workerSpin}/ms -> ${measured.toFixed(1)}s`
-      + `  (${(measured / near.ladder).toFixed(2)}x that row)`);
+    say('for comparison, same fixture measured elsewhere:');
+    for (const r of REFERENCE.filter((x) => x.hours === hours)) {
+      say(`  ${r.what.padEnd(32)} ${String(r.ladder.toFixed(1) + 's').padStart(7)}`);
+    }
+    say(`  ${'this device'.padEnd(32)} ${String(measured.toFixed(1) + 's').padStart(7)}`);
   } catch (e) {
     report.error = String(e && e.stack ? e.stack : e);
     say();

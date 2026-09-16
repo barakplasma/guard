@@ -478,24 +478,71 @@ pointed at a symlink. It now matches on `/proc/<pid>/exe`, which the kernel
 resolves. Delta over idle is ~230MB, inside the 250-400MB band this record
 already recorded, and it does not move with the horizon.
 
-**What this is not.** It is a bracket, not the on-device measurement the
-criterion asks for. This machine is not a Pixel and no throttle makes it one.
-What closes the criterion is one step, and the reason nobody had taken it was
-that there was no URL to open: `prototype/minizinc/serve.mjs` now serves the same
-fixture on the LAN, and `browser/index.html` prints its own headline figure on
-the phone holding it.
+### Measured on the device — and the curve's axis was wrong
+
+**Pixel 10, Chrome 152, Android. The 72-hour ladder takes 12.4 seconds.**
+
+```text
+  fixture   : 72h, 74 segments, 8 guards, 3 missions
+  device    : 8 cores
+  first load: 2143ms      (cold, over the network, ~19MB)
+  level 1   : 2642ms      OPTIMAL   unmet=0 empty=354 churn=0 spread=4
+  level 2   : 3497ms      OPTIMAL   unmet=0 empty=0   churn=2 spread=0
+  level 3   : 3023ms      OPTIMAL   unmet=0 empty=0   churn=0 spread=0
+  level 4   : 3243ms      OPTIMAL   unmet=0 empty=0   churn=0 spread=0
+  ladder    : 12.4s
+  warm again: 3246ms      (cold was 3243ms)
+  cancel    : stops immediately
+  COI       : false       — no COOP/COEP needed, so Pages can host it
+```
+
+Every acceptance criterion in this section is now answered on real hardware:
+first load 2.1s, repeated solve 3.2s, cancellation works, one worker
+configured, all four levels proved optimal, and the phone reaches the same
+answers as the desktop.
+
+**And the measurement invalidated the curve above as a cross-device
+predictor.** The Pixel's worker scored 2817 on the spin probe against this
+machine's 4284, so the model said 21.7 seconds. It took 12.4 — **1.75x faster
+than predicted, and faster in absolute terms than the unthrottled desktop at
+two thirds of its "rate"**.
+
+The probe was the problem, and the mechanism is measurable rather than
+speculative. `while (performance.now() - t < ms) n++` has a clock read as its
+loop body: the same loop with the read hoisted out runs **85x faster**. What it
+reported was `performance.now()` throughput, which Chrome clamps differently per
+platform, not the CPU's. It tracked the desktop throttle honestly — SIGSTOP
+halves clock reads and compute alike — which is exactly why it looked sound
+until a phone was put next to it. A number can be internally consistent across
+an entire sweep and still measure the wrong thing.
+
+So the sweep is demoted to what it always was: **the throttle response of one
+machine**, useful for reasoning about how this scales when CPU is taken away,
+and not a way to predict another device. The standalone page no longer
+extrapolates; it lists the measurements side by side. Its fingerprint is now
+fixed work timed once rather than iterations counted against the clock, which is
+a better proxy and still only a proxy — an integer loop is not a floating-point
+MIP solver in WebAssembly, and the ladder time is the measurement.
+
+One more thing the device said that the desktop could not. On the Pixel the
+worker benchmarked at 74% of the main thread; on this container it is 96%. The
+solver's thread does not reliably get the big core on a phone. It did not cost
+anything here, but it is the reason a foreground-tab measurement is the
+optimistic one.
 
 ### The consequence that actually decides the design
 
-Take the most pessimistic row - 588 spins/ms, seven times slower than this
-machine's core - and a 72-hour reschedule costs **101 seconds**. Against the
-operating reality this app was built for, where a mission appears and the rota
-has to be rebalanced inside twenty or thirty minutes, 101 seconds is
-comfortable. Speed is not the objection to MiniZinc.
+A 72-hour reschedule costs **12.4 seconds on the phone this rota is run from**.
+Against the operating reality the app was built for — a mission appears and the
+rota has to be rebalanced inside twenty or thirty minutes — that is not close to
+a constraint. Speed is not the objection to MiniZinc, and the honest version of
+that sentence is stronger than the bracketed one it replaces: the pessimistic
+101-second row was an artefact of a throttle, and the real device beat the
+unthrottled desktop.
 
 The objection is *when* it runs. The app re-solves on every `setDoc`, which
-means every keystroke in a name field. At 6.4 seconds - the **fastest** row
-here, on a desktop - that is already impossible, and this record had never
+means every keystroke in a name field. At 12.4 seconds — or at 3.2, the warm
+re-solve of a single level — that is impossible, and this record had never
 stated it. So a MiniZinc adapter is not a drop-in replacement for `plan()`; it
 requires the solve to become explicit and asynchronous, with the document
 editable while it runs.
@@ -569,11 +616,12 @@ The MiniZinc prototype must pass, before it replaces anything:
   per the prerequisite above - **met**.
 
 Plus representative Pixel-class measurements for first load, repeated solve
-time, cancellation, peak memory and worker cleanup - **bracketed, not yet taken
-on the device**. `pixelClass.mjs` gives the curve and `serve.mjs` gives the URL;
-what remains is somebody opening it on the Pixel and reading the headline.
-**Configure one worker initially**; the default worker-pool behaviour needs
-explicit memory testing before it is trusted on a phone.
+time, cancellation, peak memory and worker cleanup - **met on a Pixel 10**:
+2.1s first load, 3.2s repeated solve, cancellation immediate, four levels proved
+optimal, one worker configured. Peak memory is the one figure the device cannot
+report about itself, and it is bounded by the ruling above rather than measured
+there. **Configure one worker initially**; the default worker-pool behaviour
+needs explicit memory testing before it is trusted on a phone.
 
 And one criterion this measurement added: **the solve must be explicit and
 asynchronous before any adapter ships.** Re-solving on every `setDoc` is
