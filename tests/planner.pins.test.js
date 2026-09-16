@@ -6,6 +6,21 @@ import { HOUR, MINUTE as MIN, localTime, people, runPlan } from './testHelpers.j
 
 const START = localTime(2026, 0, 5, 8, 0);
 
+function availabilityOverride({
+  hours = 2, employee = {}, missionId = 'm', missionType = 'remote', pin = {},
+} = {}) {
+  const start = START;
+  const end = start + hours * HOUR;
+  const result = runPlan({
+    start,
+    end,
+    employees: [{ id: 'e1', name: 'Limited', ...employee }, { id: 'e2', name: 'Full' }],
+    missions: [{ id: missionId, name: 'Duty', type: missionType, start, end, count: 1 }],
+    pins: [{ missionId, employeeId: 'e1', start, end: start + HOUR, ...pin }],
+  });
+  return { start, end, result };
+}
+
 /* ------------------------------------------------------------------ */
 
 test('whole-mission pins staff a remote mission with exactly those people', () => {
@@ -220,18 +235,8 @@ test('a pin outside the person\'s availability is honoured, with an informationa
   // work around" - a stale availability window can no longer cancel a manual
   // assignment. This test used to assert the opposite (pin dropped, e2 covers
   // instead); that was exactly the override the user reported as the bug.
-  const start = START;
-  const end = start + 4 * HOUR;
-  const result = runPlan({
-    start,
-    end,
-    shiftMinutes: 60,
-    employees: [
-      { id: 'e1', name: 'Late', start: start + 2 * HOUR },
-      { id: 'e2', name: 'Full' },
-    ],
-    missions: [{ id: 'l', name: 'Gate', type: 'local', start, end, count: 1 }],
-    pins: [{ missionId: 'l', employeeId: 'e1', start, end: start + HOUR }],
+  const { start, result } = availabilityOverride({
+    hours: 4, employee: { start: START + 2 * HOUR }, missionId: 'l', missionType: 'local',
   });
 
   assert.ok(result.warnings.some((w) => w.code === WARN.PIN_AVAILABILITY_OVERRIDDEN && w.employeeId === 'e1'));
@@ -249,20 +254,8 @@ test('a frozen pin survives even when the employee is no longer available for it
   // pin is ever dropped for availability, frozen or not), but it is still the
   // scenario worth guarding: the mismatch is now reported informationally
   // rather than being silently swallowed by a bypass.
-  const start = START;
-  const end = start + 2 * HOUR;
-  const result = runPlan({
-    start,
-    end,
-    shiftMinutes: 60,
-    employees: [
-      { id: 'e1', name: 'Late', start: start + HOUR },
-      { id: 'e2', name: 'Full' },
-    ],
-    missions: [{ id: 'l', name: 'Gate', type: 'local', start, end, count: 1 }],
-    pins: [{
-      missionId: 'l', employeeId: 'e1', start, end: start + HOUR, frozen: true,
-    }],
+  const { start, result } = availabilityOverride({
+    employee: { start: START + HOUR }, missionId: 'l', missionType: 'local', pin: { frozen: true },
   });
 
   assert.ok(result.warnings.some((w) => w.code === WARN.PIN_AVAILABILITY_OVERRIDDEN && w.employeeId === 'e1'));
@@ -297,20 +290,8 @@ test('a frozen pin still expands with its mission when switched to remote, now h
   // dropped for exceeding e1's availability. Under rule 4 there is no bypass
   // left to lose - frozen or not, a pin is never dropped for availability, so
   // e1 keeps the whole remote mission with an informational warning instead.
-  const start = START;
-  const end = start + 4 * HOUR;
-  const result = runPlan({
-    start,
-    end,
-    shiftMinutes: 60,
-    employees: [
-      { id: 'e1', name: 'Early', end: start + HOUR },
-      { id: 'e2', name: 'Full' },
-    ],
-    missions: [{ id: 'm', name: 'M', type: 'remote', start, end, count: 1 }],
-    pins: [{
-      missionId: 'm', employeeId: 'e1', start, end: start + HOUR, frozen: true,
-    }],
+  const { end, result } = availabilityOverride({
+    hours: 4, employee: { end: START + HOUR }, pin: { frozen: true },
   });
 
   assert.ok(result.warnings.some((w) => w.code === WARN.PIN_AVAILABILITY_OVERRIDDEN && w.employeeId === 'e1'));
@@ -358,21 +339,8 @@ test('a frozen pin whose resolved range still matches exactly what it was frozen
   // That bypass is gone (rule 4 makes it redundant - nothing can drop a pin
   // for availability anymore, frozen or not), so this now looks exactly like
   // any other availability mismatch: honoured, with an informational note.
-  const start = START;
-  const end = start + 2 * HOUR;
-  const result = runPlan({
-    start,
-    end,
-    shiftMinutes: 60,
-    employees: [
-      { id: 'e1', name: 'Early', end: start + HOUR },
-      { id: 'e2', name: 'Full' },
-    ],
-    missions: [{ id: 'm', name: 'M', type: 'remote', start, end, count: 1 }],
-    // Frozen for exactly the mission's current (unchanged) whole window.
-    pins: [{
-      missionId: 'm', employeeId: 'e1', start, end, frozen: true,
-    }],
+  const { result } = availabilityOverride({
+    employee: { end: START + HOUR }, pin: { end: START + 2 * HOUR, frozen: true },
   });
 
   assert.ok(result.warnings.some((w) => w.code === WARN.PIN_AVAILABILITY_OVERRIDDEN && w.employeeId === 'e1'));
@@ -386,20 +354,8 @@ test('an unfrozen pin is honoured when the employee is unavailable, exactly like
   // availability: neither can be dropped for it. This test used to be the
   // frozen test's mirror image, proving the *opposite* still held for a
   // plain manual pin (dropped, e2 covers). That asymmetry is gone on purpose.
-  const start = START;
-  const end = start + 2 * HOUR;
-  const result = runPlan({
-    start,
-    end,
-    shiftMinutes: 60,
-    employees: [
-      { id: 'e1', name: 'Late', start: start + HOUR },
-      { id: 'e2', name: 'Full' },
-    ],
-    missions: [{ id: 'l', name: 'Gate', type: 'local', start, end, count: 1 }],
-    pins: [{
-      missionId: 'l', employeeId: 'e1', start, end: start + HOUR, frozen: false,
-    }],
+  const { start, result } = availabilityOverride({
+    employee: { start: START + HOUR }, missionId: 'l', missionType: 'local', pin: { frozen: false },
   });
 
   assert.ok(result.warnings.some((w) => w.code === WARN.PIN_AVAILABILITY_OVERRIDDEN && w.employeeId === 'e1'));
@@ -507,19 +463,7 @@ test('a partial remote pin that outruns availability is still widened to the who
   // now honoured in full: the remote-widening rule above still expands it to
   // the whole mission, and availability can no longer veto that - it only
   // gets an informational warning.
-  const start = START;
-  const end = start + 2 * HOUR;
-  const result = runPlan({
-    start,
-    end,
-    shiftMinutes: 60,
-    employees: [
-      { id: 'e1', name: 'Early', end: start + HOUR },
-      { id: 'e2', name: 'Full' },
-    ],
-    missions: [{ id: 'm', name: 'M', type: 'remote', start, end, count: 1 }],
-    pins: [{ missionId: 'm', employeeId: 'e1', start, end: start + HOUR }],
-  });
+  const { end, result } = availabilityOverride({ employee: { end: START + HOUR } });
 
   assert.ok(result.warnings.some((w) => w.code === WARN.PIN_AVAILABILITY_OVERRIDDEN && w.employeeId === 'e1'));
   const own = result.shifts.filter((s) => s.missionId === 'm');
