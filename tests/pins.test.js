@@ -46,6 +46,20 @@ const withExtraEmployee = (d) => ({
   employees: [...d.employees, { id: 'e4', name: 'D', start: null, end: null }],
 });
 
+function twoSeatPins() {
+  const base = doc({
+    missions: [{ id: 'm1', name: 'Remote', type: 'remote', start: null, end: null, count: 2 }],
+  });
+  return applyMissionAssignees(base, 'm1', ['e1', 'e2']);
+}
+
+function assertFirstHourPreserved(beforeDoc, afterDoc) {
+  const before = firstHourOf(beforeDoc);
+  const after = firstHourOf(afterDoc);
+  assert.equal(after.employeeId, before.employeeId, 'the past shift did not change hands');
+  assert.equal(after.pinned, true);
+}
+
 /* --- coverage -------------------------------------------------------- */
 
 test('a null-range pin inherits the mission window, which inherits the plan', () => {
@@ -100,10 +114,7 @@ test('swapping twice on the same row leaves a single pin', () => {
 });
 
 test('swapping one seat of a multi-person mission leaves the other seat pinned', () => {
-  const base = doc({
-    missions: [{ id: 'm1', name: 'Remote', type: 'remote', start: null, end: null, count: 2 }],
-  });
-  const d = applyMissionAssignees(base, 'm1', ['e1', 'e2']);
+  const d = twoSeatPins();
   assert.equal(d.pins.length, 2);
 
   const after = applySwap(d, {
@@ -278,10 +289,7 @@ test('clearing a pin works on a whole-mission assignment, not just an exact rang
 });
 
 test('clearing only removes the named person', () => {
-  const base = doc({
-    missions: [{ id: 'm1', name: 'Remote', type: 'remote', start: null, end: null, count: 2 }],
-  });
-  const d = applyMissionAssignees(base, 'm1', ['e1', 'e2']);
+  const d = twoSeatPins();
   const after = applyClearPin(d, {
     missionId: 'm1', employeeId: 'e1', start: START, end: START + 4 * HOUR,
   });
@@ -364,19 +372,13 @@ test('freezing the past adds nothing for a whole-mission pin whose hours have el
 test('a frozen shift survives an unrelated later edit to the document', () => {
   const d = twoHourLocalDoc();
   const before = plan(toPlannerInput(d));
-  const firstHour = before.shifts.find((s) => s.start === START);
-
   const frozen = freezePastShifts(d, before, START + HOUR);
 
   // Adding a new employee reshuffles the balancer's choices for a local
   // mission - this is exactly the kind of edit that would otherwise rewrite
   // who already worked the first hour.
   const edited = withExtraEmployee(frozen);
-  const after = plan(toPlannerInput(edited));
-  const stillFirstHour = after.shifts.find((s) => s.start === START);
-
-  assert.equal(stillFirstHour.employeeId, firstHour.employeeId, 'the past shift did not change hands');
-  assert.equal(stillFirstHour.pinned, true);
+  assertFirstHourPreserved(d, edited);
 });
 
 /* --- freezing centrally, before every edit ---------------------------- */
@@ -388,17 +390,12 @@ test('freezeElapsedBeforeEdit locks in the past even on an edit that never went 
   // freeze on `prev` - the document as it stood right before this edit -
   // means it doesn't matter which page made the edit.
   const prev = twoHourLocalDoc();
-  const firstHour = firstHourOf(prev);
-
   // An edit elsewhere in the document - e.g. adding an employee from the
   // Employees page - made after the first hour has already elapsed.
   const next = withExtraEmployee(prev);
   const merged = freezeElapsedBeforeEdit(prev, next, START + HOUR);
 
-  const after = plan(toPlannerInput(merged));
-  const stillFirstHour = after.shifts.find((s) => s.start === START);
-  assert.equal(stillFirstHour.employeeId, firstHour.employeeId, 'the past shift did not change hands');
-  assert.equal(stillFirstHour.pinned, true);
+  assertFirstHourPreserved(prev, merged);
 });
 
 test('freezeElapsedBeforeEdit lets an intentional clear of a frozen shift stick', () => {

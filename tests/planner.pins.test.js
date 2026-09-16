@@ -2,21 +2,54 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { plan, WARN } from '../src/lib/planner.js';
-import { HOUR, MINUTE as MIN, localTime, people, runPlan } from './testHelpers.js';
+import { availabilityPlan, carmelRotaDocument, HOUR, localDutyDocument, MINUTE as MIN, localTime, people, runPlan } from './testHelpers.js';
 
 const START = localTime(2026, 0, 5, 8, 0);
 
 function availabilityOverride({
   hours = 2, employee = {}, missionId = 'm', missionType = 'remote', pin = {},
 } = {}) {
+  const fixture = availabilityPlan(START, { hours, employee, missionId, missionType, pin });
+  return { ...fixture, result: runPlan(fixture.input) };
+}
+
+function assertAvailabilityOverride(result, missionId = 'm') {
+  assertOverrideWarning(result);
+  const own = result.shifts.filter((shift) => shift.missionId === missionId);
+  assert.equal(own.length, 1);
+  assert.equal(own[0].employeeId, 'e1');
+  return own[0];
+}
+
+function assertOverrideWarning(result) {
+  assert.ok(result.warnings.some(
+    (warning) => warning.code === WARN.PIN_AVAILABILITY_OVERRIDDEN && warning.employeeId === 'e1',
+  ));
+}
+
+const minuteShape = (shifts, start) => shifts.map(
+  (shift) => [(shift.start - start) / MIN, (shift.end - shift.start) / MIN],
+);
+
+function assertMinuteShape(shifts, start, expected, message) {
+  assert.deepEqual(minuteShape(shifts, start), expected, message);
+}
+
+function onlyMissionShift(result, missionId = 'm') {
+  const own = result.shifts.filter((shift) => shift.missionId === missionId);
+  assert.equal(own.length, 1);
+  return own[0];
+}
+
+function remotePinResult(employeeId, pinEnd) {
   const start = START;
-  const end = start + hours * HOUR;
+  const end = start + 2 * HOUR;
   const result = runPlan({
     start,
     end,
-    employees: [{ id: 'e1', name: 'Limited', ...employee }, { id: 'e2', name: 'Full' }],
-    missions: [{ id: missionId, name: 'Duty', type: missionType, start, end, count: 1 }],
-    pins: [{ missionId, employeeId: 'e1', start, end: start + HOUR, ...pin }],
+    employees: people(3),
+    missions: [{ id: 'm', name: 'M', type: 'remote', start, end, count: 1 }],
+    pins: [{ missionId: 'm', employeeId, start, end: pinEnd }],
   });
   return { start, end, result };
 }
@@ -230,41 +263,23 @@ test('pins beyond the headcount are dropped with a warning, keeping the newest',
   assert.equal(remote[0].employeeId, 'e2');
 });
 
-test('a pin outside the person\'s availability is honoured, with an informational warning', () => {
-  // Rule 4: "what I change manually must always win... for the algorithm to
-  // work around" - a stale availability window can no longer cancel a manual
-  // assignment. This test used to assert the opposite (pin dropped, e2 covers
-  // instead); that was exactly the override the user reported as the bug.
-  const { start, result } = availabilityOverride({
-    hours: 4, employee: { start: START + 2 * HOUR }, missionId: 'l', missionType: 'local',
+for (const frozen of [false, true]) {
+  test(`${frozen ? 'a frozen' : 'an explicit'} pin overrides stale availability`, () => {
+    const arrival = START + (frozen ? 1 : 2) * HOUR;
+    const { start, result } = availabilityOverride({
+      hours: frozen ? 2 : 4,
+      employee: { start: arrival },
+      missionId: 'l',
+      missionType: 'local',
+      pin: { frozen },
+    });
+    assertOverrideWarning(result);
+    assert.ok(!result.warnings.some((warning) => warning.code === WARN.PIN_UNAVAILABLE));
+    const firstSlot = result.shifts.find((shift) => shift.start === start);
+    assert.equal(firstSlot.employeeId, 'e1');
+    assert.equal(firstSlot.frozen, frozen);
   });
-
-  assert.ok(result.warnings.some((w) => w.code === WARN.PIN_AVAILABILITY_OVERRIDDEN && w.employeeId === 'e1'));
-  assert.ok(!result.warnings.some((w) => w.code === WARN.PIN_UNAVAILABLE));
-  const firstSlot = result.shifts.find((s) => s.start === start);
-  assert.equal(firstSlot.employeeId, 'e1', 'the manual assignment stands even though it overrides availability');
-});
-
-test('a frozen pin survives even when the employee is no longer available for it', () => {
-  // The scenario freezeElapsedBeforeEdit exists to protect: an already-elapsed
-  // shift was locked in for e1, then e1's availability was tightened afterwards
-  // (e.g. they can only work from some later time on). The frozen pin must not
-  // be treated as a fresh, invalid manual assignment - the past cannot become
-  // "unavailable". Under rule 4 this is no longer special to frozen pins (no
-  // pin is ever dropped for availability, frozen or not), but it is still the
-  // scenario worth guarding: the mismatch is now reported informationally
-  // rather than being silently swallowed by a bypass.
-  const { start, result } = availabilityOverride({
-    employee: { start: START + HOUR }, missionId: 'l', missionType: 'local', pin: { frozen: true },
-  });
-
-  assert.ok(result.warnings.some((w) => w.code === WARN.PIN_AVAILABILITY_OVERRIDDEN && w.employeeId === 'e1'));
-  assert.ok(!result.warnings.some((w) => w.code === WARN.PIN_UNAVAILABLE));
-  const firstSlot = result.shifts.find((s) => s.start === start);
-  assert.equal(firstSlot.employeeId, 'e1', 'the frozen assignment was not reshuffled');
-  assert.equal(firstSlot.pinned, true);
-  assert.equal(firstSlot.frozen, true, 'the shift carries the pin\'s frozen flag, for the UI to tell it apart from a manual pin');
-});
+}
 
 test('a manual (non-frozen) pin produces a shift with frozen: false', () => {
   const start = START;
@@ -294,11 +309,7 @@ test('a frozen pin still expands with its mission when switched to remote, now h
     hours: 4, employee: { end: START + HOUR }, pin: { frozen: true },
   });
 
-  assert.ok(result.warnings.some((w) => w.code === WARN.PIN_AVAILABILITY_OVERRIDDEN && w.employeeId === 'e1'));
-  const own = result.shifts.filter((s) => s.missionId === 'm');
-  assert.equal(own.length, 1);
-  assert.equal(own[0].employeeId, 'e1', 'the frozen assignment still stands for the whole widened window');
-  assert.equal(own[0].end, end);
+  assert.equal(assertAvailabilityOverride(result).end, end);
 });
 
 test('a frozen whole-mission pin still stands when the remote mission window is later extended', () => {
@@ -324,11 +335,7 @@ test('a frozen whole-mission pin still stands when the remote mission window is 
     }],
   });
 
-  assert.ok(result.warnings.some((w) => w.code === WARN.PIN_AVAILABILITY_OVERRIDDEN && w.employeeId === 'e1'));
-  const own = result.shifts.filter((s) => s.missionId === 'm');
-  assert.equal(own.length, 1);
-  assert.equal(own[0].employeeId, 'e1');
-  assert.equal(own[0].end, extendedEnd);
+  assert.equal(assertAvailabilityOverride(result).end, extendedEnd);
 });
 
 test('a frozen pin whose resolved range still matches exactly what it was frozen for is still honoured, with a warning', () => {
@@ -343,10 +350,7 @@ test('a frozen pin whose resolved range still matches exactly what it was frozen
     employee: { end: START + HOUR }, pin: { end: START + 2 * HOUR, frozen: true },
   });
 
-  assert.ok(result.warnings.some((w) => w.code === WARN.PIN_AVAILABILITY_OVERRIDDEN && w.employeeId === 'e1'));
-  const own = result.shifts.filter((s) => s.missionId === 'm');
-  assert.equal(own.length, 1);
-  assert.equal(own[0].employeeId, 'e1');
+  assertAvailabilityOverride(result);
 });
 
 test('an unfrozen pin is honoured when the employee is unavailable, exactly like a frozen one', () => {
@@ -365,13 +369,8 @@ test('an unfrozen pin is honoured when the employee is unavailable, exactly like
 
 test('pins naming a deleted employee or mission are ignored silently', () => {
   const start = START;
-  const end = start + 2 * HOUR;
   const result = runPlan({
-    start,
-    end,
-    shiftMinutes: 60,
-    employees: people(2),
-    missions: [{ id: 'l', name: 'Gate', type: 'local', start, end, count: 1 }],
+    ...localDutyDocument(start),
     pins: [
       { missionId: 'gone', employeeId: 'e1' },
       { missionId: 'l', employeeId: 'ghost' },
@@ -437,22 +436,12 @@ test('re-pinning the person the planner already chose changes nothing but the fl
 /* --- regressions ----------------------------------------------------- */
 
 test('a partial pin on a remote mission covers the whole mission, not part of it', () => {
-  const start = START;
-  const end = start + 2 * HOUR;
   // A per-shift pin made while the mission was local, then switched to remote.
-  const result = runPlan({
-    start,
-    end,
-    shiftMinutes: 60,
-    employees: people(3),
-    missions: [{ id: 'm', name: 'M', type: 'remote', start, end, count: 1 }],
-    pins: [{ missionId: 'm', employeeId: 'e1', start, end: start + HOUR }],
-  });
+  const { start, end, result } = remotePinResult('e1', START + HOUR);
 
-  const own = result.shifts.filter((s) => s.missionId === 'm');
-  assert.equal(own.length, 1);
-  assert.equal(own[0].start, start, 'the pin is widened to the whole remote mission');
-  assert.equal(own[0].end, end);
+  const own = onlyMissionShift(result);
+  assert.equal(own.start, start, 'the pin is widened to the whole remote mission');
+  assert.equal(own.end, end);
   // The seat is genuinely filled end to end, so nothing is silently short.
   assert.ok(!result.warnings.some((w) => w.code === WARN.UNDERSTAFFED));
 });
@@ -465,30 +454,15 @@ test('a partial remote pin that outruns availability is still widened to the who
   // gets an informational warning.
   const { end, result } = availabilityOverride({ employee: { end: START + HOUR } });
 
-  assert.ok(result.warnings.some((w) => w.code === WARN.PIN_AVAILABILITY_OVERRIDDEN && w.employeeId === 'e1'));
-  const own = result.shifts.filter((s) => s.missionId === 'm');
-  assert.equal(own.length, 1);
-  assert.equal(own[0].employeeId, 'e1', 'the manual assignment holds the whole remote mission despite outrunning availability');
-  assert.equal(own[0].end, end);
+  assert.equal(assertAvailabilityOverride(result).end, end);
 });
 
 test('a swap over a whole-mission pin replaces the assignee rather than competing', () => {
-  const start = START;
-  const end = start + 2 * HOUR;
   // What PlanContext.pinShift must produce: the displaced person's covering pin
   // removed, the replacement written for the row's range.
-  const result = runPlan({
-    start,
-    end,
-    shiftMinutes: 60,
-    employees: people(3),
-    missions: [{ id: 'm', name: 'M', type: 'remote', start, end, count: 1 }],
-    pins: [{ missionId: 'm', employeeId: 'e2', start, end }],
-  });
+  const { result } = remotePinResult('e2', START + 2 * HOUR);
 
-  const own = result.shifts.filter((s) => s.missionId === 'm');
-  assert.equal(own.length, 1);
-  assert.equal(own[0].employeeId, 'e2');
+  assert.equal(onlyMissionShift(result).employeeId, 'e2');
   assert.ok(!result.warnings.some((w) => w.code === WARN.PIN_OVERFLOW));
 });
 
@@ -503,20 +477,7 @@ test('a swap over a whole-mission pin replaces the assignee rather than competin
 const carmelRota = () => {
   // The historical digest includes absolute timestamps captured in UTC.
   const start = Date.UTC(2026, 8, 10, 16);
-  return {
-    start,
-    end: start + 163 * HOUR,
-    shiftMinutes: 60,
-    strategy: 'rotation',
-    employees: people(16),
-    missions: [
-      { id: 'm1', name: 'Gate', type: 'local', count: 1 },
-      { id: 'm2', name: 'Kitchen', type: 'local', count: 2 },
-      { id: 'm3', name: 'Carmel', type: 'local', count: 5 },
-      { id: 'm4', name: 'Ops', type: 'local', count: 1 },
-    ],
-    pins: [{ missionId: 'm3', employeeId: 'e1' }],
-  };
+  return carmelRotaDocument(start);
 };
 
 const staffedAt = (result, missionId, t) => result.shifts.filter(
@@ -586,10 +547,7 @@ test('a whole-mission pin on an off-grid mission gets partial rows at the missio
   });
 
   const own = result.shifts.filter((s) => s.employeeId === 'e1');
-  assert.deepEqual(
-    own.map((s) => [(s.start - start) / MIN, (s.end - s.start) / MIN]),
-    [[30, 30], [60, 60], [120, 60], [180, 60], [240, 30]],
-  );
+  assertMinuteShape(own, start, [[30, 30], [60, 60], [120, 60], [180, 60], [240, 30]]);
   assert.ok(own.every((s) => s.pinned));
 });
 
@@ -613,9 +571,6 @@ test('a pinned slot torn by an unrelated availability edge merges back into one 
   });
 
   const own = result.shifts.filter((s) => s.employeeId === 'e1');
-  assert.deepEqual(
-    own.map((s) => [(s.start - start) / MIN, (s.end - s.start) / MIN]),
-    [[0, 60], [60, 60], [120, 60]],
-    'the torn first hour is rejoined, and the three hours stay three rows',
-  );
+  assertMinuteShape(own, start, [[0, 60], [60, 60], [120, 60]],
+    'the torn first hour is rejoined, and the three hours stay three rows');
 });

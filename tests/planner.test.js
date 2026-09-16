@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { plan, WARN } from '../src/lib/planner.js';
-import { HOUR, MINUTE as MIN, localTime, people, runPlan } from './testHelpers.js';
+import { HOUR, localDutyDocument, MINUTE as MIN, localTime, people, runPlan } from './testHelpers.js';
 
 const START = localTime(2026, 0, 5, 8, 0);
 
@@ -246,14 +246,7 @@ test("one mission's off-grid edge does not fragment an unrelated mission's shift
 
 test('understaffing warns and returns a partial plan instead of throwing', () => {
   const start = START;
-  const end = start + 2 * HOUR;
-  const result = runPlan({
-    start,
-    end,
-    shiftMinutes: 60,
-    employees: people(2),
-    missions: [{ id: 'l', name: 'Busy', type: 'local', start, end, count: 5 }],
-  });
+  const result = runPlan(localDutyDocument(start, { count: 5, name: 'Busy' }));
 
   const short = result.warnings.filter((w) => w.code === WARN.UNDERSTAFFED);
   assert.ok(short.length > 0, 'expected an understaffed warning');

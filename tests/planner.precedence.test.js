@@ -20,7 +20,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { plan, WARN } from '../src/lib/planner.js';
-import { runPlan } from './testHelpers.js';
+import { availabilityPlan, runPlan } from './testHelpers.js';
 
 const localTime = (y, m, d, h = 0, min = 0) => new Date(y, m, d, h, min, 0, 0).getTime();
 const START = localTime(2026, 0, 5, 8, 0);
@@ -81,52 +81,31 @@ test('a pin that loses a seat contest does not evict an unrelated survivor as a 
 /* Defect 2 - same person, same mission, same coverage = one claimant   */
 /* ------------------------------------------------------------------ */
 
-test('a whole-mission pin and a literal-range pin describing the same assignment count as one claimant', () => {
-  const start = START;
-  const end = start + 3 * HOUR;
-  const result = runPlan({
-    start,
-    end,
-    shiftMinutes: 60,
-    employees: [{ id: 'e1', name: 'A' }, { id: 'e2', name: 'B' }],
-    missions: [{ id: 'm', name: 'M', type: 'remote', start, end, count: 1 }],
-    pins: [
-      { missionId: 'm', employeeId: 'e1' }, // whole-mission pin
-      { missionId: 'm', employeeId: 'e1', start, end }, // literal range == the mission's own window
-    ],
+for (const fixture of [
+  { name: 'whole and literal remote pins', hours: 3, type: 'remote', pins: (start, end) => [
+    { missionId: 'm', employeeId: 'e1' }, { missionId: 'm', employeeId: 'e1', start, end },
+  ] },
+  { name: 'byte-identical frozen pins', hours: 1, type: 'local', pins: (start, end) => {
+    const duplicate = { missionId: 'm', employeeId: 'e1', start, end, frozen: true };
+    return [duplicate, { ...duplicate }];
+  } },
+]) {
+  test(`${fixture.name} count as one claimant`, () => {
+    const start = START;
+    const end = start + fixture.hours * HOUR;
+    const result = runPlan({
+      start,
+      end,
+      employees: [{ id: 'e1', name: 'A' }, { id: 'e2', name: 'B' }],
+      missions: [{ id: 'm', name: 'M', type: fixture.type, start, end, count: 1 }],
+      pins: fixture.pins(start, end),
+    });
+    assert.deepEqual(result.shifts.map((shift) => shift.employeeId), ['e1']);
+    assert.ok(!result.warnings.some(
+      (warning) => warning.code === WARN.PIN_CONFLICT || warning.code === WARN.PIN_OVERFLOW,
+    ));
   });
-
-  const own = result.shifts.filter((s) => s.missionId === 'm');
-  assert.equal(own.length, 1, 'only one seat is consumed');
-  assert.equal(own[0].employeeId, 'e1');
-  assert.ok(
-    !result.warnings.some((w) => w.code === WARN.PIN_CONFLICT),
-    'the two pins describe one mission, not two overlapping ones, so there is no conflict',
-  );
-  assert.ok(
-    !result.warnings.some((w) => w.code === WARN.PIN_OVERFLOW),
-    'the duplicate does not count as a second claimant, so the seat is not overflowed',
-  );
-});
-
-test('a byte-identical duplicate pin is idempotent', () => {
-  const start = START;
-  const end = start + HOUR;
-  const dup = { missionId: 'm', employeeId: 'e1', start, end, frozen: true };
-  const result = runPlan({
-    start,
-    end,
-    shiftMinutes: 60,
-    employees: [{ id: 'e1', name: 'A' }, { id: 'e2', name: 'B' }],
-    missions: [{ id: 'm', name: 'M', type: 'local', start, end, count: 1 }],
-    pins: [dup, { ...dup }],
-  });
-
-  const own = result.shifts.filter((s) => s.missionId === 'm');
-  assert.equal(own.length, 1, 'the byte-identical duplicate does not consume a second seat');
-  assert.equal(own[0].employeeId, 'e1');
-  assert.ok(!result.warnings.some((w) => w.code === WARN.PIN_OVERFLOW));
-});
+}
 
 /* ------------------------------------------------------------------ */
 /* Defect 3 - an explicit pin outranks a frozen one in a seat contest   */
@@ -158,19 +137,10 @@ for (const explicitFirst of [true, false]) {
 /* ------------------------------------------------------------------ */
 
 test('a pin outside the employee\'s availability is honoured, with an informational warning instead of a drop', () => {
-  const start = START;
-  const end = start + 4 * HOUR;
-  const result = runPlan({
-    start,
-    end,
-    shiftMinutes: 60,
-    employees: [
-      { id: 'e1', name: 'Late', start: start + 2 * HOUR },
-      { id: 'e2', name: 'Full' },
-    ],
-    missions: [{ id: 'l', name: 'Gate', type: 'local', start, end, count: 1 }],
-    pins: [{ missionId: 'l', employeeId: 'e1', start, end: start + HOUR }],
+  const { start, input } = availabilityPlan(START, {
+    hours: 4, employee: { start: START + 2 * HOUR }, missionId: 'l', missionType: 'local', pin: {},
   });
+  const result = runPlan(input);
 
   assert.ok(
     result.warnings.some(
@@ -208,19 +178,10 @@ test('a pin that resolves to zero duration outside the mission window still cann
 });
 
 test('auto-assignment still respects availability - only manual pins are input facts', () => {
-  const start = START;
-  const end = start + 4 * HOUR;
-  const result = runPlan({
-    start,
-    end,
-    shiftMinutes: 60,
-    employees: [
-      { id: 'e1', name: 'Late', start: start + 2 * HOUR },
-      { id: 'e2', name: 'Full' },
-    ],
-    missions: [{ id: 'l', name: 'Gate', type: 'local', start, end, count: 1 }],
-    // No pins at all - every shift here is the engine's own choice.
+  const { start, input } = availabilityPlan(START, {
+    hours: 4, employee: { start: START + 2 * HOUR }, missionId: 'l', missionType: 'local',
   });
+  const result = runPlan(input);
 
   const early = result.shifts.filter((s) => s.start < start + 2 * HOUR);
   assert.ok(early.length > 0, 'sanity: there are slots before e1 becomes available');
