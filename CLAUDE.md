@@ -136,6 +136,63 @@ real history with it, unrecoverably (`setDoc` navigates with `replace`; there is
 It also only ever drops pins that finished *before* the period starts: a pin past the end is
 one the user is probably about to extend to cover.
 
+### Duty does not stop counting when the window rolls past it
+
+The rota is planned 72 hours at a time and rolled forward, and `balanced` evens
+out the window it is *given* — so without help, an hour stops counting the moment
+it falls behind the window. A guard away for two days came back permanently 36
+hours behind, and the summary reported a spread of **0.0h** at every roll while
+it happened. A number that is silent about a problem is a gap; a number that says
+there is no problem is a wrong answer.
+
+So duty already stood is an input to fairness, from **two sources, summed**: pins
+that now lie outside the period, and `carriedMinutes`/`carriedStints` on the
+employee. The first is read from the *raw* missions, exactly like the
+`PIN_OUT_OF_PERIOD` count and for the same reason — a mission that has itself
+dropped out of the period is already gone from `missionById`, and the hours its
+pins record are no less real.
+
+Reading both is what keeps `clearStalePins` a change of **representation**, not of
+schedule: it converts the first into the second and the total does not move, so no
+shift moves. `tests/pins.test.js` asserted that before the field existed and still
+does. A fairness rule that only works after somebody presses a cleanup button is
+not a fairness rule, and the first attempt at this had exactly that shape.
+
+The two strategies read different units on purpose. `balanced` evens out hours, so
+it reads `carriedMinutes`; `rotation` counts shifts and never consults hours, so it
+reads `carriedStints` — carrying minutes would say nothing there. `carriedStints`
+is an approximation and says so: an out-of-period pin has no grid left to name a
+slot on, so a turn is one plan shift length, at least one.
+
+`st.minutes` is in **minutes** despite everything around it being epoch
+milliseconds — `occupy` divides by `MINUTE` on the way in. Seeding it cost an
+hour to a factor of 60,000.
+
+While a debt is repaid the window spread is deliberately wide. That is the trade
+working, not failing, and the summary prints both figures so it does not read as a
+fault. Neither the caption nor the split figure appears when nobody carries
+anything: `buildStats` returns the object it always returned, which is what keeps
+every golden fixture and every shared link unchanged. Adding the fields
+unconditionally broke four goldens for a feature those plans do not use — the fix
+was the wire format's own discipline, write it only when it carries a value, not a
+looser test.
+
+### Asking the engine structural questions
+
+`segmentGrid`, `acceptedPins` and `countAt` are exported so nothing outside
+`planner.js` has to rebuild where a shift begins, which pins survived, or how many
+people a mission wants at 03:00. A second implementation of any of those is wrong
+eventually, in a way neither side reveals on its own reading — the same argument
+that makes one shared `segmentsOf` non-negotiable *inside* the engine, carried past
+the module boundary.
+
+`segmentGrid` is **type-agnostic**, and that is a trap worth knowing before using
+it. It cuts a remote mission on the house grid like any other, because it reads
+shift lengths and never looks at `type`; the engine gets away with that by never
+asking — phase 2 claims remote and daily missions whole. A caller that read those
+segments as shifts would hand a remote mission a different crew every hour.
+`tests/planner.segmentGrid.test.js` pins it.
+
 ### Strategies
 
 *Who* gets a given slot is the one decision the engine delegates. `planner.js` works out who is
@@ -272,7 +329,8 @@ npm run lint && npm test && npm run build
 ```
 
 For anything touching the UI, exports, sharing, or offline behaviour, also run the browser check
-(`tests/e2e.mjs`, instructions in `README.md`) — several bugs found during development were
+(`tests/e2e.mjs`, instructions in `README.md`; the other `*.e2e.mjs` files are focused scenarios
+run the same way) — several bugs found during development were
 invisible to the unit tests: MUI dropping test ids, a zod schema rejecting a freshly added mission,
 and a 24-hour remote mission rendering as `22:00–22:00`.
 
