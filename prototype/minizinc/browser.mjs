@@ -30,7 +30,7 @@
  */
 
 import { createServer } from 'node:http';
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, readlinkSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, dirname, extname } from 'node:path';
@@ -113,47 +113,115 @@ await new Promise((r) => server.listen(0, r));
 const { port } = server.address();
 
 /**
- * Resident memory of the whole browser process tree, in MB.
+ * Resident memory of every Chromium process, in MB.
  *
  * The JS heap the page reports excludes WebAssembly memory, which is where all
  * of this solver's memory is - so it reads 2MB while the wasm holds hundreds.
- * RSS over the process tree is coarser and attributes Chromium's own footprint
- * to the solver, but it is the only figure here that includes the thing being
- * measured. Reported as a delta from idle for that reason.
+ * RSS across the browser's processes is coarser and attributes Chromium's own
+ * footprint to the solver, but it is the only figure here that includes the
+ * thing being measured. Reported as a delta from idle for that reason.
+ *
+ * This used to find a root pid by matching `chrome-linux/chrome` and then walk
+ * its children. It reported `4MB idle -> 4MB peak` - the crash handler, on its
+ * own - whenever `CHROME` pointed at a symlink, because the browser process's
+ * own argv[0] was then the symlink and did not match. A measurement that can
+ * silently fall back to the wrong process is worse than no measurement, so the
+ * matching is now on `/proc/<pid>/exe`, which resolves symlinks for us, and
+ * there is no tree walk: every Chromium process counts, whoever started it.
  */
-function treeRssMB(rootPid) {
-  const kids = new Map();
+function chromiumRssMB() {
+  let kb = 0;
+  let found = 0;
   for (const entry of readdirSync('/proc')) {
     if (!/^\d+$/.test(entry)) continue;
     try {
-      const stat = readFileSync(`/proc/${entry}/stat`, 'utf8');
-      const ppid = Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1]);
-      kids.set(Number(entry), ppid);
-    } catch { /* the process went away mid-read */ }
+      // The real binary, symlinks resolved by the kernel.
+      const exe = readlinkSync(`/proc/${entry}/exe`);
+      if (!/chrome|chromium|headless_shell/.test(exe)) continue;
+      const m = /VmRSS:\s+(\d+) kB/.exec(readFileSync(`/proc/${entry}/status`, 'utf8'));
+      if (m) { kb += Number(m[1]); found++; }
+    } catch { /* not ours to read, or it went away mid-scan */ }
   }
-  const wanted = new Set([rootPid]);
-  let grew = true;
-  while (grew) {
-    grew = false;
-    for (const [pid, ppid] of kids) {
-      if (!wanted.has(pid) && wanted.has(ppid)) { wanted.add(pid); grew = true; }
+  return { mb: Math.round(kb / 1024), processes: found };
+}
+
+/**
+ * A CPU throttle that reaches the solver.
+ *
+ * `Emulation.setCPUThrottlingRate` does not, and the measurement above proves
+ * it rather than asserting it: at 8x the main thread drops from 4738 to 646
+ * spins/ms while the worker stays at 4434, and the four solve times move by
+ * less than 10%. CDP throttling is implemented in the renderer's main-thread
+ * scheduler; a worker thread never sees it. That is the single reason ADR 011's
+ * Pixel-class criterion stayed open - every "throttled" figure taken this way
+ * was a desktop figure.
+ *
+ * So throttle where the operating system cannot be argued with: SIGSTOP the
+ * renderer processes for most of each period and SIGCONT them for the rest. The
+ * signal lands on the process, so every thread in it stops - the main thread and
+ * the wasm worker alike, in the same proportion, which is what a slower core
+ * does. The browser process is deliberately left alone so CDP stays answerable.
+ *
+ * The honest caveat: this is bursty. At 8x the renderer makes no progress for
+ * 17.5ms at a time, where a genuinely slower core would make slow progress
+ * continuously. For a compute benchmark that distinction does not matter -
+ * `performance.now()` is wall clock, so a stopped process is correctly charged
+ * for the time - but it would matter for anything latency-shaped, and no
+ * conclusion here should be drawn about interaction smoothness.
+ */
+function osThrottle(rate, periodMs = 20) {
+  if (rate <= 1) return () => {};
+  let pids = [];
+  const rescan = () => {
+    const found = [];
+    for (const entry of readdirSync('/proc')) {
+      if (!/^\d+$/.test(entry)) continue;
+      try {
+        const cmd = readFileSync(`/proc/${entry}/cmdline`, 'utf8');
+        // Renderers only. The browser process answers CDP, and stopping it
+        // would look like a hung browser rather than a slow one.
+        if (cmd.includes('chrome-linux/chrome') && cmd.includes('--type=renderer')) {
+          found.push(Number(entry));
+        }
+      } catch { /* gone */ }
     }
-  }
-  let kb = 0;
-  for (const pid of wanted) {
-    try {
-      const m = /VmRSS:\s+(\d+) kB/.exec(readFileSync(`/proc/${pid}/status`, 'utf8'));
-      if (m) kb += Number(m[1]);
-    } catch { /* same */ }
-  }
-  return Math.round(kb / 1024);
+    pids = found;
+  };
+  const signal = (sig) => {
+    for (const pid of pids) {
+      try { process.kill(pid, sig); } catch { /* gone */ }
+    }
+  };
+
+  const runMs = Math.max(1, Math.round(periodMs / rate));
+  const scan = setInterval(rescan, 500);
+  rescan();
+
+  let timer = null;
+  const cycle = () => {
+    signal('SIGCONT');
+    timer = setTimeout(() => {
+      signal('SIGSTOP');
+      timer = setTimeout(cycle, periodMs - runMs);
+    }, runMs);
+  };
+  cycle();
+
+  return () => {
+    clearInterval(scan);
+    if (timer) clearTimeout(timer);
+    // Never leave a stopped renderer behind: the browser would look hung and
+    // `browser.close()` would block forever.
+    signal('SIGCONT');
+  };
 }
 
 const browser = await chromium.launch(
   process.env.CHROME ? { executablePath: process.env.CHROME } : {},
 );
 const page = await browser.newPage();
-if (throttle > 1) {
+const cdpThrottle = process.env.CDP_THROTTLE === '1';
+if (throttle > 1 && cdpThrottle) {
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('Emulation.setCPUThrottlingRate', { rate: throttle });
 }
@@ -168,36 +236,44 @@ page.on('response', (r) => {
   bodies.push(r.body().then((b) => { transferred += b.length; }).catch(() => {}));
 });
 
-// Playwright's `Browser` exposes no pid, so find the Chromium tree by name.
-// Crude, and fine here: this sandbox runs exactly one.
-const rootPid = (() => {
-  for (const entry of readdirSync('/proc')) {
-    if (!/^\d+$/.test(entry)) continue;
-    try {
-      const cmd = readFileSync(`/proc/${entry}/cmdline`, 'utf8');
-      if (cmd.includes('chrome-linux/chrome') && !cmd.includes('--type=')) return Number(entry);
-    } catch { /* gone */ }
-  }
-  return null;
-})();
-const idleRss = rootPid ? treeRssMB(rootPid) : 0;
-let peakRss = idleRss;
-const sampler = rootPid ? setInterval(() => {
-  peakRss = Math.max(peakRss, treeRssMB(rootPid));
+// Everything Chromium, not a tree from a guessed root. This sandbox runs one
+// browser; if it ran two the figure would be their sum, which the process count
+// printed alongside it makes visible rather than hiding.
+const idle = chromiumRssMB();
+let peakRss = idle.mb;
+let peakProcs = idle.processes;
+const sampler = idle.processes > 0 ? setInterval(() => {
+  const now = chromiumRssMB();
+  if (now.mb > peakRss) peakRss = now.mb;
+  peakProcs = Math.max(peakProcs, now.processes);
 }, 200) : null;
 
 const offline = process.env.OFFLINE === '1';
 const query = `solver=${solver}${offline ? '&sw=1' : ''}${process.env.NO_SOLVE === '1' ? '&noSolve=1' : ''}`;
 
+// Throttling starts before the navigation, so first load pays it too - that is
+// half the question ADR 011 asks. Released before reading the probe back, so a
+// stopped renderer can never be mistaken for a hung one.
+const releaseThrottle = osThrottle(cdpThrottle ? 1 : throttle);
 const opened = Date.now();
-await page.goto(`http://localhost:${port}/?${query}`, { waitUntil: 'load' });
-await page.waitForFunction(() => window.rotaProbe?.done, null, { timeout: 15 * 60 * 1000 });
-let result = await page.evaluate(() => window.rotaProbe);
+let result;
+let wall;
+try {
+  await page.goto(`http://localhost:${port}/?${query}`, { waitUntil: 'load' });
+  await page.waitForFunction(() => window.rotaProbe?.done, null, { timeout: 15 * 60 * 1000 });
+  wall = Date.now() - opened;
+  releaseThrottle();
+  result = await page.evaluate(() => window.rotaProbe);
+} catch (e) {
+  releaseThrottle();
+  throw e;
+}
 await Promise.all(bodies);
-let wall = Date.now() - opened;
 
 if (offline) {
   const cached = result.cached;
+  const releaseAgain = osThrottle(cdpThrottle ? 1 : throttle);
+  try {
   console.log(`warm pass          : ${cached} assets cached by the service worker`);
   // Cut the network at the browser *and* stop the server, so a cache miss
   // cannot be quietly served by a socket that was still open.
@@ -206,13 +282,21 @@ if (offline) {
   const reloaded = Date.now();
   await page.reload({ waitUntil: 'load' });
   await page.waitForFunction(() => window.rotaProbe?.done, null, { timeout: 15 * 60 * 1000 });
-  result = await page.evaluate(() => window.rotaProbe);
   wall = Date.now() - reloaded;
+  releaseAgain();
+  result = await page.evaluate(() => window.rotaProbe);
+  } finally { releaseAgain(); }
   console.log('offline pass       : network cut, server stopped, reloaded\n');
 }
 if (sampler) clearInterval(sampler);
 
-console.log(`cpu throttle       : ${throttle}x (main-thread spin ${result.spinPerMs}/ms)`);
+const reach = result.workerSpinPerMs / result.spinPerMs;
+console.log(`cpu throttle       : ${throttle}x requested, via ${cdpThrottle ? 'CDP (main thread only)' : 'SIGSTOP on the renderer (every thread)'}`);
+console.log(`  main-thread spin : ${result.spinPerMs}/ms`);
+console.log(`  worker spin      : ${result.workerSpinPerMs}/ms  ${
+  throttle > 1 && reach > 2
+    ? `<- ${reach.toFixed(1)}x FASTER than the main thread: the throttle is NOT reaching the solver`
+    : '(the thread the solver actually runs on)'}`);
 console.log(`fixture            : ${hours}h horizon, ${inst.nE} guards, ${inst.nM} missions, ${inst.nS} segments`);
 console.log(`crossOriginIsolated: ${result.crossOriginIsolated}   (false means no COOP/COEP needed)`);
 console.log(`solvers in the wasm: ${(result.solvers ?? []).join(', ') || '(none reported)'}`);
@@ -223,8 +307,13 @@ if (result.baseline) console.log('baseline pass      : MiniZinc never initialise
 for (const l of result.levels) {
   console.log(`  level ${l.level}: ${String(l.ms).padStart(6)}ms  ${l.status}  unmet=${l.unmetQualifications} unfilled=${l.unfilledSeats} churn=${l.slotChurn} imbalance=${l.imbalance}`);
 }
-if (result.heapMB) console.log(`js heap            : ${result.heapMB}MB  (excludes wasm memory - see the note on treeRssMB)`);
-if (rootPid) console.log(`browser tree rss   : ${idleRss}MB idle -> ${peakRss}MB peak  (+${peakRss - idleRss}MB)`);
+if (result.heapMB) console.log(`js heap            : ${result.heapMB}MB  (excludes wasm memory - see the note on chromiumRssMB)`);
+if (idle.processes > 0) {
+  console.log(`chromium rss       : ${idle.mb}MB idle -> ${peakRss}MB peak  (+${peakRss - idle.mb}MB)`
+    + `  over ${idle.processes}->${peakProcs} processes`);
+} else {
+  console.log('chromium rss       : not measured (no readable Chromium process)');
+}
 console.log(`wall clock         : ${wall}ms`);
 if (result.error) console.log(`\nERROR\n${result.error}`);
 

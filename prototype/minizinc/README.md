@@ -38,6 +38,16 @@ npm i --no-save minizinc playwright
 CHROME=/path/to/chromium node prototype/minizinc/browser.mjs 72 highs
 OFFLINE=1  CHROME=... node prototype/minizinc/browser.mjs 24 highs   # cache, cut the network, reload
 NO_SOLVE=1 CHROME=... node prototype/minizinc/browser.mjs 24 highs   # memory baseline
+CHROME=... node prototype/minizinc/browser.mjs 24 highs 4            # throttled 4x, worker included
+CHROME=... node prototype/minizinc/pixelClass.mjs                    # the whole curve
+```
+
+To measure a phone rather than reason about one, serve the same fixture on the
+LAN and open it there. The page prints what it measures; no harness is involved.
+
+```bash
+node prototype/minizinc/serve.mjs 72
+# -> http://192.168.x.x:8099/  — open that on the device
 ```
 
 ## The headline: not Chuffed
@@ -268,11 +278,99 @@ that is a real risk: a background tab holding a third of a gigabyte is a tab
 Android may reclaim, and this measurement was taken on a machine with room to
 spare. ADR 011's "configure one worker initially" now has a number behind it.
 
-### What the browser measurement still does not say
+### The throttle was measuring nothing
 
-**A phone figure.** The main-thread finding above cuts both ways: CDP CPU
-throttling reaches the main thread and not the worker, so this machine's
-desktop-class core did all the solving at every throttle setting. Fourteen
-seconds here is not fourteen seconds on a Pixel, and nothing here says what it
-is. Given the memory number, that measurement should happen on real hardware
-before anything ships.
+This was the last open acceptance criterion, and it stayed open because the
+obvious instrument was silently broken.
+
+`Emulation.setCPUThrottlingRate` is implemented in the renderer's **main-thread
+scheduler**. The solver runs in a Web Worker, which never sees it. The page now
+spins a busy loop on both threads and prints both rates, which turns that from
+something you have to know into something the output says:
+
+```text
+throttle        main-thread spin   worker spin   level-1 solve
+    1x                 4738/ms        3199/ms          2130ms
+    8x via CDP          646/ms        4434/ms          2356ms
+```
+
+The main thread slowed 7.3x. The worker did not slow at all — it came back
+marginally *faster*, which is noise around "unthrottled". The solve moved by
+10%, which is also noise. Every throttled figure taken this way was a desktop
+figure, and the honest reading of the earlier "fourteen seconds at 20x" is that
+it was fourteen seconds at 1x.
+
+`browser.mjs` now throttles by SIGSTOPping the renderer processes on a duty
+cycle instead. The signal lands on the process, so every thread in it stops in
+the same proportion — which is what a slower core does. The browser process is
+left alone so CDP stays answerable. At 4x the worker drops from 3199 to
+1220 spins/ms and the ladder goes from 6.5s to 26.7s: the solver is finally
+being throttled.
+
+The honest caveat is that this is bursty. At 8x the renderer makes no progress
+for 17.5ms at a time, where a slower core would make slow progress continuously.
+For a compute benchmark that does not matter — `performance.now()` is wall
+clock, so a stopped process is correctly charged — but nothing here should be
+read as a claim about interaction smoothness.
+
+### Placing a real device
+
+`pixelClass.mjs` sweeps horizon × throttle and reports a curve **indexed on the
+worker spin rate**, because that is the number a device can measure about itself
+in 50ms. Open `browser/index.html` on the phone, read the worker spin it prints,
+find the nearest row: that row is the device.
+
+That is a bracket, not a substitute. ADR 011 asks for a measurement on real
+hardware and this is not one. What it does is turn "unknown" into "known within
+a band, with a one-step procedure for closing it" — and `serve.mjs` is that one
+step, because the reason nobody had run this on a phone was that there was no
+URL to open.
+
+Measured:
+
+```text
+  horizon  segments  worker spin   first load   ladder    slowest level   peak rss
+      24h        26      4160/ms        271ms     6.4s            2.0s      892MB
+      24h        26      2484/ms        450ms    13.6s            4.2s      939MB
+      24h        26       966/ms        718ms    26.9s            7.9s      933MB
+      24h        26       585/ms       1282ms    43.8s           13.2s      952MB
+      72h        74      4284/ms        235ms    14.3s            4.5s     1061MB
+      72h        74      2586/ms        457ms    29.8s            9.5s     1006MB
+      72h        74      1131/ms        847ms    59.2s           18.7s     1009MB
+      72h        74       588/ms       1270ms   101.2s           31.8s     1017MB
+```
+
+Predicting each row from the fastest and `1/spin` lands within 3-4% at the slow
+end of both horizons and overshoots ~26% at 2x, where the duty cycle is coarse
+against a 50ms spin probe. The phone-relevant band is the slow end.
+
+72 hours costs 2.2x what 24 does, for 2.85x the segments. The horizon is cheap.
+
+### The RSS figure was measuring the crash handler
+
+Worth recording because it is the same class of mistake as the throttle. Peak
+memory came from a process-tree walk rooted on a pid found by matching
+`chrome-linux/chrome` in the command line. When `CHROME` points at a symlink -
+which is how this sandbox invokes it - the browser process's own argv[0] is the
+symlink and does not match, so the scan settled on `chrome_crashpad_handler` and
+reported `4MB idle -> 4MB peak`.
+
+It now matches on `/proc/<pid>/exe`, which the kernel resolves for us, and sums
+every Chromium process rather than walking a tree from a guessed root. The
+number came back at +231MB over idle, inside the 250-400MB band measured before,
+so the earlier figure stands - but it stood by luck, and a measurement that can
+quietly fall back to the wrong process is worse than no measurement.
+
+### What this says about shipping
+
+The most pessimistic row - 588 spins/ms, seven times slower than this machine -
+puts a 72-hour reschedule at 101 seconds. Against a rota that has to be
+rebalanced inside twenty or thirty minutes when a mission appears, that is
+comfortable. **Speed is not the objection.**
+
+*When* it runs is. The app re-solves on every `setDoc`, which is every keystroke
+in a name field, and 6.4 seconds - the fastest row here, on a desktop - already
+makes that impossible. A MiniZinc adapter is therefore not a drop-in for
+`plan()`: the solve has to become explicit and asynchronous first. ADR 012's
+freeze work already pulled the single solve into `acceptSchedule` and made every
+consumer take an accepted result rather than compute one, so the seam exists.

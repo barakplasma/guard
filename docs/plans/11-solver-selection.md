@@ -421,11 +421,90 @@ worker initially" as written, since a worker pool multiplies the number rather
 than the risk, and it keeps the Pixel-class measurement on the list: what is now
 being measured there is startup and solve time, not whether the thing fits.
 
-**One criterion is still untouched: a Pixel-class figure.** The main-thread
-finding above is why - CDP CPU throttling reaches the main thread and not the
-worker, so a desktop core did all the solving at every throttle setting.
-Fourteen seconds here is not fourteen seconds on a phone. With memory settled,
-this is now the only open measurement, and it is about time rather than fit.
+### The Pixel-class figure: the instrument was broken, and now is not
+
+This was the last open criterion, and it stayed open because the obvious tool
+was silently measuring nothing.
+
+`Emulation.setCPUThrottlingRate` is implemented in the renderer's **main-thread
+scheduler**. The solver runs in a Web Worker, which never sees it. The probe page
+now spins a busy loop on both threads and prints both rates, so the failure is
+visible in the output rather than something you have to know:
+
+```text
+throttle        main-thread spin   worker spin   level-1 solve
+    1x                 4738/ms        3199/ms          2130ms
+    8x via CDP          646/ms        4434/ms          2356ms
+```
+
+The main thread slowed 7.3x. The worker did not slow at all. The solve moved by
+10%, which is noise. **Every throttled figure this record previously quoted was
+an unthrottled figure**, including "fourteen seconds at 20x" - that was fourteen
+seconds at 1x.
+
+`browser.mjs` now throttles by SIGSTOPping the renderer processes on a duty
+cycle. The signal lands on the process, so every thread stops in the same
+proportion, which is what a slower core does. `pixelClass.mjs` sweeps it:
+
+```text
+  horizon  segments  worker spin   first load   ladder    slowest level   peak rss
+      24h        26      4160/ms        271ms     6.4s            2.0s      892MB
+      24h        26      2484/ms        450ms    13.6s            4.2s      939MB
+      24h        26       966/ms        718ms    26.9s            7.9s      933MB
+      24h        26       585/ms       1282ms    43.8s           13.2s      952MB
+      72h        74      4284/ms        235ms    14.3s            4.5s     1061MB
+      72h        74      2586/ms        457ms    29.8s            9.5s     1006MB
+      72h        74      1131/ms        847ms    59.2s           18.7s     1009MB
+      72h        74       588/ms       1270ms   101.2s           31.8s     1017MB
+```
+
+Three things fall out of it.
+
+**Solve time is inversely linear in worker speed.** Predicting each row from the
+fastest one and `1/spin` lands within 3-4% at the slow end of both horizons, and
+overshoots by ~26% at 2x where the duty cycle is coarse against a 50ms spin
+probe. The phone-relevant band is the slow end, and there the model holds. That
+is what makes the table a *curve* rather than eight anecdotes: a device measures
+its own worker spin in 50ms and reads off its row.
+
+**The horizon is cheap.** 72 hours is 2.85x the segments of 24 and 2.2x the
+time, at every throttle. Nothing here degrades badly as the window grows.
+
+**Memory is flat and confirms the earlier number**, now that the instrument
+measuring it works. The previous figure came from a process-tree walk rooted on
+a pid found by matching `chrome-linux/chrome` in the command line, which silently
+matched the crash handler and reported `4MB idle -> 4MB peak` whenever `CHROME`
+pointed at a symlink. It now matches on `/proc/<pid>/exe`, which the kernel
+resolves. Delta over idle is ~230MB, inside the 250-400MB band this record
+already recorded, and it does not move with the horizon.
+
+**What this is not.** It is a bracket, not the on-device measurement the
+criterion asks for. This machine is not a Pixel and no throttle makes it one.
+What closes the criterion is one step, and the reason nobody had taken it was
+that there was no URL to open: `prototype/minizinc/serve.mjs` now serves the same
+fixture on the LAN, and `browser/index.html` prints its own headline figure on
+the phone holding it.
+
+### The consequence that actually decides the design
+
+Take the most pessimistic row - 588 spins/ms, seven times slower than this
+machine's core - and a 72-hour reschedule costs **101 seconds**. Against the
+operating reality this app was built for, where a mission appears and the rota
+has to be rebalanced inside twenty or thirty minutes, 101 seconds is
+comfortable. Speed is not the objection to MiniZinc.
+
+The objection is *when* it runs. The app re-solves on every `setDoc`, which
+means every keystroke in a name field. At 6.4 seconds - the **fastest** row
+here, on a desktop - that is already impossible, and this record had never
+stated it. So a MiniZinc adapter is not a drop-in replacement for `plan()`; it
+requires the solve to become explicit and asynchronous, with the document
+editable while it runs.
+
+That is not new work, as it turns out. ADR 012's freeze prerequisite already
+pulled the single solve into `acceptSchedule` and made every consumer take the
+accepted result rather than compute one. An awaited result arrives in exactly
+that function, and nothing downstream of it solves. The seam is already where
+it needs to be.
 
 ### What the timings do not say
 
@@ -490,9 +569,16 @@ The MiniZinc prototype must pass, before it replaces anything:
   per the prerequisite above - **met**.
 
 Plus representative Pixel-class measurements for first load, repeated solve
-time, cancellation, peak memory and worker cleanup. **Configure one worker
-initially**; the default worker-pool behaviour needs explicit memory testing
-before it is trusted on a phone.
+time, cancellation, peak memory and worker cleanup - **bracketed, not yet taken
+on the device**. `pixelClass.mjs` gives the curve and `serve.mjs` gives the URL;
+what remains is somebody opening it on the Pixel and reading the headline.
+**Configure one worker initially**; the default worker-pool behaviour needs
+explicit memory testing before it is trusted on a phone.
+
+And one criterion this measurement added: **the solve must be explicit and
+asynchronous before any adapter ships.** Re-solving on every `setDoc` is
+impossible at these times even on a desktop. `acceptSchedule` is where it
+lands.
 
 ## What the engine still gets wrong today
 
