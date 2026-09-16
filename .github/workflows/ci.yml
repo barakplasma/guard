@@ -67,6 +67,10 @@ jobs:
         env:
           VALIDATE_ALL_CODEBASE: true
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # No PR comment. It needs `pull-requests: write`, and the findings are
+          # already in the job summary and the uploaded report - a comment would
+          # buy a wider token for a third copy of the same thing.
+          GITHUB_COMMENT_REPORTER: false
 
       # The reports say which linter objected and to what, which the job log
       # summarises but does not always show in full.

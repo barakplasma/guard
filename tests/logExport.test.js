@@ -35,6 +35,22 @@ const doc = (over = {}) => planSchema.parse({
   ...over,
 });
 
+test('an assignment beyond the period end is not exported as history', () => {
+  // `isOutOfPeriod` is true on both sides of the window, which is right for the
+  // engine - it schedules neither - and wrong for a file that says what
+  // happened. Before this split, an assignment made for a week after the period
+  // was written here as completed duty and then removed by the button beside
+  // the warning: somebody's plan, consumed by narrowing the period.
+  const later = { start: BASE + 20 * DAY, end: BASE + 20 * DAY + 4 * HOUR };
+  const d = doc({
+    missions: [{ id: 'next', name: 'שבוע הבא', type: 'local', ...later, count: 1 }],
+    pins: [{ missionId: 'next', employeeId: 'e1', ...later, frozen: false }],
+  });
+  assert.equal(outOfPeriodLog(d).length, 0, 'nothing to export');
+  assert.equal(countStalePins(d), 0, 'and nothing offered for removal');
+  assert.equal(clearStalePins(d).pins.length, 1, 'so pressing the button leaves it alone');
+});
+
 test('the export carries exactly what the button removes', () => {
   const d = doc();
   assert.equal(outOfPeriodCount(d), countStalePins(d),

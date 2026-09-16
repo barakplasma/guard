@@ -107,6 +107,11 @@ export carries and what the button removes are one set, asserted in
 "ייצא ונקה שיבוצים ישנים" and clears nothing if the download could not be
 produced.
 
+**One more correction, 2026-09-16.** The export was also treating assignments
+*beyond* the period's end as history - writing them to the CSV as completed duty
+and then deleting them. See ADR 012's correction; the predicate is split and the
+button only offers to clear what has actually elapsed.
+
 **Now closed.** Assignments the period has rolled past are shown, read-only,
 in the findings section - beside the alert that counts them and the button that
 exports and removes them. That placement is the point rather than a convenience:

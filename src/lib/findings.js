@@ -27,7 +27,7 @@ export function findingText(w, doc) {
     case 'pin-conflict': return t.warnPinConflict(person);
     case 'pin-overflow': return t.warnPinOverflow(person);
     case 'pin-unavailable': return t.warnPinUnavailable(person);
-    case 'pin-out-of-period': return t.warnPinOutOfPeriod(w.count);
+    case 'pin-out-of-period': return t.warnPinOutOfPeriod(w.count, w.elapsed);
     case 'pin-availability-overridden': return t.warnPinAvailabilityOverridden(person);
     default: return w.code;
   }

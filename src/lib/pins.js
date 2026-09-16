@@ -12,7 +12,7 @@
  * miss one of them.
  */
 
-import { plan as runPlanner, isOutOfPeriod, resolvePinWindow } from './planner.js';
+import { plan as runPlanner, isElapsedBeforePeriod, resolvePinWindow } from './planner.js';
 import { toPlannerInput, dailyOccurrences } from './planSchema.js';
 
 /** Resolve a pin's effective range, following the null-inheritance chain. */
@@ -257,9 +257,17 @@ export function applyMissionAssignees(doc, missionId, employeeIds) {
 }
 
 /** Is this pin residue from a period the plan has moved past? */
+/**
+ * Is this pin *history* - an assignment that finished before the period began?
+ *
+ * Deliberately not "outside the period", which is also true beyond the end. An
+ * assignment for next week is a plan, not a record: exporting it as completed
+ * duty is a lie, and deleting it destroys work nobody asked to lose. The engine
+ * ignores both sides and the warning counts both; only this half is clearable.
+ */
 function isStale(doc, pin) {
   const mission = doc.missions.find((m) => m.id === pin.missionId);
-  return isOutOfPeriod(pin, mission, doc.start, doc.end);
+  return isElapsedBeforePeriod(pin, mission, doc.start, doc.end);
 }
 
 /**

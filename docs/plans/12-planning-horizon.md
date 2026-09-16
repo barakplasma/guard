@@ -21,6 +21,29 @@ Treat 72 hours as the working window: what a plan covers, what a link carries,
 and what the scheduler is asked to solve. Rolling the window forward is the
 **normal** operation, not an occasional one.
 
+## Correction: only the past is history
+
+**2026-09-16, from review.** The export half of this decision shipped with a
+bug that inverted it. `isOutOfPeriod` is true on *both* sides of the window -
+correct for the engine, which schedules neither - and the export, the count and
+the cleanup button all keyed on it. So an assignment made for **next week** was
+written into the history CSV as completed duty and then deleted by the button
+beside the warning.
+
+That is somebody's plan, not their record, and narrowing the period should not
+consume it. This record authorises exporting a rolled-*past* window and nothing
+else.
+
+`isElapsedBeforePeriod` (`planner.js`) is now the predicate for anything that
+calls a pin history: the CSV, `countStalePins`, `clearStalePins`. The warning
+still counts both sides, because an assignment the engine is ignoring is worth
+knowing about whichever way it fell - so it carries two numbers now, `count` and
+`elapsed`, and the button only appears when there is history to export. With
+nothing elapsed the message says plainly that what is outside the period is
+planned for later and will be kept.
+
+Pinned in `tests/logExport.test.js` and `tests/pins.test.js`.
+
 ## Consequences
 
 ### The URL holds it comfortably

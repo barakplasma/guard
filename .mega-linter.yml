@@ -51,3 +51,7 @@ FILTER_REGEX_EXCLUDE: (^|/)(dist|node_modules|screenshots)/
 # why three rules are off. A strict JSON parser cannot, so it is excluded rather
 # than the comments deleted.
 JSON_FILTER_REGEX_EXCLUDE: (^|/)\.oxlintrc\.json$
+
+# markdownlint is advisory in MegaLinter's own defaults, which would let 57
+# findings sit in the log unread. If it is worth running it is worth obeying.
+DISABLE_ERRORS_LINTERS: []

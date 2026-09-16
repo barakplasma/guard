@@ -294,7 +294,9 @@ jobs:
           set -eu
           URL="${{ needs.pages.outputs.page_url }}"
           # Pages propagation can lag a few seconds after deploy
-          for i in $(seq 1 10); do
+          # `_` rather than `i`: the counter is never read, and shellcheck says
+          # so through actionlint, which lints the shell inside `run:` blocks.
+          for _ in $(seq 1 10); do
             CODE=$(curl -fs -o /dev/null -w '%{http_code}' "$URL" 2>/dev/null || echo "000")
             if [ "$CODE" = "200" ]; then break; fi
             sleep 5

@@ -8,6 +8,7 @@ import { WARN } from '../src/lib/planner.js';
 import { plan } from '../src/lib/planner.js';
 import { planSchema, prunePins, toPlannerInput } from '../src/lib/planSchema.js';
 
+const DAY = 24 * 60 * 60 * 1000;
 const HOUR = 3600 * 1000;
 const START = new Date(2026, 0, 5, 8, 0, 0, 0).getTime();
 
@@ -502,16 +503,26 @@ const stale = (over = {}) => doc({
   ...over,
 });
 
-test('countStalePins counts everything outside the period, both sides', () => {
-  assert.equal(countStalePins(stale()), 3);
+test('countStalePins counts what has elapsed, not what is merely outside', () => {
+  // Three pins sit outside the period and only two of them are history. The
+  // third is beyond the end - an assignment somebody made for later, which the
+  // engine ignores but which is a plan rather than a record. Counting it here
+  // would put it in the export as completed duty and then delete it.
+  assert.equal(countStalePins(stale()), 2);
   assert.equal(countStalePins(doc()), 0);
 });
 
-test('clearStalePins removes them all and leaves live pins alone', () => {
+test('clearStalePins removes elapsed history and leaves everything else alone', () => {
   const cleaned = clearStalePins(stale());
-  assert.equal(cleaned.pins.length, 1);
-  assert.equal(cleaned.pins[0].employeeId, 'e2');
-  assert.equal(cleaned.pins[0].start, START + HOUR);
+  assert.equal(cleaned.pins.length, 2, 'the live pin and the one beyond the end both survive');
+  assert.ok(
+    cleaned.pins.some((p) => p.start === START + HOUR),
+    'the live pin is untouched',
+  );
+  assert.ok(
+    cleaned.pins.some((p) => p.start === START + 9 * HOUR),
+    'and so is the assignment beyond the end - that is a plan, not residue',
+  );
 });
 
 test('clearStalePins returns the same document when there is nothing to clear', () => {
@@ -586,9 +597,15 @@ test('a pin inside the period that its mission cannot host is still a real warni
 /** One employee, one mission, one pin - varied per case. */
 const residue = (mission, pin) => doc({ missions: [mission], pins: [pin] });
 
+/**
+ * What the warning reports as *clearable*, which is the number the button acts
+ * on. Deliberately `elapsed` rather than `count`: the warning counts everything
+ * the engine is ignoring, on both sides of the window, and only the elapsed
+ * half is history the button may export and remove.
+ */
 const outOfPeriodCount = (d) => {
   const w = plan(toPlannerInput(d)).warnings.find((x) => x.code === WARN.PIN_OUT_OF_PERIOD);
-  return w ? w.count : 0;
+  return w ? w.elapsed : 0;
 };
 
 const BEFORE = { start: START - 10 * HOUR, end: START - 9 * HOUR };
@@ -630,7 +647,8 @@ test('a live remote pin is never collected, however stale its range reads', () =
 test('the reported count is exactly what the button will remove', () => {
   // The button only exists alongside this warning, so a count taken anywhere
   // that cannot see a dropped mission would strand that history with no way to
-  // reach it. Both sides share one predicate; this is that contract.
+  // reach it. One shared predicate keeps the three honest - what the warning
+  // reports as clearable is what the export carries is what the button removes.
   const cases = [
     residue({ id: 'm1', name: 'M', type: 'local', ...BEFORE, count: 1 },
       { missionId: 'm1', employeeId: 'e1', start: null, end: null, frozen: true }),
@@ -641,6 +659,29 @@ test('the reported count is exactly what the button will remove', () => {
     stale(),
   ];
   for (const d of cases) assert.equal(outOfPeriodCount(d), countStalePins(d));
+});
+
+test('an assignment beyond the period end is never called history', () => {
+  // The bug this pins: `isOutOfPeriod` is true on both sides of the window, so
+  // an assignment made for next week was written into the history CSV as
+  // completed duty and then deleted by the button. Somebody's plan, consumed by
+  // narrowing the period.
+  const later = { start: START + 7 * DAY, end: START + 7 * DAY + 4 * HOUR };
+  const d = doc({
+    missions: [{ id: 'next', name: 'Next week', type: 'local', ...later, count: 1 }],
+    pins: [{ missionId: 'next', employeeId: 'e1', ...later, frozen: false }],
+  });
+  assert.equal(outOfPeriodCount(d), 0, 'the warning reports nothing clearable');
+  assert.equal(countStalePins(d), 0, 'the button does not offer to remove it');
+  assert.equal(clearStalePins(d).pins.length, 1, 'and pressing it anyway leaves it alone');
+
+  // It is still reported, because the engine is not scheduling it and the user
+  // should know. That is the half that stays two-sided.
+  const result = plan({ ...toPlannerInput(d), onInvariantViolation: 'report' });
+  const warning = result.warnings.find((w) => w.code === 'pin-out-of-period');
+  assert.ok(warning, 'the warning still names it');
+  assert.equal(warning.count, 1, 'counted among what is being ignored');
+  assert.equal(warning.elapsed, 0, 'but none of it is clearable history');
 });
 
 test('clearing residue never changes a single shift', () => {

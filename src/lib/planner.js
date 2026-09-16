@@ -184,6 +184,28 @@ export function isOutOfPeriod(pin, mission, planStart, planEnd) {
 }
 
 /**
+ * The half of `isOutOfPeriod` that is actually *history*: an assignment that
+ * finished before the period began.
+ *
+ * The distinction is not pedantry, it is a data-loss bug the export half of
+ * ADR 012 introduced. `isOutOfPeriod` is true on both sides of the window,
+ * which is right for the engine - it schedules neither - and wrong for anything
+ * that calls one of them a record of duty that happened. An assignment made for
+ * *next* week was being written into the history CSV as completed duty and then
+ * deleted by the button beside the warning. That is somebody's plan, not their
+ * record, and narrowing the period should not consume it.
+ *
+ * So the export and the cleanup key on this, and the warning still counts both:
+ * an assignment the engine is ignoring is worth knowing about whichever side of
+ * the window it fell.
+ */
+export function isElapsedBeforePeriod(pin, mission, planStart, planEnd) {
+  const written = mission?.type === 'remote' ? WHOLE_MISSION : pin;
+  const { end } = resolvePinWindow(written, mission, planStart, planEnd);
+  return end <= planStart;
+}
+
+/**
  * Employees clamped to the plan window. An employee with no window of their own
  * defaults to the whole period, which is the common case.
  */
@@ -835,7 +857,16 @@ function planOnce({
   const stalePins = pins.filter(
     (p) => isOutOfPeriod(p, rawMissionById.get(p.missionId), start, end),
   );
-  if (stalePins.length > 0) warnings.push({ code: WARN.PIN_OUT_OF_PERIOD, count: stalePins.length });
+  if (stalePins.length > 0) {
+    // `count` is everything the engine is ignoring; `elapsed` is the part that
+    // is history and so the part the export-and-clear button touches. They
+    // differ exactly when an assignment sits beyond the period's end, which is
+    // a plan rather than a record - see `isElapsedBeforePeriod`.
+    const elapsed = stalePins.filter(
+      (p) => isElapsedBeforePeriod(p, rawMissionById.get(p.missionId), start, end),
+    ).length;
+    warnings.push({ code: WARN.PIN_OUT_OF_PERIOD, count: stalePins.length, elapsed });
+  }
 
   // Duty outside the period still counts towards how much someone has stood
   // (ADR 015). The engine cannot *schedule* it - that is what out-of-period

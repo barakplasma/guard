@@ -7,16 +7,16 @@
  * take, which the engine cannot give them - it ignores everything outside the
  * period by design, so they appear in no schedule result.
  *
- * This builds those rows directly from the pins, using `isOutOfPeriod`, the
- * same predicate `clearStalePins` removes on and `plan()` counts for
- * `PIN_OUT_OF_PERIOD`. Sharing one predicate is what keeps the three honest:
- * what the warning reports is what the export carries is what the button
- * removes. `tests/logExport.test.js` asserts that.
+ * This builds those rows directly from the pins, using `isElapsedBeforePeriod`,
+ * the same predicate `clearStalePins` removes on and `plan()` reports as the
+ * warning's `elapsed`. Sharing one predicate is what keeps the three honest:
+ * what the warning says is clearable is what the export carries is what the
+ * button removes. `tests/logExport.test.js` asserts that.
  *
  * Pure: no DOM, no clock. The download itself stays in `exportCsv.js`.
  */
 
-import { isOutOfPeriod, resolvePinWindow } from './planner.js';
+import { isElapsedBeforePeriod, resolvePinWindow } from './planner.js';
 
 /**
  * Assignments outside the plan period, shaped like the engine's own shift rows
@@ -33,7 +33,10 @@ export function outOfPeriodLog(doc) {
   const employeeById = new Map(doc.employees.map((e) => [e.id, e]));
 
   return doc.pins
-    .filter((p) => isOutOfPeriod(p, missionById.get(p.missionId), doc.start, doc.end))
+    // Elapsed only. `isOutOfPeriod` is also true beyond the period's end, and
+    // an assignment for next week written into this file as completed duty
+    // would be a lie the file outlives.
+    .filter((p) => isElapsedBeforePeriod(p, missionById.get(p.missionId), doc.start, doc.end))
     .flatMap((p) => {
       const mission = missionById.get(p.missionId);
       const employee = employeeById.get(p.employeeId);

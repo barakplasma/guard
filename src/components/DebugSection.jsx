@@ -43,7 +43,7 @@ function warningText(warning, doc) {
     case WARN.PIN_CONFLICT: return t.warnPinConflict(employee);
     case WARN.PIN_OVERFLOW: return t.warnPinOverflow(employee);
     case WARN.PIN_UNAVAILABLE: return t.warnPinUnavailable(employee);
-    case WARN.PIN_OUT_OF_PERIOD: return t.warnPinOutOfPeriod(warning.count);
+    case WARN.PIN_OUT_OF_PERIOD: return t.warnPinOutOfPeriod(warning.count, warning.elapsed);
     case WARN.PIN_AVAILABILITY_OVERRIDDEN: return t.warnPinAvailabilityOverridden(employee);
     default: return warning.code;
   }
@@ -56,6 +56,10 @@ function warningText(warning, doc) {
  */
 function warningAction(warning, key, onClearPinByWarning, onClearStalePins) {
   if (warning.code === WARN.PIN_OUT_OF_PERIOD) {
+    // No button when there is no history to export. Everything outside the
+    // period is then an assignment made for after it ends, which this must
+    // never offer to remove - it is a plan, not a record (ADR 012).
+    if (warning.elapsed === 0) return undefined;
     return (
       <Button color="inherit" size="small" onClick={onClearStalePins} data-testid="remove-stale-pins">
         {t.removeStalePins}

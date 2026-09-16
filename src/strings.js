@@ -249,9 +249,19 @@ export const t = {
   // of these behind, and one alert per pin reads as a malfunction rather than
   // the harmless residue it is. The wording says "ignored", not "failed" -
   // nothing is broken, the plan simply no longer covers those hours.
-  warnPinOutOfPeriod: (count) => (count === 1
-    ? 'שיבוץ ידני אחד נמצא מחוץ לתקופת הסידור ולכן לא נלקח בחשבון.'
-    : `${count} שיבוצים ידניים נמצאים מחוץ לתקופת הסידור ולכן לא נלקחו בחשבון.`),
+  //
+  // Two numbers, because only one of them is history. An assignment past the
+  // period's *end* is a plan somebody made for later, not a record of duty
+  // done - so the button that exports and clears must not touch it, and the
+  // message must not imply that it will (ADR 012).
+  warnPinOutOfPeriod: (count, elapsed = count) => {
+    const outside = count === 1
+      ? 'שיבוץ ידני אחד נמצא מחוץ לתקופת הסידור ולכן לא נלקח בחשבון.'
+      : `${count} שיבוצים ידניים נמצאים מחוץ לתקופת הסידור ולכן לא נלקחו בחשבון.`;
+    if (elapsed === 0) return `${outside} כולם מתוכננים לאחר סוף התקופה ויישמרו כמות שהם.`;
+    if (elapsed === count) return outside;
+    return `${outside} ${elapsed} מהם היסטוריה שהתקופה עברה אותה; השאר מתוכננים לאחר סופה ויישמרו.`;
+  },
   removeStalePins: 'ייצא ונקה שיבוצים ישנים',
   excludedEmployees: 'לא לשבץ את',
 
