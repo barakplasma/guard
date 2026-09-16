@@ -57,6 +57,8 @@ function overlaps(aStart, aEnd, bStart, bEnd) {
   return aStart < bEnd && bStart < aEnd;
 }
 
+const compareText = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+
 /**
  * Resolve a pin to the window it actually refers to, following the
  * null-inheritance chain: a pin's missing bound comes from its mission, and a
@@ -1073,9 +1075,9 @@ function repairCandidates(input, base, warning, win) {
 function mergeRows(rows) {
   const sorted = [...rows].sort((a, b) => (
     a.start - b.start
-    || (a.missionId < b.missionId ? -1 : a.missionId > b.missionId ? 1 : 0)
-    || (a.employeeName < b.employeeName ? -1 : a.employeeName > b.employeeName ? 1 : 0)
-    || (a.employeeId < b.employeeId ? -1 : a.employeeId > b.employeeId ? 1 : 0)
+    || compareText(a.missionId, b.missionId)
+    || compareText(a.employeeName, b.employeeName)
+    || compareText(a.employeeId, b.employeeId)
   ));
 
   const out = [];
@@ -1093,9 +1095,9 @@ function mergeRows(rows) {
   }
   return out.sort((a, b) => (
     a.start - b.start
-    || (a.missionName < b.missionName ? -1 : a.missionName > b.missionName ? 1 : 0)
-    || (a.employeeName < b.employeeName ? -1 : a.employeeName > b.employeeName ? 1 : 0)
-    || (a.employeeId < b.employeeId ? -1 : a.employeeId > b.employeeId ? 1 : 0)
+    || compareText(a.missionName, b.missionName)
+    || compareText(a.employeeName, b.employeeName)
+    || compareText(a.employeeId, b.employeeId)
   ));
 }
 

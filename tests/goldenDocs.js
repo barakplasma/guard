@@ -12,6 +12,7 @@
  */
 
 import { planSchema } from '../src/lib/planSchema.js';
+import { carmelRotaDocument } from './testHelpers.js';
 
 const HOUR = 3600 * 1000;
 const MINUTE = 60 * 1000;
@@ -33,19 +34,8 @@ const people = (n) => Array.from({ length: n }, (_, i) => ({
 function carmelRota() {
   const start = localTime(2026, 8, 10, 16, 0);
   return planSchema.parse({
+    ...carmelRotaDocument(start),
     title: 'כרמל',
-    start,
-    end: start + 163 * HOUR,
-    shiftMinutes: 60,
-    strategy: 'rotation',
-    employees: people(16),
-    missions: [
-      { id: 'm1', name: 'Gate', type: 'local', count: 1 },
-      { id: 'm2', name: 'Kitchen', type: 'local', count: 2 },
-      { id: 'm3', name: 'Carmel', type: 'local', count: 5 },
-      { id: 'm4', name: 'Ops', type: 'local', count: 1 },
-    ],
-    pins: [{ missionId: 'm3', employeeId: 'e1' }],
   });
 }
 
@@ -176,4 +166,3 @@ export function project(result, planStart) {
     )),
   };
 }
-

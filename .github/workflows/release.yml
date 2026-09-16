@@ -13,11 +13,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Read-only by default. Each job below grants itself exactly what it publishes
+# with, so a step that only builds cannot cut a release (zizmor
+# `excessive-permissions`, checkov CKV2_GHA_1).
 permissions:
-  contents: write   # create releases
-  packages: write   # push to GHCR
-  pages: write      # deploy to Pages
-  id-token: write   # Pages deploy attestation
+  contents: read
 
 # The group is deliberately named `release-v2-`, not `release-`. Run 31124152979
 # is wedged in `queued` with all seven of its jobs already terminal, and GitHub
@@ -42,10 +42,14 @@ concurrency:
 # 31098270057 before failing.
 jobs:
   build:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -74,11 +78,15 @@ jobs:
           path: guard-static.zip
 
   e2e-browser:
+    permissions:
+      contents: read
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -87,7 +95,7 @@ jobs:
 
       - run: npm ci
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
@@ -117,6 +125,10 @@ jobs:
           BASE: http://localhost:4173
 
   pages:
+    permissions:
+      contents: read
+      pages: write # deploy to Pages
+      id-token: write # Pages deploy attestation
     needs: e2e-browser
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -127,6 +139,8 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -150,13 +164,17 @@ jobs:
         uses: actions/deploy-pages@v4
 
   release-zip:
+    permissions:
+      contents: write # create and upload the release
     needs: e2e-browser
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: static-zip
 
@@ -178,6 +196,9 @@ jobs:
           fi
 
   oci:
+    permissions:
+      contents: read
+      packages: write # push to GHCR
     needs: e2e-browser
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -187,8 +208,10 @@ jobs:
         architecture: [amd64, arm64]
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
@@ -214,6 +237,9 @@ jobs:
           tags: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}-${{ matrix.architecture }}
 
   oci-manifest:
+    permissions:
+      contents: read
+      packages: write # push the multi-arch manifest
     needs: oci
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -239,6 +265,9 @@ jobs:
             "${IMAGE}:sha-${SHA}-arm64"
 
   e2e-oci:
+    permissions:
+      contents: read
+      packages: read # pull the image it just published
     needs: oci-manifest
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -284,16 +313,26 @@ jobs:
           echo "All OCI e2e checks passed."
 
   e2e-pages:
+    permissions:
+      contents: read
     needs: pages
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Verify the Pages site is live
+        env:
+          # Read through the environment rather than expanded into the script.
+          # A `${{ }}` inside a `run:` block is pasted in as source text before
+          # any shell sees it, so a value containing a quote would be running as
+          # code (zizmor's template-injection audit). This value is GitHub's own
+          # Pages URL, which makes it defence in depth rather than a live hole -
+          # but the fix costs one line and removes the audit's only real finding.
+          URL: ${{ needs.pages.outputs.page_url }}
         run: |
           set -eu
-          URL="${{ needs.pages.outputs.page_url }}"
           # Pages propagation can lag a few seconds after deploy
-          for i in $(seq 1 10); do
+          # `_`, not `i`: the counter is never read (shellcheck SC2034).
+          for _ in $(seq 1 10); do
             CODE=$(curl -fs -o /dev/null -w '%{http_code}' "$URL" 2>/dev/null || echo "000")
             if [ "$CODE" = "200" ]; then break; fi
             sleep 5

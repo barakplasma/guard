@@ -1,16 +1,12 @@
 /** The shared regression and its minute/hour correction on a touch viewport. */
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync } from 'node:fs';
-import { chromium } from 'playwright';
 import { decodePlan } from '../src/lib/urlState.js';
 import { encodePlan } from '../src/lib/urlState.js';
 import { shortShiftsBlob } from './fixtures/short-shifts.js';
+import { baseUrl as base, captureFailure, launchBrowser, screenshotDirectory, watchErrors } from './e2eHelpers.mjs';
 
-const base = process.env.BASE || 'http://127.0.0.1:4173';
-const shots = process.env.SHOT_DIR || '/tmp/guard-short-shifts-proof';
-mkdirSync(shots, { recursive: true });
-const browser = await chromium.launch({ headless: true,
-  executablePath: process.env.CHROME || (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined) });
+const shots = screenshotDirectory('/tmp/guard-short-shifts-proof');
+const browser = await launchBrowser();
 try {
   const context = await browser.newContext({ viewport: { width: 412, height: 915 },
     isMobile: true, hasTouch: true, locale: 'he-IL', timezoneId: 'Asia/Jerusalem',
@@ -18,7 +14,7 @@ try {
   const page = await context.newPage();
   page.setDefaultTimeout(8000);
   const errors = [];
-  page.on('pageerror', (error) => errors.push(error.message));
+  watchErrors(page, errors);
   // Edits must not turn this historic reproduction into newly frozen history.
   await page.clock.install({ time: new Date('2026-09-15T11:00:00+03:00') });
   await page.goto(`${base}/#/schedule?p=${encodeURIComponent(shortShiftsBlob)}`, { waitUntil: 'networkidle' });
@@ -89,10 +85,7 @@ try {
   assert.deepEqual(errors, []);
   console.log('PASS hourly schedule, hours correction, runtime findings/filters, reproducible report, touch layout');
 } catch (error) {
-  for (const context of browser.contexts()) for (const page of context.pages()) {
-    console.error((await page.locator('body').innerText()).slice(0, 5000));
-    await page.screenshot({ path: `${shots}/failure.png` });
-  }
+  await captureFailure(browser, `${shots}/failure.png`);
   throw error;
 } finally {
   await browser.close();

@@ -1,19 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { plan, WARN } from '../src/lib/planner.js';
-
-const HOUR = 3600 * 1000;
-const MIN = 60 * 1000;
-
-/** Local wall-clock time - shifts are reasoned about in the viewer's timezone. */
-function localTime(y, m, d, h = 0, min = 0) {
-  return new Date(y, m, d, h, min, 0, 0).getTime();
-}
-
-const people = (n) => Array.from({ length: n }, (_, i) => ({
-  id: `e${i + 1}`,
-  name: `Emp${String(i + 1).padStart(2, '0')}`,
-}));
+import { HOUR, localDutyDocument, MINUTE as MIN, localTime, people, runPlan } from './testHelpers.js';
 
 const START = localTime(2026, 0, 5, 8, 0);
 
@@ -22,7 +10,7 @@ const START = localTime(2026, 0, 5, 8, 0);
 test("the worked example: 4 on a remote mission, 6 rotating through a local one", () => {
   const start = START;
   const end = start + 12 * HOUR;
-  const result = plan({
+  const result = runPlan({
     start,
     end,
     shiftMinutes: 60,
@@ -62,7 +50,7 @@ test("the worked example: 4 on a remote mission, 6 rotating through a local one"
 test('local rotation spreads load within one shift length', () => {
   const start = START;
   const end = start + 8 * HOUR;
-  const result = plan({
+  const result = runPlan({
     start,
     end,
     shiftMinutes: 60,
@@ -82,7 +70,7 @@ test('an off-grid qualified callout can reclaim scarce staff from ordinary posts
     tags: index < 2 ? ['driver'] : [],
   }));
   const calloutStart = start + 20 * MIN;
-  const result = plan({
+  const result = runPlan({
     start,
     end: start + 24 * HOUR,
     shiftMinutes: 60,
@@ -111,7 +99,7 @@ test('an off-grid qualified callout can reclaim scarce staff from ordinary posts
 test('gap maximization: nobody repeats until everyone has had a turn', () => {
   const start = START;
   const end = start + 6 * HOUR;
-  const result = plan({
+  const result = runPlan({
     start,
     end,
     shiftMinutes: 60,
@@ -141,7 +129,7 @@ test('local rotation spreads people across missions, not just across time', () =
   // perfectly balanced even though neither ever switches missions.
   const start = START;
   const end = start + 4 * HOUR;
-  const result = plan({
+  const result = runPlan({
     start,
     end,
     shiftMinutes: 60,
@@ -168,7 +156,7 @@ test('local rotation spreads people across missions, not just across time', () =
 test('nobody is ever double-booked across concurrent missions', () => {
   const start = START;
   const end = start + 4 * HOUR;
-  const result = plan({
+  const result = runPlan({
     start,
     end,
     shiftMinutes: 60,
@@ -195,7 +183,7 @@ test('availability windows exclude people from missions they only partly cover',
     { id: 'e1', name: 'Full' },
     { id: 'e2', name: 'Late', start: start + 2 * HOUR },
   ];
-  const result = plan({
+  const result = runPlan({
     start,
     end,
     shiftMinutes: 60,
@@ -211,7 +199,7 @@ test('availability windows exclude people from missions they only partly cover',
 test('a mission that starts mid-slot is clamped, not rounded', () => {
   const start = START;
   const end = start + 3 * HOUR;
-  const result = plan({
+  const result = runPlan({
     start,
     end,
     shiftMinutes: 60,
@@ -238,7 +226,7 @@ test('a mission that starts mid-slot is clamped, not rounded', () => {
 test("one mission's off-grid edge does not fragment an unrelated mission's shifts", () => {
   const start = START;
   const end = start + 2 * HOUR;
-  const result = plan({
+  const result = runPlan({
     start,
     end,
     shiftMinutes: 60,
@@ -258,14 +246,7 @@ test("one mission's off-grid edge does not fragment an unrelated mission's shift
 
 test('understaffing warns and returns a partial plan instead of throwing', () => {
   const start = START;
-  const end = start + 2 * HOUR;
-  const result = plan({
-    start,
-    end,
-    shiftMinutes: 60,
-    employees: people(2),
-    missions: [{ id: 'l', name: 'Busy', type: 'local', start, end, count: 5 }],
-  });
+  const result = runPlan(localDutyDocument(start, { count: 5, name: 'Busy' }));
 
   const short = result.warnings.filter((w) => w.code === WARN.UNDERSTAFFED);
   assert.ok(short.length > 0, 'expected an understaffed warning');
@@ -308,7 +289,7 @@ test('the timeline partitions every employee at every moment', () => {
     ...people(4),
     { id: 'e5', name: 'Partial', start, end: start + 2 * HOUR },
   ];
-  const result = plan({
+  const result = runPlan({
     start,
     end,
     shiftMinutes: 60,
@@ -339,7 +320,7 @@ test('the timeline partitions every employee at every moment', () => {
 test('an unused employee is reported', () => {
   const start = START;
   const end = start + HOUR;
-  const result = plan({
+  const result = runPlan({
     start,
     end,
     shiftMinutes: 60,
@@ -359,24 +340,24 @@ test('validation errors', () => {
     missions: [{ id: 'l', name: 'Gate', type: 'local', count: 1 }],
   };
 
-  assert.throws(() => plan({ ...base, end: base.start }), /end after it starts/);
-  assert.throws(() => plan({ ...base, start: NaN }), /numeric timestamps/);
-  assert.throws(() => plan({ ...base, shiftMinutes: 0 }), /Shift length must be positive/);
-  assert.throws(() => plan({ ...base, employees: [] }), /At least one employee/);
+  assert.throws(() => runPlan({ ...base, end: base.start }), /end after it starts/);
+  assert.throws(() => runPlan({ ...base, start: NaN }), /numeric timestamps/);
+  assert.throws(() => runPlan({ ...base, shiftMinutes: 0 }), /Shift length must be positive/);
+  assert.throws(() => runPlan({ ...base, employees: [] }), /At least one employee/);
   assert.throws(
-    () => plan({ ...base, employees: [{ id: 'a', name: 'X' }, { id: 'b', name: 'X' }] }),
+    () => runPlan({ ...base, employees: [{ id: 'a', name: 'X' }, { id: 'b', name: 'X' }] }),
     /names must be unique/,
   );
   assert.throws(
-    () => plan({ ...base, employees: [{ id: 'a', name: 'X' }, { id: 'a', name: 'Y' }] }),
+    () => runPlan({ ...base, employees: [{ id: 'a', name: 'X' }, { id: 'a', name: 'Y' }] }),
     /ids must be unique/,
   );
   assert.throws(
-    () => plan({ ...base, missions: [{ id: 'l', name: 'Gate', type: 'local', count: 0 }] }),
+    () => runPlan({ ...base, missions: [{ id: 'l', name: 'Gate', type: 'local', count: 0 }] }),
     /at least one person/,
   );
   assert.throws(
-    () => plan({
+    () => runPlan({
       ...base,
       missions: [{
         id: 'l', name: 'Gate', type: 'local', start: base.end, end: base.start, count: 1,

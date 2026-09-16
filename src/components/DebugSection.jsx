@@ -86,6 +86,22 @@ const preSx = {
   overflowY: 'auto',
 };
 
+function CopyDump({ title, text, buttonTestId, textTestId, copy }) {
+  return (
+    <>
+      <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: 'center', mb: 0.5 }}>
+        <Typography variant="caption" color="text.secondary" fontWeight={700} sx={{ flex: 1 }}>
+          {title}
+        </Typography>
+        <Button size="small" onClick={() => copy(text)} data-testid={buttonTestId}>
+          {t.copyPlanData}
+        </Button>
+      </Stack>
+      <Box component="pre" data-testid={textTestId} sx={preSx}>{text}</Box>
+    </>
+  );
+}
+
 /**
  * Warnings plus the two "what did we actually feed/get from the engine" text
  * dumps, collapsed behind one toggle at the bottom of the schedule page. This
@@ -95,6 +111,8 @@ const preSx = {
  */
 export default function DebugSection({ doc, result, onClearPinByWarning, onClearStalePins }) {
   const { copy, toastNode } = useCopyToast();
+  const planText = planToReadableText(doc);
+  const scheduleText = whatsappText(result, { title: doc.title });
 
   return (
     <>
@@ -131,35 +149,13 @@ export default function DebugSection({ doc, result, onClearPinByWarning, onClear
 
           <Divider sx={{ my: 1.25 }} />
 
-          <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: 'center', mb: 0.5 }}>
-            <Typography variant="caption" color="text.secondary" fontWeight={700} sx={{ flex: 1 }}>
-              {t.planDataTitle}
-            </Typography>
-            <Button size="small" onClick={() => copy(planToReadableText(doc))} data-testid="copy-plan-data">
-              {t.copyPlanData}
-            </Button>
-          </Stack>
-          <Box component="pre" data-testid="plan-data-text" sx={preSx}>
-            {planToReadableText(doc)}
-          </Box>
+          <CopyDump title={t.planDataTitle} text={planText} buttonTestId="copy-plan-data"
+            textTestId="plan-data-text" copy={copy} />
 
           <Divider sx={{ my: 1.25 }} />
 
-          <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: 'center', mb: 0.5 }}>
-            <Typography variant="caption" color="text.secondary" fontWeight={700} sx={{ flex: 1 }}>
-              {t.scheduleTextTitle}
-            </Typography>
-            <Button
-              size="small"
-              onClick={() => copy(whatsappText(result, { title: doc.title }))}
-              data-testid="copy-schedule-text"
-            >
-              {t.copyPlanData}
-            </Button>
-          </Stack>
-          <Box component="pre" data-testid="schedule-text" sx={preSx}>
-            {whatsappText(result, { title: doc.title })}
-          </Box>
+          <CopyDump title={t.scheduleTextTitle} text={scheduleText} buttonTestId="copy-schedule-text"
+            textTestId="schedule-text" copy={copy} />
         </Box>
       </AccordionDetails>
     </Accordion>

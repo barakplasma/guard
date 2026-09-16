@@ -1,4 +1,5 @@
 import { formatDate, formatTime } from './format.js';
+import { downloadText } from './download.js';
 
 const HEADERS = ['תאריך', 'שעת התחלה', 'שעת סיום', 'שם השומר', 'שם המשימה', 'סוג', 'שיבוץ ידני'];
 
@@ -40,15 +41,5 @@ export function shiftsToCsv(result, { tags = [], missions = [] } = {}) {
 
 /** Trigger a browser download of `text` as `filename`. */
 export function downloadCsv(text, filename = 'shifts.csv') {
-  const blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  // Revoke on the next tick: revoking synchronously can cancel the download in
-  // some browsers before it has actually started reading the blob.
-  setTimeout(() => URL.revokeObjectURL(url), 0);
+  downloadText(text, filename, 'text/csv;charset=utf-8');
 }

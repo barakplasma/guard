@@ -20,6 +20,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { plan, WARN } from '../src/lib/planner.js';
+import { availabilityPlan, runPlan } from './testHelpers.js';
 
 const localTime = (y, m, d, h = 0, min = 0) => new Date(y, m, d, h, min, 0, 0).getTime();
 const START = localTime(2026, 0, 5, 8, 0);
@@ -80,121 +81,66 @@ test('a pin that loses a seat contest does not evict an unrelated survivor as a 
 /* Defect 2 - same person, same mission, same coverage = one claimant   */
 /* ------------------------------------------------------------------ */
 
-test('a whole-mission pin and a literal-range pin describing the same assignment count as one claimant', () => {
-  const start = START;
-  const end = start + 3 * HOUR;
-  const result = plan({
-    start,
-    end,
-    shiftMinutes: 60,
-    employees: [{ id: 'e1', name: 'A' }, { id: 'e2', name: 'B' }],
-    missions: [{ id: 'm', name: 'M', type: 'remote', start, end, count: 1 }],
-    pins: [
-      { missionId: 'm', employeeId: 'e1' }, // whole-mission pin
-      { missionId: 'm', employeeId: 'e1', start, end }, // literal range == the mission's own window
-    ],
+for (const fixture of [
+  { name: 'whole and literal remote pins', hours: 3, type: 'remote', pins: (start, end) => [
+    { missionId: 'm', employeeId: 'e1' }, { missionId: 'm', employeeId: 'e1', start, end },
+  ] },
+  { name: 'byte-identical frozen pins', hours: 1, type: 'local', pins: (start, end) => {
+    const duplicate = { missionId: 'm', employeeId: 'e1', start, end, frozen: true };
+    return [duplicate, { ...duplicate }];
+  } },
+]) {
+  test(`${fixture.name} count as one claimant`, () => {
+    const start = START;
+    const end = start + fixture.hours * HOUR;
+    const result = runPlan({
+      start,
+      end,
+      employees: [{ id: 'e1', name: 'A' }, { id: 'e2', name: 'B' }],
+      missions: [{ id: 'm', name: 'M', type: fixture.type, start, end, count: 1 }],
+      pins: fixture.pins(start, end),
+    });
+    assert.deepEqual(result.shifts.map((shift) => shift.employeeId), ['e1']);
+    assert.ok(!result.warnings.some(
+      (warning) => warning.code === WARN.PIN_CONFLICT || warning.code === WARN.PIN_OVERFLOW,
+    ));
   });
-
-  const own = result.shifts.filter((s) => s.missionId === 'm');
-  assert.equal(own.length, 1, 'only one seat is consumed');
-  assert.equal(own[0].employeeId, 'e1');
-  assert.ok(
-    !result.warnings.some((w) => w.code === WARN.PIN_CONFLICT),
-    'the two pins describe one mission, not two overlapping ones, so there is no conflict',
-  );
-  assert.ok(
-    !result.warnings.some((w) => w.code === WARN.PIN_OVERFLOW),
-    'the duplicate does not count as a second claimant, so the seat is not overflowed',
-  );
-});
-
-test('a byte-identical duplicate pin is idempotent', () => {
-  const start = START;
-  const end = start + HOUR;
-  const dup = { missionId: 'm', employeeId: 'e1', start, end, frozen: true };
-  const result = plan({
-    start,
-    end,
-    shiftMinutes: 60,
-    employees: [{ id: 'e1', name: 'A' }, { id: 'e2', name: 'B' }],
-    missions: [{ id: 'm', name: 'M', type: 'local', start, end, count: 1 }],
-    pins: [dup, { ...dup }],
-  });
-
-  const own = result.shifts.filter((s) => s.missionId === 'm');
-  assert.equal(own.length, 1, 'the byte-identical duplicate does not consume a second seat');
-  assert.equal(own[0].employeeId, 'e1');
-  assert.ok(!result.warnings.some((w) => w.code === WARN.PIN_OVERFLOW));
-});
+}
 
 /* ------------------------------------------------------------------ */
 /* Defect 3 - an explicit pin outranks a frozen one in a seat contest   */
 /* ------------------------------------------------------------------ */
 
-test('an explicit pin wins a contested seat against a frozen pin - explicit first, frozen second', () => {
-  const start = START;
-  const end = start + HOUR;
-  const result = plan({
-    start,
-    end,
-    shiftMinutes: 60,
-    employees: [{ id: 'e1', name: 'Explicit' }, { id: 'e2', name: 'Frozen' }, { id: 'e3', name: 'C' }],
-    missions: [{ id: 'm', name: 'M', type: 'local', start, end, count: 1 }],
-    pins: [
-      { missionId: 'm', employeeId: 'e1', start, end }, // explicit, written first
-      { missionId: 'm', employeeId: 'e2', start, end, frozen: true }, // frozen, written second
-    ],
+for (const explicitFirst of [true, false]) {
+  test(`an explicit pin beats a frozen pin when written ${explicitFirst ? 'first' : 'second'}`, () => {
+    const start = START;
+    const end = start + HOUR;
+    const explicit = { missionId: 'm', employeeId: 'e1', start, end };
+    const frozen = { missionId: 'm', employeeId: 'e2', start, end, frozen: true };
+    const result = runPlan({
+      start,
+      end,
+      employees: [{ id: 'e1', name: 'Explicit' }, { id: 'e2', name: 'Frozen' }, { id: 'e3', name: 'C' }],
+      missions: [{ id: 'm', name: 'M', type: 'local', start, end, count: 1 }],
+      pins: explicitFirst ? [explicit, frozen] : [frozen, explicit],
+    });
+    const own = result.shifts.filter((shift) => shift.missionId === 'm');
+    assert.deepEqual(own.map((shift) => shift.employeeId), ['e1']);
+    assert.ok(result.warnings.some(
+      (warning) => warning.code === WARN.PIN_OVERFLOW && warning.employeeId === 'e2',
+    ));
   });
-
-  const own = result.shifts.filter((s) => s.missionId === 'm');
-  assert.equal(own.length, 1);
-  assert.equal(own[0].employeeId, 'e1', 'the explicit pin holds the seat');
-  assert.ok(result.warnings.some((w) => w.code === WARN.PIN_OVERFLOW && w.employeeId === 'e2'));
-});
-
-test('an explicit pin wins a contested seat against a frozen pin - frozen first, explicit second', () => {
-  const start = START;
-  const end = start + HOUR;
-  const result = plan({
-    start,
-    end,
-    shiftMinutes: 60,
-    employees: [{ id: 'e1', name: 'Explicit' }, { id: 'e2', name: 'Frozen' }, { id: 'e3', name: 'C' }],
-    missions: [{ id: 'm', name: 'M', type: 'local', start, end, count: 1 }],
-    pins: [
-      { missionId: 'm', employeeId: 'e2', start, end, frozen: true }, // frozen, written first
-      { missionId: 'm', employeeId: 'e1', start, end }, // explicit, written second
-    ],
-  });
-
-  const own = result.shifts.filter((s) => s.missionId === 'm');
-  assert.equal(own.length, 1);
-  assert.equal(
-    own[0].employeeId,
-    'e1',
-    'the explicit pin still wins even though the frozen one arrived first and would have under pure document order',
-  );
-  assert.ok(result.warnings.some((w) => w.code === WARN.PIN_OVERFLOW && w.employeeId === 'e2'));
-});
+}
 
 /* ------------------------------------------------------------------ */
 /* Rule 4 - availability may never veto a manual pin                    */
 /* ------------------------------------------------------------------ */
 
 test('a pin outside the employee\'s availability is honoured, with an informational warning instead of a drop', () => {
-  const start = START;
-  const end = start + 4 * HOUR;
-  const result = plan({
-    start,
-    end,
-    shiftMinutes: 60,
-    employees: [
-      { id: 'e1', name: 'Late', start: start + 2 * HOUR },
-      { id: 'e2', name: 'Full' },
-    ],
-    missions: [{ id: 'l', name: 'Gate', type: 'local', start, end, count: 1 }],
-    pins: [{ missionId: 'l', employeeId: 'e1', start, end: start + HOUR }],
+  const { start, input } = availabilityPlan(START, {
+    hours: 4, employee: { start: START + 2 * HOUR }, missionId: 'l', missionType: 'local', pin: {},
   });
+  const result = runPlan(input);
 
   assert.ok(
     result.warnings.some(
@@ -213,7 +159,7 @@ test('a pin that resolves to zero duration outside the mission window still cann
   const start = START;
   const missionStart = start + HOUR;
   const missionEnd = start + 2 * HOUR;
-  const result = plan({
+  const result = runPlan({
     start,
     end: start + 3 * HOUR,
     shiftMinutes: 60,
@@ -232,19 +178,10 @@ test('a pin that resolves to zero duration outside the mission window still cann
 });
 
 test('auto-assignment still respects availability - only manual pins are input facts', () => {
-  const start = START;
-  const end = start + 4 * HOUR;
-  const result = plan({
-    start,
-    end,
-    shiftMinutes: 60,
-    employees: [
-      { id: 'e1', name: 'Late', start: start + 2 * HOUR },
-      { id: 'e2', name: 'Full' },
-    ],
-    missions: [{ id: 'l', name: 'Gate', type: 'local', start, end, count: 1 }],
-    // No pins at all - every shift here is the engine's own choice.
+  const { start, input } = availabilityPlan(START, {
+    hours: 4, employee: { start: START + 2 * HOUR }, missionId: 'l', missionType: 'local',
   });
+  const result = runPlan(input);
 
   const early = result.shifts.filter((s) => s.start < start + 2 * HOUR);
   assert.ok(early.length > 0, 'sanity: there are slots before e1 becomes available');
@@ -258,57 +195,27 @@ test('auto-assignment still respects availability - only manual pins are input f
 /* Rule 5 - on a contested seat, the newest manual assignment wins      */
 /* ------------------------------------------------------------------ */
 
-test('three explicit pins for a two-seat mission: the two newest win, the oldest overflows - order A', () => {
-  const start = START;
-  const end = start + HOUR;
-  const mission = { id: 'm', name: 'M', type: 'local', start, end, count: 2 };
-  const employees = [{ id: 'e1', name: 'E1' }, { id: 'e2', name: 'E2' }, { id: 'e3', name: 'E3' }];
-
-  const result = plan({
-    start,
-    end,
-    shiftMinutes: 60,
-    employees,
-    missions: [mission],
-    pins: [
-      { missionId: 'm', employeeId: 'e1', start, end }, // oldest
-      { missionId: 'm', employeeId: 'e2', start, end },
-      { missionId: 'm', employeeId: 'e3', start, end }, // newest
-    ],
+for (const [order, expected] of [
+  [['e1', 'e2', 'e3'], ['e2', 'e3']],
+  [['e3', 'e1', 'e2'], ['e1', 'e2']],
+]) {
+  test(`the newest two explicit pins win in order ${order.join(',')}`, () => {
+    const start = START;
+    const end = start + HOUR;
+    const result = runPlan({
+      start,
+      end,
+      employees: ['e1', 'e2', 'e3'].map((id) => ({ id, name: id.toUpperCase() })),
+      missions: [{ id: 'm', name: 'M', type: 'local', start, end, count: 2 }],
+      pins: order.map((employeeId) => ({ missionId: 'm', employeeId, start, end })),
+    });
+    const winners = result.shifts.map((shift) => shift.employeeId).sort();
+    assert.deepEqual(winners, expected);
+    assert.ok(result.warnings.some(
+      (warning) => warning.code === WARN.PIN_OVERFLOW && warning.employeeId === order[0],
+    ));
   });
-
-  const winners = result.shifts.filter((s) => s.missionId === 'm').map((s) => s.employeeId).sort();
-  assert.deepEqual(winners, ['e2', 'e3'], 'the two most recently written pins win the two seats');
-  assert.ok(result.warnings.some((w) => w.code === WARN.PIN_OVERFLOW && w.employeeId === 'e1'));
-});
-
-test('three explicit pins for a two-seat mission: the two newest win, the oldest overflows - order B (reshuffled)', () => {
-  // Same three people, same mission - but now e3 (the winner in order A) is
-  // written FIRST and e1 (the loser in order A) is written LAST. If the rule
-  // were secretly keyed on employee id or original mission position rather
-  // than array order, this would not flip the outcome. It must.
-  const start = START;
-  const end = start + HOUR;
-  const mission = { id: 'm', name: 'M', type: 'local', start, end, count: 2 };
-  const employees = [{ id: 'e1', name: 'E1' }, { id: 'e2', name: 'E2' }, { id: 'e3', name: 'E3' }];
-
-  const result = plan({
-    start,
-    end,
-    shiftMinutes: 60,
-    employees,
-    missions: [mission],
-    pins: [
-      { missionId: 'm', employeeId: 'e3', start, end }, // oldest this time
-      { missionId: 'm', employeeId: 'e1', start, end },
-      { missionId: 'm', employeeId: 'e2', start, end }, // newest this time
-    ],
-  });
-
-  const winners = result.shifts.filter((s) => s.missionId === 'm').map((s) => s.employeeId).sort();
-  assert.deepEqual(winners, ['e1', 'e2'], 'the winners follow document order, not employee identity');
-  assert.ok(result.warnings.some((w) => w.code === WARN.PIN_OVERFLOW && w.employeeId === 'e3'));
-});
+}
 
 /* ------------------------------------------------------------------ */
 /* Determinism                                                          */

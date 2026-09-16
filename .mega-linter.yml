@@ -1,0 +1,57 @@
+# MegaLinter, JavaScript flavor.
+#
+# The workflow (.github/workflows/ci.yml) runs the flavor whole and marks the
+# whole run advisory with DISABLE_ERRORS; what it does *not* run is configured
+# here, and every exclusion below has a reason rather than a shrug.
+#
+# Nothing in this file takes effect if the workflow sets the same key as an env
+# variable: an env variable replaces the file's value instead of adding to it.
+# That is why DISABLE_LINTERS lives here and nowhere else.
+
+# Let zizmor authenticate when it resolves action references. The workflow token
+# remains scoped by the job's explicit permissions.
+ACTION_ZIZMOR_UNSECURED_ENV_VARIABLES:
+  - GITHUB_TOKEN
+
+# Findings already appear in the check summary. Keeping the reporter off avoids
+# granting issue and pull-request write access just to duplicate that output.
+GITHUB_COMMENT_REPORTER: false
+
+DISABLE_LINTERS:
+  # Spell-checking is off permanently. This app is Hebrew-only and the codebase
+  # is full of protocol tokens and domain shorthand, so cspell's 140 findings
+  # were: Hebrew words (סידור, משמרות, שיבוץ), iCalendar keywords (DTSTART,
+  # DTEND, VEVENT, VCALENDAR, DTSTAMP), British spellings (behaviour, neighbour,
+  # unrecognised) and deliberate identifiers (emps, sleepable, hintable). Not one
+  # was a typo. A dictionary that has to list every Hebrew noun in the product is
+  # a maintenance job wearing a quality gate's clothes.
+  - SPELL_CSPELL
+
+  # `standard` enforces a style this repository does not use - it wants no
+  # semicolons, and every file here has them. With APPLY_FIXES it does not
+  # report that, it *rewrites*: one run reformatted 20 source files and
+  # committed them, and its single actual error was `self` and `caches` being
+  # undefined in a service worker, which is what a service worker is. Linting
+  # JavaScript here is oxlint's job (`npm run lint`,
+  # .oxlintrc.json), which already gates every pull request in the `check` job
+  # and carries three documented rule exceptions. Two linters with different
+  # opinions about the same files end with the louder one winning.
+  - JAVASCRIPT_STANDARD
+
+# Kept named even though DISABLE_ERRORS already makes the whole run advisory:
+# these three are advisory *by nature* - a style opinion, a duplication
+# heuristic, a link that was reachable yesterday - so they should stay
+# non-blocking even if the run is ever made to gate again.
+DISABLE_ERRORS_LINTERS:
+  - COPYPASTE_JSCPD
+  - MARKDOWN_MARKDOWNLINT
+  - SPELL_LYCHEE
+
+# The golden assignment fixtures are written by scripts/writeGoldens.mjs, and
+# reformatting them is the one thing CLAUDE.md says must never happen casually:
+# under APPLY_FIXES the job commits what it rewrites, so any pull request that
+# legitimately touches a golden would come back with all four of them reflowed
+# and the real diff buried. prettier wants to rewrite every one of them today.
+# Every other JSON file in the repo is already prettier-clean, so it keeps the
+# rest.
+JSON_PRETTIER_FILTER_REGEX_EXCLUDE: (tests/fixtures/)

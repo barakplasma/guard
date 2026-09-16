@@ -1,5 +1,5 @@
 import { TextField } from '@mui/material';
-import { fromLocalDateTimeInput, toLocalDateTimeInput } from '../lib/localInput.js';
+import { commitTemporalInput, fromLocalDateTimeInput, toLocalDateTimeInput } from '../lib/localInput.js';
 
 /**
  * A date and time, as the platform's own field.
@@ -23,14 +23,10 @@ export default function DateTimeField({
       size="small"
       label={label}
       value={toLocalDateTimeInput(value)}
-      onChange={(event) => {
-        const next = fromLocalDateTimeInput(event.target.value);
-        // A half-filled field reads as an empty string. Only a field that may
-        // be empty takes that as "cleared"; a required one keeps what it had
-        // rather than tearing a bound out of the document mid-edit.
-        if (next != null) onChange(next);
-        else if (nullable && event.target.value === '') onChange(null);
-      }}
+      // A half-filled field reads as empty. Required fields retain their value.
+      onChange={(event) => commitTemporalInput(
+        event.target.value, fromLocalDateTimeInput, nullable, onChange,
+      )}
       slotProps={{
         // A native date input always shows its own placeholder, so the label
         // has to sit above it or the two overlap.

@@ -3,6 +3,9 @@ name: CI
 on:
   pull_request:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -16,16 +19,31 @@ jobs:
       contents: write
     steps:
       - name: Checkout code
+        # zizmor: ignore[artipacked]
+        # This is the one checkout that must keep its credentials: the
+        # auto-commit step below pushes MegaLinter's fixes back to the PR
+        # branch with them. Every other checkout in this repo sets
+        # persist-credentials: false.
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Run MegaLinter
         id: megalinter
         uses: oxsecurity/megalinter/flavors/javascript@v10
+        # Advisory, never blocking: DISABLE_ERRORS reports every finding in the
+        # job summary and still exits 0. What gates a pull request is the
+        # `check` job below - oxlint, the scheduler tests and the build. The
+        # baseline this branch establishes is worth keeping clean, but a link
+        # that was reachable yesterday or a new rule in a linter this repo does
+        # not otherwise run should not hold a merge.
+        #
+        # Which linters run is configured in .mega-linter.yml, not here: a
+        # MegaLinter env variable *replaces* the file's value rather than adding
+        # to it, so a DISABLE_LINTERS on this step would silently discard every
+        # entry in that file.
         env:
           APPLY_FIXES: all
-          DISABLE_LINTERS: ACTION_ZIZMOR
-          ENABLE: ACTION,JAVASCRIPT,JSON,JSX,TSX,TYPESCRIPT,YAML
+          DISABLE_ERRORS: true
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_COMMENT_REPORTER: false
           VALIDATE_ALL_CODEBASE: false
@@ -39,12 +57,16 @@ jobs:
           commit_message: "[MegaLinter] Apply automatic fixes"
 
   check:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     # An explicit timeout on every job: the default is 360 minutes, so one hung
     # step would hold the concurrency group - and every later run - for hours.
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -77,11 +99,15 @@ jobs:
   # last one shipped red: release.yml ran these after the merge, which is too
   # late to keep main green.
   e2e-browser:
+    permissions:
+      contents: read
     needs: check
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -90,7 +116,7 @@ jobs:
 
       - run: npm ci
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
