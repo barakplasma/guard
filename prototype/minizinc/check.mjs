@@ -1,7 +1,7 @@
 /**
  * Run the MiniZinc ladder against the brute-force oracle on random instances.
  *
- *   node check.mjs [count] [firstSeed]
+ *   node check.mjs [count] [firstSeed] [solver]
  *
  * Reports the first disagreement with its seed, so it can be replayed. Needs a
  * `minizinc` binary on PATH; see ADR 011 for what is being measured and why.
@@ -12,6 +12,7 @@ import { bruteForce, randomInstance, score, violations } from './oracle.mjs';
 
 const count = Number(process.argv[2] ?? 200);
 const first = Number(process.argv[3] ?? 1);
+const solver = process.argv[4] ?? 'highs';
 
 let checked = 0;
 let unsat = 0;
@@ -20,7 +21,7 @@ const started = Date.now();
 for (let seed = first; seed < first + count; seed++) {
   const inst = randomInstance(seed);
   const truth = bruteForce(inst);
-  const got = solveRota(inst);
+  const got = solveRota(inst, { solver });
 
   if (!truth) {
     // The oracle found nothing feasible, so the solver must agree.
@@ -65,4 +66,4 @@ for (let seed = first; seed < first + count; seed++) {
 }
 
 const secs = (Date.now() - started) / 1000;
-console.log(`${checked} instances agreed with the oracle (${unsat} infeasible) in ${secs.toFixed(1)}s`);
+console.log(`${checked} instances agreed with the oracle (${unsat} infeasible) via ${solver} in ${secs.toFixed(1)}s`);

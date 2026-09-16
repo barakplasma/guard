@@ -1,9 +1,29 @@
-# ADR 011: MiniZinc with Chuffed, as the one production scheduling engine
+# ADR 011: MiniZinc as the one production scheduling engine
 
 - Status: **Accepted, provisionally** - the owner's words were "go with MiniZinc
   for now", so this is a working choice rather than a closed one. Depends on
   ADR 009. Addresses ADR 008's defect 3. Sized by ADR 012, re-rated by ADR 013.
-- Date: 2026-09-15
+- Date: 2026-09-15, backend amended 2026-09-16
+
+## Amendment: the backend is HiGHS, not Chuffed
+
+This record originally said "MiniZinc **with Chuffed**, selected explicitly".
+The prototype measured that and it is wrong. Chuffed proves this model's optimum
+up to roughly a four-hour horizon and then stops proving anything at all, while
+HiGHS - **in the same WebAssembly bundle** - proves a fully covered, churn-free,
+perfectly balanced 72-hour schedule in under eight seconds. The measurement is
+below under "How far the model goes".
+
+Nothing else in the decision moves. MiniZinc is still the choice, for the
+ownership reasons set out below; what changed is which backend inside it gets
+selected, and the argument for selecting one *explicitly* rather than taking a
+default is unaffected and now better evidenced.
+
+The original text is left in place rather than rewritten, because the reasoning
+that picked Chuffed is worth reading next to the measurement that overturned it.
+It picked a technology - lazy clause generation - on a comparison with Pumpkin,
+and never asked which backend suited *this* model. That question could only be
+answered by writing the model.
 
 ## Provenance
 
@@ -21,9 +41,11 @@ so the trade can be judged rather than inherited.
 
 ## Decision
 
-**MiniZinc's JavaScript API with Chuffed, selected explicitly, as the single
+**MiniZinc's JavaScript API, with one backend selected explicitly, as the single
 production scheduling engine.** Not Pumpkin, and not a production solver plus a
 separate oracle or fallback.
+
+*(The backend named here was Chuffed. It is HiGHS - see the amendment above.)*
 
 ### Priority order
 
@@ -157,6 +179,9 @@ window is bounded (ADR 012).
 6. improve uninterrupted rest and mission rotation;
 7. prefer distinct people for qualifications where feasible.
 
+The prototype implements 1, 2 and 5, plus the crew-churn term this list did not
+have (see below). Levels 3, 4, 6 and 7 are unwritten.
+
 **Avoid a single weighted sum.** A weighted objective can silently trade
 correctness for fairness, which inverts the priority order above.
 
@@ -234,6 +259,65 @@ that split is expected to survive into anything shipped.
 `vsEngine.mjs` correspondingly solves one instant at a time, which is exact only
 because that fuzz has no rest rules and no availability windows. It is not a
 statement about a 72-hour horizon.
+
+### How far the model goes, and on which backend
+
+The fixture is `scripts/midScheduleCallout.mjs`'s roster - eight guards of whom
+two drive, a gate wanting three, a patrol wanting two, and a callout needing
+both drivers inserted twenty minutes past the hour - stretched to each horizon.
+`proved` is one character per lexicographic level, and an unproven level is not
+a result: the ladder passes each optimum down as a cap, so an unproven one
+poisons every level below it.
+
+```
+solver: highs                                  solver: chuffed
+horizon segments elapsed proved imbalance      horizon segments elapsed proved imbalance
+     2h        3   712ms   yyyy         2           2h        3   356ms   yyyy         2
+     4h        6  2040ms   yyyy         1           4h        6  7213ms   yyyy         1
+     6h        8  1491ms   yyyy         1           6h        8 20550ms   yyyn         1
+    12h       14  2518ms   yyyy         1          12h       14 22241ms   yyyn         2
+    24h       26  2923ms   yyyy         0          24h       26 35867ms   yyyn         7
+    48h       50  3825ms   yyyy         0
+    72h       74  7819ms   yyyy         0
+```
+
+Every row is `unmet=0 unfilled=0 churn=0`; imbalance is the column that
+separates them, and with eight guards against five seats a 0 or 1 is reachable
+at every length.
+
+**CBC and CP-SAT behave like HiGHS** - 72 hours in 6.5s and 7.8s, both proved,
+both imbalance 0. So this is not a HiGHS trick, and not a tuning problem either.
+The fairness level is a bound on a sum over every assignment, which a linear
+relaxation hands over for free and lazy clause generation has to search for.
+
+It costs nothing to act on. The `minizinc` package's own build script fetches
+`gecode cbc chuffed highs` for `wasm32-emscripten`, read from the published
+tarball, so HiGHS is already inside the browser bundle this record committed to.
+CP-SAT is not, and is not needed.
+
+### Three things the model needed that no amount of reading would have found
+
+Worth recording because each cost real time and none is visible in the finished
+model:
+
+- **Every objective needs its floor declared.** `unfilledSeats` is a sum of
+  `want - sum(x)` terms, each non-negative only because of the headcount
+  constraint - which MiniZinc does not fold into the expression's inferred
+  bounds. Left as `var int`, the solver found the optimum in milliseconds and
+  then spent minutes failing to prove nothing beat it, because as far as its
+  bounds went a negative total was still on the table.
+- **Identical guards need their symmetry broken.** Six interchangeable guards
+  are 720 identical schedules, all of which get walked to prove nothing better
+  exists. The driver derives the classes from the instance rather than asking
+  the caller for them, since a caller that got it wrong would prune real
+  solutions.
+- **The search order has to be handed over (`-f`).** Chuffed's default fixed
+  order returned `UNKNOWN` - no solution at all - in thirty seconds where free
+  search proved the optimum in under one.
+
+None of these is a MiniZinc complaint. They are the ordinary craft of the tool,
+and they are the part that does not transfer to a hand-written alternative,
+which is worth knowing before choosing one.
 
 ### What the timings do not say
 

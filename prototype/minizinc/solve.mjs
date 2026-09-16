@@ -29,11 +29,44 @@ const bool = (b) => (b ? 'true' : 'false');
  * @property {number} nS
  * @property {number[][]} want      seats per [mission][segment], 0 = not running
  * @property {number[][]} slotOf    grid slot id per [mission][segment]
+ * @property {number[][]} holdOf    indivisible-hold group id, 0 = none
  * @property {boolean[][]} avail    [employee][segment]
  * @property {boolean[][]} allowed  [employee][mission]
  * @property {boolean[][][]} pinned [employee][mission][segment]
  * @property {{mission:number,count:number,holds:boolean[]}[]} requires 0-based mission
  */
+
+/**
+ * Interchangeable employees, as a class id each.
+ *
+ * Derived here rather than taken from the caller: it is a property of the
+ * instance, and a caller that got it wrong would silently prune real solutions.
+ * Two employees are interchangeable when nothing in the instance distinguishes
+ * them - same availability, same exclusions, same qualifications, and neither
+ * pinned anywhere, since a pin names a person.
+ */
+function symClasses(inst) {
+  const key = (e) => (inst.pinned[e].some((row) => row.some(Boolean))
+    ? `pinned:${e}`
+    : [
+      inst.avail[e].map(Number).join(''),
+      inst.allowed[e].map(Number).join(''),
+      inst.requires.map((r) => Number(r.holds[e])).join(''),
+    ].join('|'));
+  const ids = new Map();
+  const seen = new Map();
+  for (let e = 0; e < inst.nE; e++) {
+    const k = key(e);
+    seen.set(k, (seen.get(k) ?? 0) + 1);
+  }
+  let next = 1;
+  return Array.from({ length: inst.nE }, (_, e) => {
+    const k = key(e);
+    if (seen.get(k) < 2) return 0;
+    if (!ids.has(k)) ids.set(k, next++);
+    return ids.get(k);
+  });
+}
 
 /** MiniZinc data for an instance. Indices are 1-based on the model's side. */
 export function toDzn(inst, { level, capUnmet, capUnfilled, capChurn }) {
@@ -51,6 +84,7 @@ export function toDzn(inst, { level, capUnmet, capUnfilled, capChurn }) {
     `nS = ${nS};`,
     `want = array2d(1..${nM}, 1..${nS}, [${inst.want.flat().join(', ')}]);`,
     `slotOf = array2d(1..${nM}, 1..${nS}, [${inst.slotOf.flat().join(', ')}]);`,
+    `holdOf = array2d(1..${nM}, 1..${nS}, [${inst.holdOf.flat().join(', ')}]);`,
     `avail = array2d(1..${nE}, 1..${nS}, [${inst.avail.flat().map(bool).join(', ')}]);`,
     `allowed = array2d(1..${nE}, 1..${nM}, [${inst.allowed.flat().map(bool).join(', ')}]);`,
     `pinned = array3d(1..${nE}, 1..${nM}, 1..${nS}, [${flatPinned.join(', ')}]);`,
@@ -66,6 +100,7 @@ export function toDzn(inst, { level, capUnmet, capUnfilled, capChurn }) {
     `capUnmet = ${capUnmet};`,
     `capUnfilled = ${capUnfilled};`,
     `capChurn = ${capChurn};`,
+    `symClass = [${symClasses(inst).join(', ')}];`,
     '',
   ].join('\n');
 }
@@ -108,7 +143,13 @@ function runOnce(inst, level, caps, { solver, timeLimitMs, mzn }) {
   try {
     const data = join(dir, 'inst.dzn');
     writeFileSync(data, toDzn(inst, { level, ...caps }));
-    const args = ['--solver', solver, '--output-mode', 'item'];
+    // `-f` hands the search over to the solver's own heuristics instead of the
+    // model's declaration order. Not a micro-optimisation: on the callout
+    // fixture Chuffed's default fixed order returned UNKNOWN - no solution at
+    // all - in thirty seconds on the churn level, and free search proved the
+    // optimum in well under one. Optimality proofs stay proofs either way; the
+    // driver checks for them separately.
+    const args = ['--solver', solver, '--output-mode', 'item', '-f'];
     if (timeLimitMs) args.push('--time-limit', String(timeLimitMs));
     args.push(mzn, data);
     const out = execFileSync('minizinc', args, { encoding: 'utf8', maxBuffer: 64 << 20 });
@@ -128,7 +169,12 @@ function runOnce(inst, level, caps, { solver, timeLimitMs, mzn }) {
  * means contradictory pins, since every soft goal is a slack term.
  */
 export function solveRota(inst, opts = {}) {
-  const cfg = { solver: 'chuffed', timeLimitMs: 0, mzn: MODEL, ...opts };
+  // HiGHS rather than Chuffed, on measurement - see `scaling.mjs` and ADR 011.
+  // Chuffed proves this model's optimum up to about a four-hour horizon and
+  // then stops proving anything, which is not a tuning problem: the fairness
+  // level is a bound on a sum over every assignment, and a MIP relaxation gives
+  // that away for free where lazy clause generation has to search for it.
+  const cfg = { solver: 'highs', timeLimitMs: 0, mzn: MODEL, ...opts };
   let caps = { capUnmet: -1, capUnfilled: -1, capChurn: -1 };
   let best = null;
   const levels = [];

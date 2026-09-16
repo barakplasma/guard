@@ -141,7 +141,14 @@ function stretches(nightWindows, planStart, planEnd) {
 }
 
 /** How many people a mission needs at `t`, which on a local mission can differ by night. */
-function countAt(mission, t, nightWindows) {
+/**
+ * A mission's headcount at an instant: `nightCount` inside a night stretch,
+ * `count` otherwise. Exported for the same reason `segmentGrid` is - a caller
+ * building the engine's demand from outside must not re-derive this rule, and
+ * `nightCount` resolving to `count` when unset is `normalizeMissions`'s doing,
+ * so it takes a *normalized* mission.
+ */
+export function countAt(mission, t, nightWindows) {
   return isNight(t, nightWindows) ? mission.nightCount : mission.count;
 }
 
@@ -677,20 +684,40 @@ function makeGrid({ start, end, shiftMinutes, emps, miss, goodPins, nightWindows
  * with the engine about what a shift *is*, which is a defect nobody would find
  * by reading either side on its own.
  *
- * Warnings raised while normalizing are discarded: this answers a structural
- * question, and `plan()` is where findings belong.
  */
-export function segmentGrid({
-  start, end, shiftMinutes, employees = [], missions = [], pins = [], nightWindows = [],
+export function segmentGrid(input) {
+  const { start, end, shiftMinutes, nightWindows = [] } = input;
+  const { emps, miss, goodPins } = prepare(input);
+  const { segmentsOf } = makeGrid({ start, end, shiftMinutes, emps, miss, goodPins, nightWindows });
+  return miss.map((mission) => ({ mission, segments: segmentsOf(mission) }));
+}
+
+/**
+ * The pins `plan()` would accept for this input, normalized: resolved against
+ * their mission's window, clipped, and with the conflicting or unusable ones
+ * already dropped.
+ *
+ * Same argument as `segmentGrid`. A caller reading raw `pins` off the document
+ * sees assignments the engine has rejected, and matching them by literal range
+ * rather than by coverage is the mistake this codebase has made twice.
+ */
+export function acceptedPins(input) {
+  return prepare(input).goodPins;
+}
+
+/** Normalization shared by `segmentGrid` and `acceptedPins`. */
+function prepare({
+  start, end, employees = [], missions = [], pins = [], nightWindows = [],
 }) {
+  // Warnings raised here are discarded: these answer structural questions, and
+  // `plan()` is where findings belong.
   const warnings = [];
   const emps = normalizeEmployees(employees, start, end, warnings);
   const miss = normalizeMissions(missions, start, end, warnings);
   const employeeById = new Map(emps.map((e) => [e.id, e]));
   const missionById = new Map(miss.map((m) => [m.id, m]));
   const goodPins = normalizePins(pins, employeeById, missionById, start, end, warnings, nightWindows);
-  const { segmentsOf } = makeGrid({ start, end, shiftMinutes, emps, miss, goodPins, nightWindows });
-  return miss.map((mission) => ({ mission, segments: segmentsOf(mission) }));
+  return { emps, miss, goodPins };
 }
 
 function planOnce({

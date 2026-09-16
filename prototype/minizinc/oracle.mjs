@@ -39,6 +39,16 @@ export function violations(inst, x) {
       if (on > inst.want[m][s]) bad.push(`m${m}/s${s} holds ${on} of ${inst.want[m][s]}`);
     }
   }
+  for (let e = 0; e < nE; e++) {
+    for (let m = 0; m < nM; m++) {
+      for (let s = 1; s < nS; s++) {
+        const h = inst.holdOf[m][s];
+        if (h > 0 && h === inst.holdOf[m][s - 1] && x[e][m][s] !== x[e][m][s - 1]) {
+          bad.push(`e${e} changed hands inside hold ${h} on m${m}`);
+        }
+      }
+    }
+  }
   return bad;
 }
 
@@ -153,6 +163,12 @@ export function randomInstance(seed) {
   // Segments grouped into slots, so some instances carry a slot torn in two and
   // the churn term has something to say. A fresh slot number per segment, with
   // an even chance of continuing the previous one.
+  // Roughly a third of missions are an indivisible hold - a remote mission, or
+  // one occurrence of a daily one.
+  inst.holdOf = Array.from({ length: nM }, () => {
+    const whole = r() < 0.33;
+    return Array.from({ length: nS }, () => (whole ? 1 : 0));
+  });
   inst.slotOf = Array.from({ length: nM }, () => {
     const out = [];
     let slot = 0;

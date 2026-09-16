@@ -17,7 +17,7 @@ pending implementation plans.
 | [008](08-history-and-staffing-bugs.md) | Three defects to fix regardless of any refactor. *(Proposed)* |
 | [009](09-timeline-split.md) | Log the past, schedule only the future. *(Partly implemented)* |
 | [010](10-plan-storage.md) | The plan stays in the URL, where it already is. *(Accepted)* |
-| [011](11-solver-selection.md) | MiniZinc with Chuffed as the one engine. *(Accepted, provisionally)* |
+| [011](11-solver-selection.md) | MiniZinc as the one engine, on HiGHS. *(Accepted, provisionally)* |
 | [012](12-planning-horizon.md) | Plan 72 hours at a time, rolled forward. *(Proposed)* |
 | [013](13-replanning-under-churn.md) | Continuous re-planning is the operating model. *(Proposed)* |
 | [014](14-exclusions-and-flexibility.md) | Exclude individuals; keep scarce people free. *(First half implemented)* |
@@ -42,15 +42,16 @@ be taken or left on its own:
   because the app uses `HashRouter`. **Nothing to build.** The correction is in
   the record, along with what the real ceiling is and why local-first stays
   dormant.
-- **011** is the solver question that started all of this. **MiniZinc with
-  Chuffed**, selected explicitly, as the single production engine - accepted
-  "for now", on ownership and failure surface rather than solving technology.
-  It carries the model's lexicographic objective order, the acceptance criteria
-  a prototype must meet, and what would justify revisiting the choice. The
-  prototype now exists in `prototype/minizinc/` and has closed one of those
-  criteria: it agrees with a brute-force oracle over 420 random instances, and
-  finds a full crew on 2.8% of the instants the shipped engine calls short -
-  independently reproducing `offGridFuzz.mjs`'s figure for that class.
+- **011** is the solver question that started all of this. **MiniZinc**,
+  accepted "for now", on ownership and failure surface rather than solving
+  technology. The prototype now exists in `prototype/minizinc/` and has already
+  corrected the record twice. It agrees with a brute-force oracle over 420
+  random instances and finds a full crew on 2.8% of the instants the shipped
+  engine calls short, independently reproducing `offGridFuzz.mjs`'s figure -
+  and it showed that **Chuffed, which this ADR named explicitly, is the wrong
+  backend**: it stops proving optimality past a four-hour horizon, where HiGHS
+  in the same WebAssembly bundle proves a perfectly balanced 72-hour schedule in
+  under eight seconds.
 - **012** records the 72-hour horizon and what it does to the others: it settles
   010 (the fragment is enough, local-first is not needed), sizes 011 at 648
   assignments, and raises 008's second defect to the main path because rolling
@@ -83,11 +84,16 @@ Suggested order, updated now that 009's core rule has landed:
    without saying so, or that quietly loses an accepted pin. Rest-score
    correctness, fairness optimality and false UNSAT still need an oracle rather
    than an invariant.
-4. **011's adapter** is what is now in front. The prototype takes an abstract
-   segment grid; nothing yet turns a plan document into one and the answer back
-   into rows. Until that exists the browser-bundle criteria cannot be measured
-   at all, and the timings the prototype reports are measurement cost rather
-   than anything the app would pay.
+4. ~~011's adapter~~ - **done** (`prototype/minizinc/fromPlan.mjs`), which is
+   what made the horizon measurement possible. It imports `segmentGrid`,
+   `acceptedPins` and `countAt` from the engine rather than re-deriving any of
+   them.
+5. **011's browser path** is what is now in front, and it is the last acceptance
+   criterion nothing has touched. Everything measured so far spawns a native
+   binary; shipping means a WebAssembly worker, assets the service worker has to
+   cache, and a phone. The model's remaining levels - history, rest, rotation
+   turn counting - are the other half, and are modelling work rather than
+   measurement.
 
 ## Verification
 
