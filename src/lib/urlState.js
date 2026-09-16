@@ -61,7 +61,13 @@ export function encodePlan(doc) {
     st: doc.strategy,
     ns: doc.nightStart,
     ne: doc.nightEnd,
-    emp: doc.employees.map((x) => trimTail([x.id, x.name, outTs(x.start), outTs(x.end), x.tags ?? []], 4)),
+    // Positions 5 and 6 are carried duty (ADR 006's table, ADR 015). Written
+    // only when non-zero, so an employee who has carried nothing encodes to
+    // exactly the bytes they always did.
+    emp: doc.employees.map((x) => trimTail([
+      x.id, x.name, outTs(x.start), outTs(x.end), x.tags ?? [],
+      x.carriedMinutes || null, x.carriedStints || null,
+    ], 4)),
     // Everything past `count` is *appended* to the mission tuple. Field order
     // is the wire format here, so appending is safe and reordering is not: an
     // older link simply has no seventh element and reads back as `null`, i.e.
@@ -120,8 +126,10 @@ export function decodePlan(blob) {
       nightStart: raw.ns ?? undefined,
       nightEnd: raw.ne ?? undefined,
       tags: (raw.tg ?? []).map(([id, name, minNightRestMinutes]) => ({ id, name, minNightRestMinutes })),
-      employees: (raw.emp ?? []).map(([id, name, s, e, tags]) => ({
+      employees: (raw.emp ?? []).map(([id, name, s, e, tags, carriedMinutes, carriedStints]) => ({
         id, name, start: inTs(s), end: inTs(e), tags,
+        carriedMinutes: carriedMinutes ?? 0,
+        carriedStints: carriedStints ?? 0,
       })),
       missions: (raw.mis ?? []).map((
         [id, name, type, s, e, count, nightCount, shiftMinutes, nightShiftMinutes, dayStart, dayEnd, requires, excludes, onCall, excludeEmployees],

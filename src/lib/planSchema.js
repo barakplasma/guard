@@ -21,6 +21,17 @@ export const employeeSchema = z.object({
   name: z.string().max(80),
   start: ts.nullable().default(null),
   end: ts.nullable().default(null),
+  // Duty already stood, outside whatever period the document now covers
+  // (ADR 015). The rota is planned 72 hours at a time and rolled forward, and
+  // the engine evens out the window it is given - so once an hour falls behind
+  // the window it stops counting, and a guard who came back from two days away
+  // stays permanently behind while the app reports a perfectly even spread.
+  // This is the one number that has to survive the roll. A summary rather than
+  // the shifts themselves, so it costs a few bytes per person and outlives the
+  // export that clears them.
+  carriedMinutes: z.number().int().min(0).default(0),
+  // The same, in the unit `rotation` counts: shifts stood, not hours.
+  carriedStints: z.number().int().min(0).default(0),
 });
 
 /** Minutes past midnight, the unit both night boundaries are written in. */
@@ -254,6 +265,8 @@ export function toPlannerInput(doc, now) {
       tags: e.tags ?? [],
       start: e.start ?? undefined,
       end: e.end ?? undefined,
+      carriedMinutes: e.carriedMinutes ?? 0,
+      carriedStints: e.carriedStints ?? 0,
     })),
     missions: doc.missions.map((m) => ({
       id: m.id,

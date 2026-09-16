@@ -105,7 +105,10 @@ function ringKeys(st, ctx) {
     else slots.add(iv.slotStart);
     if (iv.end > lastEnd) lastEnd = iv.end;
   }
-  return { turns: slots.size + remotes, lastEnd };
+  // Turns already taken outside this period ride along with the ones inside it
+  // (ADR 015): `rotation` counts shifts rather than hours, so carrying minutes
+  // would say nothing here and carrying turns says exactly the right thing.
+  return { turns: slots.size + remotes + (st.carriedStints ?? 0), lastEnd };
 }
 
 /** Daily fairness counts completed occurrences, never future pins or hours. */

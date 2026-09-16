@@ -278,7 +278,46 @@ function isStale(doc, pin) {
  */
 export function clearStalePins(doc) {
   const pins = doc.pins.filter((p) => !isStale(doc, p));
-  return pins.length === doc.pins.length ? doc : { ...doc, pins };
+  if (pins.length === doc.pins.length) return doc;
+  return { ...doc, pins, employees: carryForward(doc, doc.pins.filter((p) => isStale(doc, p))) };
+}
+
+/**
+ * Roll the duty that is being removed into each guard's carried totals
+ * (ADR 015).
+ *
+ * The export bounds the document; this keeps the one number the engine still
+ * needs out of what the export takes away. Without it, clearing residue also
+ * clears the evidence that one guard has stood twice as many hours as another,
+ * and the next window starts everyone level - with the app reporting a
+ * perfectly even spread over a debt it can no longer see.
+ *
+ * This is a change of **representation, not of schedule**. `plan()` already
+ * counts these same pins towards the same totals, so the sum is identical
+ * before and after and no shift moves - which is the button's whole safety
+ * argument and what `tests/pins.test.js` asserts. The arithmetic below
+ * deliberately mirrors the engine's, including the stint approximation: an
+ * out-of-period pin has no grid to name a slot on any more, so a turn is one
+ * plan shift length, at least one.
+ */
+function carryForward(doc, removed) {
+  const slot = Math.max(1, doc.shiftMinutes) * 60 * 1000;
+  const minutes = new Map();
+  const stints = new Map();
+  for (const pin of removed) {
+    const { start, end } = pinRange(doc, pin);
+    if (!(end > start)) continue;
+    minutes.set(pin.employeeId, (minutes.get(pin.employeeId) ?? 0) + (end - start));
+    stints.set(pin.employeeId, (stints.get(pin.employeeId) ?? 0) + Math.max(1, Math.round((end - start) / slot)));
+  }
+  if (minutes.size === 0) return doc.employees;
+  return doc.employees.map((e) => (minutes.has(e.id)
+    ? {
+      ...e,
+      carriedMinutes: (e.carriedMinutes ?? 0) + Math.round(minutes.get(e.id) / 60000),
+      carriedStints: (e.carriedStints ?? 0) + stints.get(e.id),
+    }
+    : e));
 }
 
 /** How many pins `clearStalePins` would remove. */

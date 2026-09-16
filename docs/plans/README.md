@@ -21,6 +21,7 @@ pending implementation plans.
 | [012](12-planning-horizon.md) | Plan 72 hours at a time, rolled forward. *(Proposed)* |
 | [013](13-replanning-under-churn.md) | Continuous re-planning is the operating model. *(Proposed)* |
 | [014](14-exclusions-and-flexibility.md) | Exclude individuals; keep scarce people free. *(First half implemented)* |
+| [015](15-fairness-across-rolls.md) | Duty does not stop counting when the window rolls past it. *(Implemented)* |
 
 Each record states the context, decision, consequences, rejected alternatives,
 and implementation or test evidence. Acceptance dates record this design, not a
@@ -62,6 +63,14 @@ be taken or left on its own:
 - **013** records that the rota is re-solved continuously against a moving
   present, not planned once. That re-rated 008's third defect from rare to the
   main path, which #40 then addressed for the reported shape.
+- **015** is the one the prototype work turned up by accident. The rota is
+  planned 72 hours at a time and rolled forward, and the engine evens out the
+  window it is given - so an hour stopped counting the moment it fell behind the
+  window. A guard away for two days came back permanently 36 hours behind, and
+  the app reported a spread of **0.0h** at every roll while it happened.
+  **Implemented:** duty outside the period counts, from the pins themselves and
+  from a per-person carried total that survives ADR 012's export. The gap now
+  closes in four rolls and stays closed.
 - **014** adds per-person exclusions - **implemented**, at wire position 14,
   with one shared `isExcluded` predicate replacing five copies of the tag check
   - and the softer rule that scarce qualifications should be kept uncommitted so

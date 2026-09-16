@@ -198,7 +198,11 @@ function normalizeEmployees(employees, planStart, planEnd, warnings) {
       warnings.push({ code: WARN.EMPLOYEE_WINDOW_OUTSIDE_PLAN, employeeId: e.id });
       continue;
     }
-    out.push({ id: e.id, name: e.name, tags: e.tags ?? [], start, end });
+    out.push({
+      id: e.id, name: e.name, tags: e.tags ?? [], start, end,
+      carriedMinutes: e.carriedMinutes ?? 0,
+      carriedStints: e.carriedStints ?? 0,
+    });
   }
   return out;
 }
@@ -461,14 +465,28 @@ function normalizePins(pins, employeeById, missionById, planStart, planEnd, warn
  * maximization, and `seq` - bumped on every pick - round-robins exact ties so
  * the rotation cannot collapse onto whoever happens to sort first.
  */
-function makeState(employees, strategy) {
+function makeState(employees, strategy, carried = new Map()) {
   let seq = 0;
   return new Map(
     employees.map((e, index) => [
       e.id,
       {
         id: e.id, name: e.name, tags: e.tags ?? [], start: e.start, end: e.end, busy: [], busyUntil: -Infinity,
-        minutes: 0, missionMinutes: new Map(), lastEnd: -Infinity, seq: seq++, stints: 0,
+        // Seeded with duty already stood outside this period (ADR 015), so
+        // `balanced` evens out a guard's whole record rather than only the
+        // window in front of it. Zero for every document written before the
+        // field existed, which is what keeps those links rendering as they did.
+        //
+        // Two sources, summed: the document's own carried totals, and the
+        // assignments still sitting outside the period. Counting both is what
+        // makes clearing residue a change of *representation* rather than a
+        // change of schedule - the button converts the second into the first
+        // and the total does not move, which `tests/pins.test.js` asserts.
+        // `st.minutes` is minutes, despite everything around it being epoch
+        // milliseconds - `occupy` divides by MINUTE on the way in.
+        minutes: (e.carriedMinutes ?? 0) + (carried.get(e.id)?.minutes ?? 0) / MINUTE,
+        carriedStints: (e.carriedStints ?? 0) + (carried.get(e.id)?.stints ?? 0),
+        missionMinutes: new Map(), lastEnd: -Infinity, seq: seq++, stints: 0,
         ...(strategy.seed ? strategy.seed(e, index) : null),
       },
     ]),
@@ -779,13 +797,37 @@ function planOnce({
   // the predicate with `clearStalePins` is what keeps the number honest: what
   // is reported here is exactly what the button removes.
   const rawMissionById = new Map(missions.map((m) => [m.id, m]));
-  const outOfPeriod = pins.filter(
+  const stalePins = pins.filter(
     (p) => isOutOfPeriod(p, rawMissionById.get(p.missionId), start, end),
-  ).length;
-  if (outOfPeriod > 0) warnings.push({ code: WARN.PIN_OUT_OF_PERIOD, count: outOfPeriod });
+  );
+  if (stalePins.length > 0) warnings.push({ code: WARN.PIN_OUT_OF_PERIOD, count: stalePins.length });
+
+  // Duty outside the period still counts towards how much someone has stood
+  // (ADR 015). The engine cannot *schedule* it - that is what out-of-period
+  // means - but a guard who worked those hours should not be first in line for
+  // the next ones, which is what happens if the sum forgets them the moment the
+  // window rolls past.
+  //
+  // Read straight from the raw pins, exactly like the count above and for the
+  // same reason: a mission that has itself dropped out of the period is already
+  // gone from `missionById`, and the hours its pins record are no less real.
+  const carried = new Map();
+  const slotMs = shiftMinutes * MINUTE;
+  for (const p of stalePins) {
+    const mission = rawMissionById.get(p.missionId);
+    if (!mission) continue;
+    const win = resolvePinWindow(p, mission, start, end);
+    if (!(win.end > win.start)) continue;
+    const at = carried.get(p.employeeId) ?? { minutes: 0, stints: 0 };
+    at.minutes += win.end - win.start;
+    // No grid to name a slot on any more, so a turn is one plan shift length,
+    // at least one. `rotation` is the only strategy that reads it.
+    at.stints += Math.max(1, Math.round((win.end - win.start) / slotMs));
+    carried.set(p.employeeId, at);
+  }
 
   const strategy = getStrategy(strategyName);
-  const state = makeState(emps, strategy);
+  const state = makeState(emps, strategy, carried);
   // On-call duty can be slept through, so pins on such missions must not push
   // anyone's sleep block out of the night, and staffing one must not cost the
   // crew their rest window - see `choose` and `assessRest` below.
