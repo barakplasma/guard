@@ -10,30 +10,30 @@
  * than a schedule with a hole in it.
  */
 
-import { z } from 'zod';
-import { MODEL_VERSION } from './types.ts';
+import { z } from 'zod'
+import { MODEL_VERSION } from './types.ts'
 import type {
-  InstanceIndex, NamedQuantities, SegmentDiagnostics, SolverInstance,
-} from './types.ts';
+  InstanceIndex, NamedQuantities, SegmentDiagnostics, SolverInstance
+} from './types.ts'
 
-const nonNegativeInt = z.number().int().min(0);
+const nonNegativeInt = z.number().int().min(0)
 
 /** Exactly `length` entries, each in `0..max`. */
-const fixedIntArray = (length: number, max: number) => z.array(z.number().int().min(0).max(max)).length(length);
+const fixedIntArray = (length: number, max: number) => z.array(z.number().int().min(0).max(max)).length(length)
 
-const fixedIntMatrix = (rows: number, columns: number, max: number) => z.array(fixedIntArray(columns, max)).length(rows);
+const fixedIntMatrix = (rows: number, columns: number, max: number) => z.array(fixedIntArray(columns, max)).length(rows)
 
-const fixedBoolMatrix = (rows: number, columns: number) => z.array(z.array(z.boolean()).length(columns)).length(rows);
+const fixedBoolMatrix = (rows: number, columns: number) => z.array(z.array(z.boolean()).length(columns)).length(rows)
 
 /**
  * @param index the instance index the run was built from
  * @param requirementCount how many qualification requirements the instance carries
  * @param nightCount how many nights it carries
  */
-export function solverOutputSchemaFor(index: InstanceIndex, requirementCount: number, nightCount: number) {
-  const employees = index.employeeIds.length;
-  const missions = index.missionIds.length;
-  const segments = index.segments.length;
+export function solverOutputSchemaFor (index: InstanceIndex, requirementCount: number, nightCount: number) {
+  const employees = index.employeeIds.length
+  const missions = index.missionIds.length
+  const segments = index.segments.length
   return z.object({
     // One byte per cell, one mission or zero: two missions in one cell is not
     // a value this can hold, which is the representation ADR 017 asks for.
@@ -65,23 +65,23 @@ export function solverOutputSchemaFor(index: InstanceIndex, requirementCount: nu
     shortestWaitMinutes: nonNegativeInt,
 
     // The one field that says the JSON came from the model this build knows.
-    echoedModelVersion: z.literal(MODEL_VERSION),
-  });
+    echoedModelVersion: z.literal(MODEL_VERSION)
+  })
 }
 
 export interface DecodedOutput {
-  assignment: Uint8Array;
-  quantities: NamedQuantities;
-  diagnostics: SegmentDiagnostics;
+  assignment: Uint8Array
+  quantities: NamedQuantities
+  diagnostics: SegmentDiagnostics
 }
 
 export class SolverOutputError extends Error {
-  readonly reason: 'malformed-output' | 'dimension-mismatch';
+  readonly reason: 'malformed-output' | 'dimension-mismatch'
 
-  constructor(reason: 'malformed-output' | 'dimension-mismatch', detail: string) {
-    super(detail);
-    this.name = 'SolverOutputError';
-    this.reason = reason;
+  constructor (reason: 'malformed-output' | 'dimension-mismatch', detail: string) {
+    super(detail)
+    this.name = 'SolverOutputError'
+    this.reason = reason
   }
 }
 
@@ -92,27 +92,27 @@ export class SolverOutputError extends Error {
  * different things: a wrong dimension is the driver and the model disagreeing
  * about the instance, while a missing quantity is output the runner mangled.
  */
-export function decodeSolverOutput(
+export function decodeSolverOutput (
   raw: unknown,
   index: InstanceIndex,
-  instance: Pick<SolverInstance, 'requirementCount' | 'nightCount'>,
+  instance: Pick<SolverInstance, 'requirementCount' | 'nightCount'>
 ): DecodedOutput {
-  const parsed = solverOutputSchemaFor(index, instance.requirementCount, instance.nightCount).safeParse(raw);
+  const parsed = solverOutputSchemaFor(index, instance.requirementCount, instance.nightCount).safeParse(raw)
   if (!parsed.success) {
-    const issue = parsed.error.issues[0];
-    const path = issue?.path.join('.') ?? '';
-    const dimension = issue?.code === 'too_big' || issue?.code === 'too_small';
+    const issue = parsed.error.issues[0]
+    const path = issue?.path.join('.') ?? ''
+    const dimension = issue?.code === 'too_big' || issue?.code === 'too_small'
     throw new SolverOutputError(
       dimension ? 'dimension-mismatch' : 'malformed-output',
-      `${path || '<root>'}: ${issue?.message ?? 'unparseable solver output'}`,
-    );
+      `${path || '<root>'}: ${issue?.message ?? 'unparseable solver output'}`
+    )
   }
-  const value = parsed.data;
-  const segmentCount = index.segments.length;
-  const assignment = new Uint8Array(index.employeeIds.length * segmentCount);
+  const value = parsed.data
+  const segmentCount = index.segments.length
+  const assignment = new Uint8Array(index.employeeIds.length * segmentCount)
   value.assignedMission.forEach((row, employee) => {
-    row.forEach((mission, segment) => { assignment[employee * segmentCount + segment] = mission; });
-  });
+    row.forEach((mission, segment) => { assignment[employee * segmentCount + segment] = mission })
+  })
 
   return {
     assignment,
@@ -131,7 +131,7 @@ export function decodeSolverOutput(
       nightDutySpreadMinutes: value.nightDutySpreadMinutes,
       missionRepeatCost: value.missionRepeatCost,
       nightHourRepeatCost: value.nightHourRepeatCost,
-      shortestWaitMinutes: value.shortestWaitMinutes,
+      shortestWaitMinutes: value.shortestWaitMinutes
     },
     diagnostics: {
       seatsFilled: value.seatsFilled,
@@ -142,7 +142,7 @@ export function decodeSolverOutput(
       dutyMinutes: value.dutyMinutes,
       turnsTaken: value.turnsTaken,
       turnsOnMission: value.turnsOnMission,
-      nightMinutesInWindow: value.nightMinutesInWindow,
-    },
-  };
+      nightMinutesInWindow: value.nightMinutesInWindow
+    }
+  }
 }

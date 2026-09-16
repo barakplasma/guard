@@ -146,19 +146,19 @@ Browser commands above can also be run locally on a headless host.
 
 ## Architecture
 
-| Path | Purpose |
-|------|---------|
-| `src/lib/planner.js` | Pure scheduling orchestration over absolute intervals. |
-| `src/lib/strategies.js` | Balanced and rotation candidate ranking. |
-| `src/lib/crew.js`, `rest.js` | Qualification selection and preferred-rest assessment. |
-| `src/lib/invariants.js` | Independent assignment and timeline validation. |
-| `src/lib/planSchema.js` | Document validation, defaults, and calendar adapters. |
-| `src/lib/urlState.js` | Positional tuple encoding and compressed URL decoding. |
-| `src/lib/pins.js` | Manual assignment edits and elapsed-history freezing. |
-| `src/lib/agenda.js` | Day/slot/mission grouping for display and exports. |
-| `src/lib/exportCsv.js`, `exportText.js`, `exportIcal.js` | CSV, WhatsApp, and calendar output. |
-| `src/state/PlanContext.jsx` | URL-backed document edits. |
-| `src/pages/`, `src/components/` | Hebrew RTL interface. |
+| Path                                                     | Purpose                                                |
+|----------------------------------------------------------|--------------------------------------------------------|
+| `src/lib/planner.js`                                     | Pure scheduling orchestration over absolute intervals. |
+| `src/lib/strategies.js`                                  | Balanced and rotation candidate ranking.               |
+| `src/lib/crew.js`, `rest.js`                             | Qualification selection and preferred-rest assessment. |
+| `src/lib/invariants.js`                                  | Independent assignment and timeline validation.        |
+| `src/lib/planSchema.js`                                  | Document validation, defaults, and calendar adapters.  |
+| `src/lib/urlState.js`                                    | Positional tuple encoding and compressed URL decoding. |
+| `src/lib/pins.js`                                        | Manual assignment edits and elapsed-history freezing.  |
+| `src/lib/agenda.js`                                      | Day/slot/mission grouping for display and exports.     |
+| `src/lib/exportCsv.js`, `exportText.js`, `exportIcal.js` | CSV, WhatsApp, and calendar output.                    |
+| `src/state/PlanContext.jsx`                              | URL-backed document edits.                             |
+| `src/pages/`, `src/components/`                          | Hebrew RTL interface.                                  |
 
 The URL hash contains the input document, including pins, rather than generated
 shifts. There is no backend document store or localStorage save. Corrupt links
