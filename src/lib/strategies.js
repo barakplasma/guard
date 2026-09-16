@@ -49,6 +49,12 @@ export const DEFAULT_STRATEGY = STRATEGY.BALANCED;
  *
  * A remote mission is claimed once and held end to end, so the per-mission
  * variety term is meaningless there and is skipped.
+ *
+ * Duty carried in from outside the period (ADR 015) enters through key 1, as a
+ * head start on `minutes` seeded in `makeState` - and **clamped there**, for
+ * reasons that record sets out at length. The short version: this key picks the
+ * fewest minutes for every slot, so an unclamped debt makes whoever is behind
+ * the cheapest candidate for as many consecutive slots as the debt is long.
  */
 const balanced = {
   id: STRATEGY.BALANCED,
@@ -105,7 +111,10 @@ function ringKeys(st, ctx) {
     else slots.add(iv.slotStart);
     if (iv.end > lastEnd) lastEnd = iv.end;
   }
-  return { turns: slots.size + remotes, lastEnd };
+  // Turns already taken outside this period ride along with the ones inside it
+  // (ADR 015): `rotation` counts shifts rather than hours, so carrying minutes
+  // would say nothing here and carrying turns says exactly the right thing.
+  return { turns: slots.size + remotes + (st.carriedStints ?? 0), lastEnd };
 }
 
 /** Daily fairness counts completed occurrences, never future pins or hours. */

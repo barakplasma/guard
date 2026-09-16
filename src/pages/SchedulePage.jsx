@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   Alert, Box, Button, Paper, Stack, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, Typography,
@@ -12,6 +12,8 @@ import EmployeeSelect from '../components/EmployeeSelect.jsx';
 import { usePlan } from '../state/PlanContext.jsx';
 import { plan as runPlanner } from '../lib/planner.js';
 import { toPlannerInput } from '../lib/planSchema.js';
+import { outOfPeriodLog, logFilename } from '../lib/logExport.js';
+import { shiftsToCsv, downloadCsv } from '../lib/exportCsv.js';
 import { findNowSlot, groupAgenda } from '../lib/agenda.js';
 import { formatDuration } from '../lib/format.js';
 import { sortByHebrewName } from '../lib/sort.js';
@@ -28,7 +30,11 @@ function useSchedule(doc) {
     if (doc.employees.length === 0) return { error: t.needEmployees };
     if (doc.missions.length === 0) return { error: t.needMissions };
     try {
-      return { result: runPlanner({ ...toPlannerInput(doc), onInvariantViolation: 'report' }) };
+      // `Date.now()` enters here, in the UI, and reaches the engine only as the
+      // absolute `loggedBefore` instant the adapter resolves - the engine still
+      // owns no clock (ADR 009). Recomputing on `doc` alone is deliberate: the
+      // schedule should move when the plan moves, not tick over on its own.
+      return { result: runPlanner({ ...toPlannerInput(doc, Date.now()), onInvariantViolation: 'report' }) };
     } catch (e) {
       return { error: e.message };
     }
@@ -63,7 +69,18 @@ function SummaryTable({ result, highlightId }) {
                 selected={row.employeeId === highlightId}
                 data-testid={`summary-${row.employeeId}`}
               >
-                <TableCell sx={{ overflowWrap: 'break-word' }}>{row.name}</TableCell>
+                <TableCell sx={{ overflowWrap: 'break-word' }}>
+                  {row.name}
+                  {/* Deliberately a second line under the name rather than a
+                      fifth column: four columns already crowd a 360px phone,
+                      and this text is absent for everyone who has carried
+                      nothing, which is the ordinary case. */}
+                  {(row.carriedMinutes ?? 0) > 0 && (
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                      {t.carriedBefore(formatDuration(row.carriedMinutes))}
+                    </Typography>
+                  )}
+                </TableCell>
                 <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>{formatDuration(row.minutes)}</TableCell>
                 <TableCell align="right">{row.stints}</TableCell>
                 <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
@@ -75,7 +92,17 @@ function SummaryTable({ result, highlightId }) {
         </Table>
       </TableContainer>
       <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-        {`${t.spread}: ${formatDuration(result.stats.spreadMinutes)}`}
+        {/* While a carried debt is being repaid the window spread is
+            deliberately wide - that is the engine catching somebody up, not a
+            fault - so the number it is actually evening out is shown beside it.
+            With nothing carried the two are equal and only one is worth
+            printing (ADR 015). */}
+        {(result.stats.totalSpreadMinutes ?? result.stats.spreadMinutes) === result.stats.spreadMinutes
+          ? `${t.spread}: ${formatDuration(result.stats.spreadMinutes)}`
+          : t.spreadWithCarried(
+            formatDuration(result.stats.spreadMinutes),
+            formatDuration(result.stats.totalSpreadMinutes),
+          )}
       </Typography>
     </Paper>
   );
@@ -86,6 +113,23 @@ export default function SchedulePage() {
     doc, pinShift, clearPin, clearAllPins, clearPinByWarning, clearStalePins, applyCorrection, decodeFailed,
   } = usePlan();
   const { result, error } = useSchedule(doc);
+
+  /**
+   * ADR 012: a window the plan has rolled past is *exported*, not dropped. So
+   * the out-of-period button downloads the record before removing it, and
+   * removes nothing if the download could not be produced - losing a window to
+   * a failed export is the data loss this exists to prevent.
+   */
+  const exportAndClearStalePins = useCallback(() => {
+    const rows = outOfPeriodLog(doc);
+    if (rows.length === 0) return;
+    try {
+      downloadCsv(shiftsToCsv({ shifts: rows }, doc), logFilename(doc, rows));
+    } catch {
+      return;
+    }
+    clearStalePins();
+  }, [doc, clearStalePins]);
 
   // View state, not plan data: it never reaches the document or the URL, so
   // sharing a link never sends your filter along with it.
@@ -186,7 +230,7 @@ export default function SchedulePage() {
             doc={doc}
             result={result}
             onClearPinByWarning={clearPinByWarning}
-            onClearStalePins={clearStalePins}
+            onClearStalePins={exportAndClearStalePins}
           />
         </>
       )}

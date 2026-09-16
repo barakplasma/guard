@@ -112,6 +112,7 @@ jobs:
           node tests/mui-pickers.e2e.mjs
           node tests/short-shifts.e2e.mjs
           node tests/assignment-badges.e2e.mjs
+          node tests/carried-duty.e2e.mjs
           node tests/mobile-viewports.mjs
         env:
           BASE: http://localhost:4173

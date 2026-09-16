@@ -44,6 +44,48 @@ export function MissionQualifications({ mission, onChange }) {
   </Stack>;
 }
 
+/**
+ * People kept off this mission by name (ADR 014).
+ *
+ * Deliberately not part of `MissionQualifications`, which returns null when the
+ * plan defines no qualifications. Excluding a person has nothing to do with
+ * qualifications existing - that is the whole reason this is its own field
+ * rather than a tag minted to name one individual.
+ *
+ * Anyone already pinned here is shown disabled rather than hidden: a pin
+ * overrides an exclusion visibly, so offering to exclude somebody whose
+ * assignment would then survive anyway reads as a control that did nothing.
+ */
+export function MissionExcludedEmployees({ mission, onChange }) {
+  const { doc } = usePlan();
+  const named = doc.employees.filter((e) => e.name.trim());
+  if (named.length === 0) return null;
+  const pinnedHere = new Set(doc.pins.filter((p) => p.missionId === mission.id).map((p) => p.employeeId));
+  const value = mission.excludeEmployees ?? [];
+  return (
+    <Autocomplete
+      multiple
+      options={named}
+      getOptionDisabled={(e) => pinnedHere.has(e.id) && !value.includes(e.id)}
+      value={named.filter((e) => value.includes(e.id))}
+      getOptionLabel={(e) => e.name}
+      isOptionEqualToValue={(a, b) => a.id === b.id}
+      onChange={(_, selected) => onChange({ excludeEmployees: selected.map((e) => e.id) })}
+      sx={{ minWidth: 0, width: '100%', '& .MuiChip-root': { maxWidth: '100%' } }}
+      renderInput={(params) => (
+        <TextField
+          {...params}
+          label={t.excludedEmployees}
+          slotProps={{
+            ...params.slotProps,
+            htmlInput: { ...params.slotProps.htmlInput, 'data-testid': `mission-exclude-employees-${mission.id}` },
+          }}
+        />
+      )}
+    />
+  );
+}
+
 export default function QualificationManager() {
   const { doc, update } = usePlan();
   const [pending, setPending] = useState(null);

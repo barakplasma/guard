@@ -21,6 +21,17 @@ export const employeeSchema = z.object({
   name: z.string().max(80),
   start: ts.nullable().default(null),
   end: ts.nullable().default(null),
+  // Duty already stood, outside whatever period the document now covers
+  // (ADR 015). The rota is planned 72 hours at a time and rolled forward, and
+  // the engine evens out the window it is given - so once an hour falls behind
+  // the window it stops counting, and a guard who came back from two days away
+  // stays permanently behind while the app reports a perfectly even spread.
+  // This is the one number that has to survive the roll. A summary rather than
+  // the shifts themselves, so it costs a few bytes per person and outlives the
+  // export that clears them.
+  carriedMinutes: z.number().int().min(0).default(0),
+  // The same, in the unit `rotation` counts: shifts stood, not hours.
+  carriedStints: z.number().int().min(0).default(0),
 });
 
 /** Minutes past midnight, the unit both night boundaries are written in. */
@@ -34,6 +45,11 @@ export const missionSchema = z.object({
   id,
   requires: z.array(z.object({ tag: id, count: z.number().int().min(1).max(999) })).default([]),
   excludes: z.array(id).default([]).transform((tags) => [...new Set(tags)]),
+  // Excluded *people*, by id, alongside excluded qualifications above.
+  // A qualification cannot say "not this particular person", and minting a tag
+  // to name one individual pollutes the same list that drives required coverage
+  // and night rest - so this is its own field (ADR 014).
+  excludeEmployees: z.array(id).default([]).transform((ids) => [...new Set(ids)]),
   name: z.string().max(80),
   type: z.enum(['remote', 'local', 'daily']),
   dayStart: minuteOfDay.nullable().default(null),
@@ -221,8 +237,22 @@ export function dailyOccurrences(doc, mission) {
 }
 
 /** Shape the document into the planner engine's input. */
-export function toPlannerInput(doc) {
+/**
+ * The only route from the plan document into the engine.
+ *
+ * `now` is where the clock enters, and it enters *here* rather than in
+ * `planner.js` for the same reason the night windows are resolved here: the
+ * engine does interval arithmetic on absolute instants and owns no clock. It
+ * becomes `loggedBefore`, the boundary before which time is a log rather than
+ * a schedule (ADR 009).
+ *
+ * Omitting `now` means "nothing has elapsed", which is what every caller
+ * written before this parameter meant - so the golden fixtures, the export
+ * tests and the URL round-trips all keep their exact previous results.
+ */
+export function toPlannerInput(doc, now) {
   return {
+    loggedBefore: now ?? -Infinity,
     start: doc.start,
     end: doc.end,
     shiftMinutes: doc.shiftMinutes,
@@ -235,12 +265,15 @@ export function toPlannerInput(doc) {
       tags: e.tags ?? [],
       start: e.start ?? undefined,
       end: e.end ?? undefined,
+      carriedMinutes: e.carriedMinutes ?? 0,
+      carriedStints: e.carriedStints ?? 0,
     })),
     missions: doc.missions.map((m) => ({
       id: m.id,
       name: m.name,
       requires: m.requires ?? [],
       excludes: m.excludes ?? [],
+      excludeEmployees: m.excludeEmployees ?? [],
       type: m.type,
       start: m.start ?? undefined,
       end: m.end ?? undefined,

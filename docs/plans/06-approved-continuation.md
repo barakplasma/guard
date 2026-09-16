@@ -25,7 +25,9 @@ without the extensions retain their previous encoding.
 | mission | 11 | flat qualification requirement pairs | [] |
 | mission | 12 | excluded tag ids | [] |
 | mission | 13 | on-call flag | absent; `1` when on-call |
+| mission | 14 | excluded employee ids | [] |
 | employee | 4 | qualification ids | [] |
+| employee | 5–6 | carried duty minutes, carried stints | absent; written only when non-zero |
 | plan | key `tg` | qualification definitions | omitted |
 
 Mission types encode as local `0`, remote `1`, and daily `2`. Future extension

@@ -61,7 +61,13 @@ export function encodePlan(doc) {
     st: doc.strategy,
     ns: doc.nightStart,
     ne: doc.nightEnd,
-    emp: doc.employees.map((x) => trimTail([x.id, x.name, outTs(x.start), outTs(x.end), x.tags ?? []], 4)),
+    // Positions 5 and 6 are carried duty (ADR 006's table, ADR 015). Written
+    // only when non-zero, so an employee who has carried nothing encodes to
+    // exactly the bytes they always did.
+    emp: doc.employees.map((x) => trimTail([
+      x.id, x.name, outTs(x.start), outTs(x.end), x.tags ?? [],
+      x.carriedMinutes || null, x.carriedStints || null,
+    ], 4)),
     // Everything past `count` is *appended* to the mission tuple. Field order
     // is the wire format here, so appending is safe and reordering is not: an
     // older link simply has no seventh element and reads back as `null`, i.e.
@@ -76,6 +82,10 @@ export function encodePlan(doc) {
       // Position 13: on-call. Written only when true, so plans that never
       // heard of the flag encode to the exact bytes they always did.
       x.onCall ? 1 : null,
+      // Position 14: excluded employee ids. Empty arrays are trimmed by
+      // `trimTail`, so the same holds - a mission excluding nobody encodes
+      // exactly as it did before this field existed (ADR 006, ADR 014).
+      x.excludeEmployees ?? [],
     ], MISSION_TUPLE_WAS)),
     pin: doc.pins.map((x) => [x.missionId, x.employeeId, outTs(x.start), outTs(x.end), x.frozen ? 1 : 0]),
     ...(doc.tags?.length ? { tg: doc.tags.map((t) => [t.id, t.name, t.minNightRestMinutes]) } : {}),
@@ -116,11 +126,13 @@ export function decodePlan(blob) {
       nightStart: raw.ns ?? undefined,
       nightEnd: raw.ne ?? undefined,
       tags: (raw.tg ?? []).map(([id, name, minNightRestMinutes]) => ({ id, name, minNightRestMinutes })),
-      employees: (raw.emp ?? []).map(([id, name, s, e, tags]) => ({
+      employees: (raw.emp ?? []).map(([id, name, s, e, tags, carriedMinutes, carriedStints]) => ({
         id, name, start: inTs(s), end: inTs(e), tags,
+        carriedMinutes: carriedMinutes ?? 0,
+        carriedStints: carriedStints ?? 0,
       })),
       missions: (raw.mis ?? []).map((
-        [id, name, type, s, e, count, nightCount, shiftMinutes, nightShiftMinutes, dayStart, dayEnd, requires, excludes, onCall],
+        [id, name, type, s, e, count, nightCount, shiftMinutes, nightShiftMinutes, dayStart, dayEnd, requires, excludes, onCall, excludeEmployees],
       ) => ({
         id,
         name,
@@ -140,6 +152,7 @@ export function decodePlan(blob) {
         requires: requires == null ? [] : Array.from({ length: Math.ceil(requires.length / 2) }, (_, i) => ({ tag: requires[i * 2], count: requires[i * 2 + 1] })),
         excludes: excludes ?? [],
         onCall: onCall === 1,
+        excludeEmployees: excludeEmployees ?? [],
       })),
       pins: (raw.pin ?? []).map(([missionId, employeeId, s, e, f]) => ({
         missionId, employeeId, start: inTs(s), end: inTs(e), frozen: Boolean(f),

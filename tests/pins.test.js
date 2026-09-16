@@ -3,11 +3,10 @@ import assert from 'node:assert/strict';
 import {
   applyClearPin, applyClearPinsForMission, applyMissionAssignees, applySwap,
   clearStalePins, countStalePins, cutPin, freezeElapsedBeforeEdit, freezePastShifts, pinCovers,
-  pruneStalePins,
 } from '../src/lib/pins.js';
 import { WARN } from '../src/lib/planner.js';
 import { plan } from '../src/lib/planner.js';
-import { toPlannerInput } from '../src/lib/planSchema.js';
+import { planSchema, prunePins, toPlannerInput } from '../src/lib/planSchema.js';
 
 const HOUR = 3600 * 1000;
 const START = new Date(2026, 0, 5, 8, 0, 0, 0).getTime();
@@ -540,24 +539,24 @@ test('a whole-window pin is never stale, whatever the period is', () => {
   assert.equal(clearStalePins(d), d);
 });
 
-test('the automatic prune drops finished history but never future assignments', () => {
+test('no edit removes recorded duty on its own (ADR 012)', () => {
+  // There used to be an automatic prune here, and it was correct while
+  // out-of-period pins were residue. Once a rolled-past window is *exported*,
+  // those pins are the only durable record, and the prune deleted 288 of them
+  // per unrelated edit - see scripts/rollForwardLoss.mjs. Removal is explicit
+  // now, and this asserts that nothing does it silently.
   const prev = stale();
-  const pruned = pruneStalePins(prev, { ...prev, title: 'renamed' });
-  assert.equal(pruned.pins.length, 2, 'the two pre-period pins go');
-  assert.ok(pruned.pins.some((p) => p.start === START + 9 * HOUR), 'the post-period one stays');
-  assert.ok(pruned.pins.some((p) => p.start === START + HOUR), 'so does the live one');
-});
-
-test('the automatic prune refuses to act while the period itself is being edited', () => {
-  // The date fields emit an edit on every intermediate value that parses, so a
-  // half-typed year must never be able to delete history: setDoc navigates
-  // with replace, and there is no way back.
-  const prev = stale();
-  const mid = { ...prev, start: START + 500 * HOUR, end: START + 504 * HOUR };
-  assert.equal(pruneStalePins(prev, mid), mid, 'nothing removed while the window moves');
-
-  // Once the window is standing still again, the ordinary cleanup resumes.
-  assert.equal(pruneStalePins(mid, { ...mid, title: 'x' }).pins.length, 0);
+  const rolled = { ...prev, start: START + 500 * HOUR, end: START + 504 * HOUR };
+  assert.equal(
+    planSchema.parse(prunePins(rolled)).pins.length,
+    prev.pins.length,
+    'rolling the window past history keeps all of it',
+  );
+  assert.equal(
+    planSchema.parse(prunePins({ ...rolled, title: 'x' })).pins.length,
+    prev.pins.length,
+    'and so does the next ordinary edit, which is where the loss used to land',
+  );
 });
 
 test('the planner counts stale pins once instead of warning about each', () => {

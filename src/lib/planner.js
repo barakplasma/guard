@@ -58,6 +58,25 @@ function overlaps(aStart, aEnd, bStart, bEnd) {
 }
 
 /**
+ * Is `person` kept off `mission` by an exclusion?
+ *
+ * Two kinds, deliberately one predicate (ADR 014). A qualification exclusion
+ * says "no commander in the kitchen"; a per-person one says "not him, here",
+ * which no statement about a qualification can express. Both are hard filters
+ * on *automatic* assignment only - a pin still overrides either, visibly,
+ * because a manual assignment is an input fact and not a suggestion.
+ *
+ * One predicate rather than a check at each of the five candidate filters:
+ * remote eligibility, the scarcity pool, the local candidate list, repair
+ * hints and correction substitutes. A guard that has to be repeated is a guard
+ * that will eventually be repeated wrongly.
+ */
+export function isExcluded(mission, person) {
+  return (mission.excludes ?? []).some((tag) => (person.tags ?? []).includes(tag))
+    || (mission.excludeEmployees ?? []).includes(person.id);
+}
+
+/**
  * Resolve a pin to the window it actually refers to, following the
  * null-inheritance chain: a pin's missing bound comes from its mission, and a
  * mission's missing bound from the plan period.
@@ -122,7 +141,14 @@ function stretches(nightWindows, planStart, planEnd) {
 }
 
 /** How many people a mission needs at `t`, which on a local mission can differ by night. */
-function countAt(mission, t, nightWindows) {
+/**
+ * A mission's headcount at an instant: `nightCount` inside a night stretch,
+ * `count` otherwise. Exported for the same reason `segmentGrid` is - a caller
+ * building the engine's demand from outside must not re-derive this rule, and
+ * `nightCount` resolving to `count` when unset is `normalizeMissions`'s doing,
+ * so it takes a *normalized* mission.
+ */
+export function countAt(mission, t, nightWindows) {
   return isNight(t, nightWindows) ? mission.nightCount : mission.count;
 }
 
@@ -172,7 +198,11 @@ function normalizeEmployees(employees, planStart, planEnd, warnings) {
       warnings.push({ code: WARN.EMPLOYEE_WINDOW_OUTSIDE_PLAN, employeeId: e.id });
       continue;
     }
-    out.push({ id: e.id, name: e.name, tags: e.tags ?? [], start, end });
+    out.push({
+      id: e.id, name: e.name, tags: e.tags ?? [], start, end,
+      carriedMinutes: e.carriedMinutes ?? 0,
+      carriedStints: e.carriedStints ?? 0,
+    });
   }
   return out;
 }
@@ -243,6 +273,7 @@ function normalizeMissions(missions, planStart, planEnd, warnings) {
       id: m.id,
       name: m.name,
       requires: requirementsOf(m.requires), excludes: m.excludes ?? [],
+      excludeEmployees: m.excludeEmployees ?? [],
       type: ['remote', 'daily'].includes(m.type) ? m.type : 'local',
       ...(m.type === 'daily' ? { occurrences: normalizeOccurrences(m.occurrences ?? [], start, end) } : {}),
       start,
@@ -262,7 +293,7 @@ function normalizeMissions(missions, planStart, planEnd, warnings) {
  * shared link must keep working rather than erroring. Everything else that
  * cannot be honoured degrades to a warning.
  */
-function normalizePins(pins, employeeById, missionById, planStart, planEnd, warnings, nightWindows) {
+function normalizePins(pins, employeeById, missionById, planStart, planEnd, warnings, nightWindows, loggedBefore = -Infinity) {
   // --- Step 1: resolve every pin to its effective [start, end) coverage ---
   // Everything downstream (dedup, availability, conflicts, capacity) has to
   // reason about coverage, never the literal written range - a whole-mission
@@ -390,9 +421,14 @@ function normalizePins(pins, employeeById, missionById, planStart, planEnd, warn
     const sameMission = perMission.get(c.mission.id) || [];
     // Capacity is measured at every change inside the claim, not the roomiest
     // headcount or a count of intervals that merely overlap different parts.
+    //
+    // A claim wholly inside elapsed time is exempt (ADR 009). Today's `count`
+    // is not evidence about how many people stood a post that is already over,
+    // so applying it there deletes people who genuinely were on duty the moment
+    // somebody lowers the headcount. The record outranks the setting.
     const points = new Set([c.start, ...sameMission.flatMap((q) => [q.start, q.end]),
       ...nightWindows.flatMap((w) => [w.start, w.end])]);
-    const overflows = [...points].some((at) => at >= c.start && at < c.end
+    const overflows = c.end > loggedBefore && [...points].some((at) => at >= c.start && at < c.end
       && sameMission.filter((q) => q.start <= at && q.end > at).length
         >= countAt(c.mission, at, nightWindows));
     if (overflows) {
@@ -429,14 +465,49 @@ function normalizePins(pins, employeeById, missionById, planStart, planEnd, warn
  * maximization, and `seq` - bumped on every pick - round-robins exact ties so
  * the rotation cannot collapse onto whoever happens to sort first.
  */
-function makeState(employees, strategy) {
+/**
+ * Duty stood outside this period, in minutes, as each guard's head start on the
+ * fairness key - normalized against the least-worked person and clamped.
+ *
+ * Both halves matter. **Normalized**, because a roster where everybody has
+ * stood five hundred hours is a roster in balance, and seeding five hundred
+ * against a newcomer's zero hands the newcomer every hour there is - measured,
+ * before the clamp existed: 72 of a 72-hour window, unbroken.
+ *
+ * **Clamped**, because `balanced` picks the fewest minutes for every slot, so an
+ * unclamped debt makes whoever is behind the cheapest candidate for as many
+ * consecutive slots as the debt is long. A guard back from two days' leave was
+ * handed 72 unbroken hours to settle a 36-hour gap: the eighty-eight-hour
+ * failure `rotation` was fixed for, arriving through the fairness key instead.
+ *
+ * The bound is the engine's own quality bar rather than a number invented here -
+ * `invariants.js` calls three consecutive slots a `long-unbroken-run`, so two
+ * slots is the most a debt may buy and a debt can never on its own build a run
+ * this codebase would flag. The cost is that a larger debt settles two slots per
+ * window as the period rolls forward instead of all at once, which is what
+ * `scripts/fairnessAcrossRolls.mjs` measures.
+ */
+function carriedDebts(employees, carried, shiftMinutes) {
+  const total = (e) => (e.carriedMinutes ?? 0) + (carried.get(e.id)?.minutes ?? 0) / MINUTE;
+  if (employees.length === 0) return new Map();
+  const floor = Math.min(...employees.map(total));
+  const cap = 2 * shiftMinutes;
+  return new Map(employees.map((e) => [e.id, Math.min(total(e) - floor, cap)]));
+}
+
+function makeState(employees, strategy, carried = new Map(), shiftMinutes = 60) {
   let seq = 0;
+  const debts = carriedDebts(employees, carried, shiftMinutes);
   return new Map(
     employees.map((e, index) => [
       e.id,
       {
         id: e.id, name: e.name, tags: e.tags ?? [], start: e.start, end: e.end, busy: [], busyUntil: -Infinity,
-        minutes: 0, missionMinutes: new Map(), lastEnd: -Infinity, seq: seq++, stints: 0,
+        // A head start on the fairness key, normalized and clamped - see
+        // `carriedDebts`, where both of those are the whole safety of ADR 015.
+        minutes: debts.get(e.id) ?? 0,
+        carriedStints: (e.carriedStints ?? 0) + (carried.get(e.id)?.stints ?? 0),
+        missionMinutes: new Map(), lastEnd: -Infinity, seq: seq++, stints: 0,
         ...(strategy.seed ? strategy.seed(e, index) : null),
       },
     ]),
@@ -510,123 +581,26 @@ function occupy(st, mission, start, end, slotStart, counter) {
  * @returns {{
  *   shifts: {missionId:string,missionName:string,type:string,employeeId:string,employeeName:string,start:number,end:number,slotStart:number,slotEnd:number,pinned:boolean,frozen:boolean}[],
  *   timeline: {start:number,end:number,onDuty:{employeeId:string,missionId:string}[],offDuty:string[],unavailable:string[]}[],
- *   stats: {perEmployee:{employeeId:string,name:string,minutes:number,stints:number,minGapMinutes:number|null}[], spreadMinutes:number},
+ *   stats: {perEmployee:{employeeId:string,name:string,minutes:number,stints:number,minGapMinutes:number|null,carriedMinutes?:number,carriedStints?:number,totalMinutes?:number,totalStints?:number}[], spreadMinutes:number, totalSpreadMinutes?:number},
  *   warnings: object[],
  *   rest: {employeeId:string,start:number,end:number,needed:number,totalMinutes:number,longestMinutes:number}[],
  *   proposals: object[],
  * }}
  */
-function planOnce({
-  start, end, shiftMinutes, strategy: strategyName = DEFAULT_STRATEGY,
-  employees = [], missions = [], pins = [], nightWindows = [], tags = [],
-  repairHints = [],
-  onInvariantViolation = 'throw',
-}) {
-  /* --- structural validation: these are bugs in the input, not planner findings --- */
-  if (!Number.isFinite(start) || !Number.isFinite(end)) throw new Error('Plan window must be numeric timestamps.');
-  if (!(end > start)) throw new Error('Plan must end after it starts.');
-  if (!(shiftMinutes > 0)) throw new Error('Shift length must be positive.');
-  if (employees.length === 0) throw new Error('At least one employee is required.');
-  // Blank names are allowed (a row still being filled in); only real names have
-  // to be distinct, and only so the output is readable - identity is by id.
-  const names = employees.map((e) => e.name.trim()).filter(Boolean);
-  if (new Set(names).size !== names.length) throw new Error('Employee names must be unique.');
-  if (new Set(employees.map((e) => e.id)).size !== employees.length) throw new Error('Employee ids must be unique.');
-
-  const tagIds = new Set(tags.map((t) => t.id));
-  if (tagIds.size !== tags.length) throw new Error('Qualification ids must be unique.');
-  for (const m of missions) for (const r of m.requires ?? []) {
-    if (!Number.isInteger(r.count) || r.count < 1) throw new Error('Qualification counts must be positive integers.');
-  }
-  const warnings = [];
-  const emps = normalizeEmployees(employees, start, end, warnings);
-  if (emps.length === 0) throw new Error('No employee is available during the plan window.');
-  const miss = normalizeMissions(missions, start, end, warnings);
-
-  const employeeById = new Map(emps.map((e) => [e.id, e]));
-  const missionById = new Map(miss.map((m) => [m.id, m]));
-  for (const m of miss) {
-    for (const r of m.requires) if (m.excludes.includes(r.tag)) warnings.push({ code: 'tag-required-and-excluded', missionId: m.id, tag: r.tag });
-  }
-  const goodPins = normalizePins(pins, employeeById, missionById, start, end, warnings, nightWindows);
-
-  for (const p of goodPins) {
-    const m = missionById.get(p.missionId), e = employeeById.get(p.employeeId);
-    if (m.excludes.some((t) => e.tags.includes(t))) warnings.push({ code: 'pin-excluded-tag', missionId: m.id, employeeId: e.id, start: p.start, end: p.end });
-  }
-
-  // Assignments left behind by a period that has since moved on. Counted once
-  // rather than reported one by one: a rota carried across a few days
-  // accumulates dozens, and a wall of identical "cannot be honoured" alerts
-  // reads as a scheduler malfunction rather than the harmless residue it is.
-  //
-  // Counted from the *raw* missions, deliberately. A mission that has itself
-  // dropped out of the period is gone from `missionById`, so everything pinned
-  // to it disappears inside normalizePins before anything can notice - and the
-  // button that clears residue only exists alongside this warning, so a count
-  // taken in there would leave that history with no way to reach it. Sharing
-  // the predicate with `clearStalePins` is what keeps the number honest: what
-  // is reported here is exactly what the button removes.
-  const rawMissionById = new Map(missions.map((m) => [m.id, m]));
-  const outOfPeriod = pins.filter(
-    (p) => isOutOfPeriod(p, rawMissionById.get(p.missionId), start, end),
-  ).length;
-  if (outOfPeriod > 0) warnings.push({ code: WARN.PIN_OUT_OF_PERIOD, count: outOfPeriod });
-
-  const strategy = getStrategy(strategyName);
-  const state = makeState(emps, strategy);
-  // On-call duty can be slept through, so pins on such missions must not push
-  // anyone's sleep block out of the night, and staffing one must not cost the
-  // crew their rest window - see `choose` and `assessRest` below.
-  const sleepable = new Set([...missionById.values()].filter((m) => m.onCall).map((m) => m.id));
-  const rest = preferredRest(emps, tags, nightWindows,
-    goodPins.filter((p) => !sleepable.has(p.missionId)), start, end);
-  const choose = (candidates, fixed, need, mission, lo, hi) => {
-    // Sleep-compatible duty: rest blocks neither deprioritize nor exclude
-    // anyone from an on-call mission.
-    if (mission.onCall) return selectCrew(candidates, fixed, need, mission.requires);
-    // Priority ladder per candidate: configured total-minimum deficit, then
-    // the 8-hour total and 6-hour continuous preferences, then overlap with a
-    // reserved rest block. `selectCrew` re-reads the same vector per crew, so
-    // qualification coverage still outranks every tier here.
-    const costs = new Map(candidates.map((e) => [e.id, [
-      ...restCost(e, tags, nightWindows, rows.filter((r) => r.employeeId === e.id && !sleepable.has(r.missionId)), start, end, lo, hi),
-      Number(overlapsRest(e.id, lo, hi, rest)),
-    ]]));
-    const ordered = [...candidates].sort((a, b) => {
-      const left = costs.get(a.id), right = costs.get(b.id);
-      return left.map((v, i) => v - right[i]).find((v) => v !== 0) ?? 0;
-    });
-    return selectCrew(ordered, fixed, need, mission.requires, costs);
-  };
-  let seqCounter = emps.length;
-  const nextSeq = () => seqCounter++;
-
-  /** Raw assignments before adjacent-row merging. */
-  const rows = [];
-  // `slot` is the grid slot the row belongs to - the mission's own window for a
-  // remote hold, which is claimed once and held whole. Every row carries it
-  // because there is no longer one global step anyone downstream could
-  // rediscover by arithmetic: `mergeRows` rejoins rows within a slot, and the
-  // ring counts distinct slots entered.
-  const addRow = (mission, st, blockStart, blockEnd, slot, pinned, frozen = false) => {
-    occupy(st, mission, blockStart, blockEnd, slot.start, nextSeq);
-    rows.push({
-      missionId: mission.id,
-      missionName: mission.name,
-      type: mission.type,
-      employeeId: st.id,
-      employeeName: st.name,
-      start: blockStart,
-      end: blockEnd,
-      slotStart: slot.start,
-      slotEnd: slot.end,
-      pinned,
-      frozen,
-      ...(st.tags.length ? { qualifications: [...st.tags] } : {}),
-    });
-  };
-
+/**
+ * The segment grid every mission rotates on, as a pure function of the
+ * normalized input.
+ *
+ * Lifted out of `planOnce` so it keeps exactly one definition - the reason the
+ * comment below insists pinned rows and the demand walk cannot disagree about
+ * where a segment starts. Nothing here was ever state-dependent: it reads the
+ * plan window, the employees' availability edges, the night edges and each
+ * mission's own fields, and none of the phases that follow touch any of those.
+ *
+ * Exposed through `segmentGrid` below, which is how anything outside the engine
+ * asks the same question without building a second, subtly different answer.
+ */
+function makeGrid({ start, end, shiftMinutes, emps, miss, goodPins, nightWindows }) {
   /* --- the segment grid local missions rotate on --- */
   // Two things make a segment, and only one of them is the rotation grid.
   //
@@ -737,6 +711,200 @@ function planOnce({
     segmentCache.set(mission, segments);
     return segments;
   };
+  return { segmentsOf, slotBoundsFor };
+}
+
+/**
+ * The segment grid for a plan input, as plain data.
+ *
+ * The one supported way to ask "where does this plan's grid cut" from outside
+ * `plan()`. A caller that rebuilds it - ADR 011's solver adapter is the case in
+ * hand - and gets it even slightly wrong produces a schedule that disagrees
+ * with the engine about what a shift *is*, which is a defect nobody would find
+ * by reading either side on its own.
+ *
+ */
+export function segmentGrid(input) {
+  const { start, end, shiftMinutes, nightWindows = [] } = input;
+  const { emps, miss, goodPins } = prepare(input);
+  const { segmentsOf } = makeGrid({ start, end, shiftMinutes, emps, miss, goodPins, nightWindows });
+  return miss.map((mission) => ({ mission, segments: segmentsOf(mission) }));
+}
+
+/**
+ * The pins `plan()` would accept for this input, normalized: resolved against
+ * their mission's window, clipped, and with the conflicting or unusable ones
+ * already dropped.
+ *
+ * Same argument as `segmentGrid`. A caller reading raw `pins` off the document
+ * sees assignments the engine has rejected, and matching them by literal range
+ * rather than by coverage is the mistake this codebase has made twice.
+ */
+export function acceptedPins(input) {
+  return prepare(input).goodPins;
+}
+
+/** Normalization shared by `segmentGrid` and `acceptedPins`. */
+function prepare({
+  start, end, employees = [], missions = [], pins = [], nightWindows = [],
+}) {
+  // Warnings raised here are discarded: these answer structural questions, and
+  // `plan()` is where findings belong.
+  const warnings = [];
+  const emps = normalizeEmployees(employees, start, end, warnings);
+  const miss = normalizeMissions(missions, start, end, warnings);
+  const employeeById = new Map(emps.map((e) => [e.id, e]));
+  const missionById = new Map(miss.map((m) => [m.id, m]));
+  const goodPins = normalizePins(pins, employeeById, missionById, start, end, warnings, nightWindows);
+  return { emps, miss, goodPins };
+}
+
+function planOnce({
+  start, end, shiftMinutes, strategy: strategyName = DEFAULT_STRATEGY,
+  employees = [], missions = [], pins = [], nightWindows = [], tags = [],
+  repairHints = [],
+  // The instant before which time is a *log* rather than a schedule (ADR 009).
+  // An absolute ms epoch, resolved by the adapter exactly like `nightWindows`,
+  // because the engine has no clock of its own and must not grow one.
+  // `-Infinity` means "nothing has elapsed", which is what every caller written
+  // before this field meant and what keeps the golden fixtures byte-identical.
+  loggedBefore = -Infinity,
+  onInvariantViolation = 'throw',
+}) {
+  /* --- structural validation: these are bugs in the input, not planner findings --- */
+  if (!Number.isFinite(start) || !Number.isFinite(end)) throw new Error('Plan window must be numeric timestamps.');
+  if (!(end > start)) throw new Error('Plan must end after it starts.');
+  if (!(shiftMinutes > 0)) throw new Error('Shift length must be positive.');
+  if (employees.length === 0) throw new Error('At least one employee is required.');
+  // Blank names are allowed (a row still being filled in); only real names have
+  // to be distinct, and only so the output is readable - identity is by id.
+  const names = employees.map((e) => e.name.trim()).filter(Boolean);
+  if (new Set(names).size !== names.length) throw new Error('Employee names must be unique.');
+  if (new Set(employees.map((e) => e.id)).size !== employees.length) throw new Error('Employee ids must be unique.');
+
+  const tagIds = new Set(tags.map((t) => t.id));
+  if (tagIds.size !== tags.length) throw new Error('Qualification ids must be unique.');
+  for (const m of missions) for (const r of m.requires ?? []) {
+    if (!Number.isInteger(r.count) || r.count < 1) throw new Error('Qualification counts must be positive integers.');
+  }
+  const warnings = [];
+  const emps = normalizeEmployees(employees, start, end, warnings);
+  if (emps.length === 0) throw new Error('No employee is available during the plan window.');
+  const miss = normalizeMissions(missions, start, end, warnings);
+
+  const employeeById = new Map(emps.map((e) => [e.id, e]));
+  const missionById = new Map(miss.map((m) => [m.id, m]));
+  for (const m of miss) {
+    for (const r of m.requires) if (m.excludes.includes(r.tag)) warnings.push({ code: 'tag-required-and-excluded', missionId: m.id, tag: r.tag });
+  }
+  const goodPins = normalizePins(pins, employeeById, missionById, start, end, warnings, nightWindows, loggedBefore);
+
+  for (const p of goodPins) {
+    const m = missionById.get(p.missionId), e = employeeById.get(p.employeeId);
+    if (m.excludes.some((t) => e.tags.includes(t))) warnings.push({ code: 'pin-excluded-tag', missionId: m.id, employeeId: e.id, start: p.start, end: p.end });
+    if (m.excludeEmployees.includes(e.id)) warnings.push({ code: 'pin-excluded-employee', missionId: m.id, employeeId: e.id, start: p.start, end: p.end });
+  }
+
+  // Assignments left behind by a period that has since moved on. Counted once
+  // rather than reported one by one: a rota carried across a few days
+  // accumulates dozens, and a wall of identical "cannot be honoured" alerts
+  // reads as a scheduler malfunction rather than the harmless residue it is.
+  //
+  // Counted from the *raw* missions, deliberately. A mission that has itself
+  // dropped out of the period is gone from `missionById`, so everything pinned
+  // to it disappears inside normalizePins before anything can notice - and the
+  // button that clears residue only exists alongside this warning, so a count
+  // taken in there would leave that history with no way to reach it. Sharing
+  // the predicate with `clearStalePins` is what keeps the number honest: what
+  // is reported here is exactly what the button removes.
+  const rawMissionById = new Map(missions.map((m) => [m.id, m]));
+  const stalePins = pins.filter(
+    (p) => isOutOfPeriod(p, rawMissionById.get(p.missionId), start, end),
+  );
+  if (stalePins.length > 0) warnings.push({ code: WARN.PIN_OUT_OF_PERIOD, count: stalePins.length });
+
+  // Duty outside the period still counts towards how much someone has stood
+  // (ADR 015). The engine cannot *schedule* it - that is what out-of-period
+  // means - but a guard who worked those hours should not be first in line for
+  // the next ones, which is what happens if the sum forgets them the moment the
+  // window rolls past.
+  //
+  // Read straight from the raw pins, exactly like the count above and for the
+  // same reason: a mission that has itself dropped out of the period is already
+  // gone from `missionById`, and the hours its pins record are no less real.
+  const carried = new Map();
+  const slotMs = shiftMinutes * MINUTE;
+  for (const p of stalePins) {
+    const mission = rawMissionById.get(p.missionId);
+    if (!mission) continue;
+    const win = resolvePinWindow(p, mission, start, end);
+    if (!(win.end > win.start)) continue;
+    const at = carried.get(p.employeeId) ?? { minutes: 0, stints: 0 };
+    at.minutes += win.end - win.start;
+    // No grid to name a slot on any more, so a turn is one plan shift length,
+    // at least one. `rotation` is the only strategy that reads it.
+    at.stints += Math.max(1, Math.round((win.end - win.start) / slotMs));
+    carried.set(p.employeeId, at);
+  }
+
+  const strategy = getStrategy(strategyName);
+  const state = makeState(emps, strategy, carried, shiftMinutes);
+  // On-call duty can be slept through, so pins on such missions must not push
+  // anyone's sleep block out of the night, and staffing one must not cost the
+  // crew their rest window - see `choose` and `assessRest` below.
+  const sleepable = new Set([...missionById.values()].filter((m) => m.onCall).map((m) => m.id));
+  const rest = preferredRest(emps, tags, nightWindows,
+    goodPins.filter((p) => !sleepable.has(p.missionId)), start, end);
+  const choose = (candidates, fixed, need, mission, lo, hi) => {
+    // Sleep-compatible duty: rest blocks neither deprioritize nor exclude
+    // anyone from an on-call mission.
+    if (mission.onCall) return selectCrew(candidates, fixed, need, mission.requires);
+    // Priority ladder per candidate: configured total-minimum deficit, then
+    // the 8-hour total and 6-hour continuous preferences, then overlap with a
+    // reserved rest block. `selectCrew` re-reads the same vector per crew, so
+    // qualification coverage still outranks every tier here.
+    const costs = new Map(candidates.map((e) => [e.id, [
+      ...restCost(e, tags, nightWindows, rows.filter((r) => r.employeeId === e.id && !sleepable.has(r.missionId)), start, end, lo, hi),
+      Number(overlapsRest(e.id, lo, hi, rest)),
+    ]]));
+    const ordered = [...candidates].sort((a, b) => {
+      const left = costs.get(a.id), right = costs.get(b.id);
+      return left.map((v, i) => v - right[i]).find((v) => v !== 0) ?? 0;
+    });
+    return selectCrew(ordered, fixed, need, mission.requires, costs);
+  };
+  let seqCounter = emps.length;
+  const nextSeq = () => seqCounter++;
+
+  /** Raw assignments before adjacent-row merging. */
+  const rows = [];
+  // `slot` is the grid slot the row belongs to - the mission's own window for a
+  // remote hold, which is claimed once and held whole. Every row carries it
+  // because there is no longer one global step anyone downstream could
+  // rediscover by arithmetic: `mergeRows` rejoins rows within a slot, and the
+  // ring counts distinct slots entered.
+  const addRow = (mission, st, blockStart, blockEnd, slot, pinned, frozen = false) => {
+    occupy(st, mission, blockStart, blockEnd, slot.start, nextSeq);
+    rows.push({
+      missionId: mission.id,
+      missionName: mission.name,
+      type: mission.type,
+      employeeId: st.id,
+      employeeName: st.name,
+      start: blockStart,
+      end: blockEnd,
+      slotStart: slot.start,
+      slotEnd: slot.end,
+      pinned,
+      frozen,
+      ...(st.tags.length ? { qualifications: [...st.tags] } : {}),
+    });
+  };
+
+  /* --- the segment grid local missions rotate on --- */
+  // Built before anything is placed, because phase 1 needs it too: a pin on a
+  // local mission is emitted one row per segment. See `makeGrid`.
+  const { segmentsOf } = makeGrid({ start, end, shiftMinutes, emps, miss, goodPins, nightWindows });
 
   /* --- 1. pins are immovable: place them before anything else competes --- */
   // A pin on a remote mission stays one row over the whole mission: that is
@@ -799,7 +967,7 @@ function planOnce({
   /* --- 2. remote missions: hard constraints, so they claim people first --- */
   const eligibleForRemote = (m) => [...state.values()].filter(
     (st) => isAvailable(st, m.start, m.end) && isFree(st, m.start, m.end)
-      && !m.excludes.some((tag) => st.tags.includes(tag)),
+      && !isExcluded(m, st),
   );
 
   const remotes = miss.flatMap((m) => m.type === 'remote' ? [m]
@@ -859,6 +1027,17 @@ function planOnce({
       const covered = rows.filter(
         (r) => r.missionId === m.id && r.start <= seg.start && r.end >= seg.end,
       ).length;
+      // Elapsed time that already has a record is a record, not a slot to fill
+      // (ADR 009). Raising a mission's headcount today must not retroactively
+      // staff a shift that is already over with somebody who was never there:
+      // the freeze records *who* held a slot and has nowhere to record how many
+      // seats existed then, so today's `count` is not evidence about the past.
+      //
+      // Gated on `covered` deliberately. An elapsed segment nobody is recorded
+      // on has no history to protect, and the schedule it *would* have had is
+      // still the most useful thing to show - so it is planned as before. Only
+      // a segment with a record defers to it.
+      if (seg.end <= loggedBefore && covered > 0) continue;
       const need = countAt(m, seg.start, nightWindows) - covered;
       if (need > 0) {
         demands.push({
@@ -878,7 +1057,7 @@ function planOnce({
   // the demand rather than something that shifts as assignments are made.
   for (const d of demands) {
     const eligible = [...state.values()].filter((st) => isAvailable(st, d.start, d.end)
-      && !d.mission.excludes.some((tag) => st.tags.includes(tag)));
+      && !isExcluded(d.mission, st));
     d.pool = scarcity(d.mission, eligible, d.start, d.end);
   }
   for (const d of demands) {
@@ -896,7 +1075,7 @@ function planOnce({
   for (const d of demands) {
     const candidates = [...state.values()].filter(
       (st) => isAvailable(st, d.start, d.end) && isFree(st, d.start, d.end)
-        && !d.mission.excludes.some((tag) => st.tags.includes(tag)),
+        && !isExcluded(d.mission, st),
     );
     // Who among them actually gets it is the strategy's call - see
     // `strategies.js` for what each one optimizes for.
@@ -950,6 +1129,10 @@ function planOnce({
   };
   const missing = new Map();
   for (const seg of result.timeline) {
+    // A qualification gap in elapsed time is a historical fact, not a finding.
+    // The engine no longer staffs that time (ADR 009), so reporting it would
+    // be an alert nobody can act on, arriving on every render.
+    if (seg.end <= loggedBefore) continue;
     for (const m of miss) {
       const running = m.type === 'daily' ? m.occurrences.some((w) => seg.start >= w.start && seg.start < w.end)
         : seg.start >= m.start && seg.start < m.end;
@@ -966,7 +1149,7 @@ function planOnce({
   }
   warnings.push(...missing.values());
   warnings.push(...assessRest(shifts, emps, tags, nightWindows, start, end, sleepable));
-  return validateSchedule(result, { start, end, shiftMinutes, employees: emps, missions: miss, pins: goodPins, nightWindows }, onInvariantViolation);
+  return validateSchedule(result, { start, end, shiftMinutes, employees: emps, missions: miss, pins: goodPins, nightWindows, loggedBefore }, onInvariantViolation);
 }
 
 /**
@@ -1035,7 +1218,7 @@ function repairCandidates(input, base, warning, win) {
   const mission = input.missions.find((m) => m.id === warning.missionId);
   if (!mission) return [];
   return input.employees.filter((e) => (e.tags ?? []).includes(warning.tag)
-    && !(mission.excludes ?? []).some((t) => (e.tags ?? []).includes(t))
+    && !isExcluded(mission, e)
     && (e.start ?? input.start) <= win.start && (e.end ?? input.end) >= win.end
     && !base.shifts.some((s) => s.employeeId === e.id && s.missionId === mission.id
       && s.start <= win.start && s.end >= win.end)
@@ -1149,10 +1332,39 @@ function buildStats(shifts, employees, sleepable) {
       if (minGapMinutes == null || gap < minGapMinutes) minGapMinutes = gap;
     }
 
-    return { employeeId: e.id, name: e.name, minutes, stints: own.length, minGapMinutes };
+    // Duty stood outside this period (ADR 015) rides alongside rather than
+    // inside `minutes`: the window figure is what the agenda below it shows, so
+    // conflating the two would make the table disagree with itself. What the
+    // strategy actually ranks on is `totalMinutes`.
+    //
+    // Present only when there is some, which is the same discipline the wire
+    // format follows and for the same reason: a plan that carries nothing must
+    // produce exactly the object it always produced, or every golden fixture
+    // changes shape for a feature it does not use.
+    const carriedMinutes = e.carriedMinutes ?? 0;
+    const carriedStints = e.carriedStints ?? 0;
+    const row = { employeeId: e.id, name: e.name, minutes, stints: own.length, minGapMinutes };
+    if (!carriedMinutes && !carriedStints) return row;
+    return {
+      ...row,
+      carriedMinutes,
+      carriedStints,
+      totalMinutes: minutes + carriedMinutes,
+      totalStints: own.length + carriedStints,
+    };
   });
 
   const totals = perEmployee.map((p) => p.minutes);
   const spreadMinutes = totals.length ? Math.max(...totals) - Math.min(...totals) : 0;
-  return { perEmployee, spreadMinutes };
+  if (!perEmployee.some((p) => p.carriedMinutes || p.carriedStints)) {
+    return { perEmployee, spreadMinutes };
+  }
+  // The number the engine is actually evening out. While a debt is being repaid
+  // the two diverge, and the window one reads as a fault when it is a fix.
+  const overall = perEmployee.map((p) => p.totalMinutes ?? p.minutes);
+  return {
+    perEmployee,
+    spreadMinutes,
+    totalSpreadMinutes: Math.max(...overall) - Math.min(...overall),
+  };
 }

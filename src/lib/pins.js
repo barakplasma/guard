@@ -175,6 +175,11 @@ export function freezeElapsedBeforeEdit(prev, next, now = Date.now()) {
   if (prev.employees.length === 0 || prev.missions.length === 0) return next;
   let result;
   try {
+    // Deliberately *without* `now`. The freeze's whole job is to capture what
+    // the engine had already decided for elapsed time, so it needs the
+    // unrestricted schedule; passing `now` here would make the engine decline
+    // to plan the very hours this is about to record, and history would be lost
+    // rather than preserved (ADR 009).
     result = runPlanner(toPlannerInput(prev));
   } catch {
     return next;
@@ -273,7 +278,46 @@ function isStale(doc, pin) {
  */
 export function clearStalePins(doc) {
   const pins = doc.pins.filter((p) => !isStale(doc, p));
-  return pins.length === doc.pins.length ? doc : { ...doc, pins };
+  if (pins.length === doc.pins.length) return doc;
+  return { ...doc, pins, employees: carryForward(doc, doc.pins.filter((p) => isStale(doc, p))) };
+}
+
+/**
+ * Roll the duty that is being removed into each guard's carried totals
+ * (ADR 015).
+ *
+ * The export bounds the document; this keeps the one number the engine still
+ * needs out of what the export takes away. Without it, clearing residue also
+ * clears the evidence that one guard has stood twice as many hours as another,
+ * and the next window starts everyone level - with the app reporting a
+ * perfectly even spread over a debt it can no longer see.
+ *
+ * This is a change of **representation, not of schedule**. `plan()` already
+ * counts these same pins towards the same totals, so the sum is identical
+ * before and after and no shift moves - which is the button's whole safety
+ * argument and what `tests/pins.test.js` asserts. The arithmetic below
+ * deliberately mirrors the engine's, including the stint approximation: an
+ * out-of-period pin has no grid to name a slot on any more, so a turn is one
+ * plan shift length, at least one.
+ */
+function carryForward(doc, removed) {
+  const slot = Math.max(1, doc.shiftMinutes) * 60 * 1000;
+  const minutes = new Map();
+  const stints = new Map();
+  for (const pin of removed) {
+    const { start, end } = pinRange(doc, pin);
+    if (!(end > start)) continue;
+    minutes.set(pin.employeeId, (minutes.get(pin.employeeId) ?? 0) + (end - start));
+    stints.set(pin.employeeId, (stints.get(pin.employeeId) ?? 0) + Math.max(1, Math.round((end - start) / slot)));
+  }
+  if (minutes.size === 0) return doc.employees;
+  return doc.employees.map((e) => (minutes.has(e.id)
+    ? {
+      ...e,
+      carriedMinutes: (e.carriedMinutes ?? 0) + Math.round(minutes.get(e.id) / 60000),
+      carriedStints: (e.carriedStints ?? 0) + stints.get(e.id),
+    }
+    : e));
 }
 
 /** How many pins `clearStalePins` would remove. */
@@ -282,33 +326,24 @@ export function countStalePins(doc) {
 }
 
 /**
- * The automatic half of the same cleanup, deliberately timid on two counts.
+ * There is no automatic cleanup any more, and that is the point.
  *
- * It refuses to act when the edit moves the period, because the period fields
- * fire an edit on every intermediate value that parses - typing a year in the
- * end-date box walks through several - and a momentarily wild window would
- * take real history with it, unrecoverably. So the window has to be standing
- * still for this to run at all.
+ * `pruneStalePins` used to run inside `setDoc` and drop assignments that had
+ * finished before the period start. It was deliberately timid - it declined to
+ * act on the edit that *moved* the window, because the date fields emit an edit
+ * on every intermediate value that parses - and under the old model it was
+ * right: out-of-period pins were residue, and its own comment said that
+ * collecting them after a deliberate roll "is the point".
  *
- * And it only ever drops pins that finished *before* the period starts. A pin
- * beyond the end is far more likely to be wanted: extending the end to cover
- * it is the documented workflow, so treating it as residue would delete the
- * assignment a moment before the user reaches for it. Those are left to the
- * explicit button, where someone has said out loud that they want them gone.
+ * ADR 012 inverts that. A rolled-past window is **exported**, which makes those
+ * same pins the only durable record of who actually stood post. The timidity
+ * was what hid the damage: rolling the window looked safe, and the deletion
+ * landed on the *next* edit, when the window was standing still again.
+ * `scripts/rollForwardLoss.mjs` measured it at 288 assignments destroyed by
+ * adding an employee.
  *
- * The guard only holds for the edit that moves the window, which leaves one
- * accepted gap: land a nonsense period and then edit something else before
- * correcting it, and that edit collects real history. Closing it would need a
- * notion of a *settled* window, which this app has no way to form - the engine
- * has no clock, and there is no undo to fall back on. Note that rolling the
- * period forward deliberately and then editing anything is not that gap: the
- * history really is residue by then, and collecting it is the point.
+ * So nothing removes recorded duty on its own. Every pin the prune could have
+ * taken had already elapsed, so there is no narrower version of it left to
+ * keep. Removal is now explicit, goes through `outOfPeriodLog` first, and is
+ * the user's decision - see `clearStalePins` above.
  */
-export function pruneStalePins(prev, next) {
-  if (prev.start !== next.start || prev.end !== next.end) return next;
-  const pins = next.pins.filter((p) => {
-    if (!isStale(next, p)) return true;
-    return (p.end ?? next.end) > next.start;
-  });
-  return pins.length === next.pins.length ? next : { ...next, pins };
-}

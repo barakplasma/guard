@@ -10,7 +10,26 @@ const row = (patch = {}) => ({ missionId: 'g', employeeId: 'a', type: 'local',
 const result = (shifts) => ({ shifts, timeline: [{ start: 0, end: H,
   onDuty: shifts.filter((s) => s.start < H && s.end > 0) }, { start: H, end: 2 * H,
   onDuty: shifts.filter((s) => s.start < 2 * H && s.end > H) }] });
-const codes = (r, i = input) => checkSchedule(r, i).map((v) => v.rule);
+/**
+ * These fixtures are deliberately partial - each exists to provoke one rule, so
+ * most of them describe a mission nobody is on for part of the window. That is
+ * a real shortfall, and `UNREPORTED_SHORTFALL` would fire on nearly all of them
+ * and drown out the rule under test. So unless a test supplies its own
+ * warnings, blanket `understaffed` cover is synthesized for every mission:
+ * these tests are not the ones asserting that shortages get reported. The
+ * dedicated tests for that are at the bottom of this file, and the property
+ * suite exercises it across ~1900 generated plans.
+ */
+const blanketCover = (i) => i.missions.map(
+  (m) => ({ code: 'understaffed', missionId: m.id, start: -Infinity, end: Infinity }),
+);
+// Unconditional: `validateSchedule(..., 'report')` mutates `r.warnings` in
+// place, so "did the caller supply warnings" is not a question this helper can
+// answer after the first call.
+const codes = (r, i = input) => checkSchedule(
+  { ...r, warnings: [...(r.warnings ?? []), ...blanketCover(i)] },
+  i,
+).map((v) => v.rule);
 test('checker accepts a valid slot and catches duplicate seats', () => {
   assert.deepEqual(codes(result([row()])), []);
   const c = codes(result([row(), row()]));
@@ -77,4 +96,43 @@ test('unexpected sub-slot edges are rejected even with correct slot stamps and t
   const night = { ...i, nightWindows: [{ start: H / 10, end: H }] };
   assert.ok(codes(r, night).includes('UNEXPECTED_SHIFT_BOUNDARY'), 'unchanged night staffing is not a reason to split');
   assert.deepEqual(codes(r, { ...night, missions: [{ ...i.missions[0], nightCount: 2 }] }), [], 'changed night staffing is a real boundary');
+});
+
+test('a shortfall nobody reported is an engine bug', () => {
+  // The check an empty schedule cannot pass. Mission `g` runs the whole plan
+  // and needs one person; the second hour has nobody and says nothing about it.
+  const short = { ...result([row()]), warnings: [] };
+  assert.ok(checkSchedule(short, input).some((v) => v.rule === 'UNREPORTED_SHORTFALL'));
+
+  // Reporting it makes the same schedule legal: short is allowed, silent is not.
+  const honest = { ...result([row()]), warnings: [{ code: 'understaffed', missionId: 'g', start: H, end: 2 * H }] };
+  assert.deepEqual(checkSchedule(honest, input).map((v) => v.rule), []);
+});
+
+test('a schedule with no shifts at all is caught, not waved through', () => {
+  const empty = { shifts: [], warnings: [], timeline: [{ start: 0, end: 2 * H, onDuty: [] }] };
+  assert.ok(checkSchedule(empty, input).some((v) => v.rule === 'UNREPORTED_SHORTFALL'));
+});
+
+test('warnings may tile the shortfall in pieces', () => {
+  // The engine reports per grid segment, so no single warning spans the gap.
+  const pieces = { ...result([row()]), warnings: [
+    { code: 'understaffed', missionId: 'g', start: H, end: H * 1.5 },
+    { code: 'understaffed', missionId: 'g', start: H * 1.5, end: 2 * H },
+  ] };
+  assert.deepEqual(checkSchedule(pieces, input).map((v) => v.rule), []);
+});
+
+test('an accepted pin that vanished from the output is an engine bug', () => {
+  const i = { ...input, employees: [{ id: 'a' }], pins: [{ missionId: 'g', employeeId: 'a', start: 0, end: 2 * H }] };
+  const dropped = { shifts: [], warnings: [{ code: 'understaffed', missionId: 'g', start: 0, end: 2 * H }],
+    timeline: [{ start: 0, end: 2 * H, onDuty: [] }] };
+  assert.ok(checkSchedule(dropped, i).some((v) => v.rule === 'PIN_DROPPED'));
+});
+
+test('a pin honoured as several rows, one per segment, is not dropped', () => {
+  const i = { ...input, employees: [{ id: 'a' }], pins: [{ missionId: 'g', employeeId: 'a', start: 0, end: 2 * H }] };
+  const halves = [row({ pinned: true }), row({ pinned: true, start: H, end: 2 * H, slotStart: H, slotEnd: 2 * H })];
+  const r = { ...result(halves), warnings: [] };
+  assert.ok(!checkSchedule(r, i).some((v) => v.rule === 'PIN_DROPPED'));
 });

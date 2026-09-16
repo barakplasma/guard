@@ -6,7 +6,7 @@ import { decodePlan, encodePlan, PARAM } from '../lib/urlState.js';
 import { emptyPlan, makeId, planSchema, prunePins } from '../lib/planSchema.js';
 import {
   applyClearPin, applyClearPinsForMission, applyMissionAssignees, applySwap,
-  applyCorrection, clearStalePins, freezeElapsedBeforeEdit, pruneStalePins,
+  applyCorrection, clearStalePins, freezeElapsedBeforeEdit,
 } from '../lib/pins.js';
 import { addUniqueEmployees } from '../lib/employees.js';
 import { t } from '../strings.js';
@@ -61,7 +61,10 @@ export function PlanProvider({ children }) {
   const setDoc = useCallback((next) => {
     const previous = lastDoc.current ?? doc;
     const frozen = freezeElapsedBeforeEdit(previous, next);
-    const parsed = planSchema.parse(prunePins(pruneStalePins(previous, frozen)));
+    // No automatic pruning of out-of-period pins: they are the durable record
+    // of duty once ADR 012 exports a rolled-past window, and deleting them here
+    // cost 288 assignments per unrelated edit. Removal is explicit now.
+    const parsed = planSchema.parse(prunePins(frozen));
     const encoded = encodePlan(parsed);
     lastBlob.current = encoded;
     lastDoc.current = parsed;
