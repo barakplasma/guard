@@ -377,10 +377,15 @@ quietly fall back to the wrong process is worse than no measurement.
 
 ### The device, and what it disproved
 
-**Pixel 10, Chrome 152: the 72-hour ladder takes 12.4 seconds.** First load
-2143ms cold over the network, warm re-solve 3246ms, cancellation immediate, all
-four levels proved optimal, `crossOriginIsolated` false. Read with
+**Pixel 10, Chrome 152: the 72-hour ladder takes 12.4 to 20.9 seconds** — two
+runs, same device, same fixture, same browser. First load 2143ms cold over the
+network and 463ms from cache, warm re-solve 3.2-3.5s, cancellation immediate,
+all four levels proved optimal in both, `crossOriginIsolated` false. Read with
 `browser/standalone.html`, which is why that page exists.
+
+A 1.69x spread over two runs, and the fingerprint moved only 1.15x across them -
+so it fails to track the variation within one device as well as between two. The
+range is the result; either number alone repeats the mistake below.
 
 The curve above predicted **21.7s** for it, from a worker spin of 2817 against
 this machine's 4284. It came in 1.75x faster than predicted, and faster in

@@ -480,7 +480,10 @@ already recorded, and it does not move with the horizon.
 
 ### Measured on the device — and the curve's axis was wrong
 
-**Pixel 10, Chrome 152, Android. The 72-hour ladder takes 12.4 seconds.**
+**Pixel 10, Chrome 152, Android. The 72-hour ladder takes 12.4 to 20.9
+seconds** — two runs, same device, same fixture, same browser, a 1.69x spread.
+The first reading below is the faster run; the range is the result, and quoting
+either number alone is the same mistake as the curve it replaced.
 
 ```text
   fixture   : 72h, 74 segments, 8 guards, 3 missions
@@ -496,10 +499,23 @@ already recorded, and it does not move with the horizon.
   COI       : false       — no COOP/COEP needed, so Pages can host it
 ```
 
+The second run: 4024 / 7592 / 5725 / 3562ms, ladder 20.9s, first load 463ms
+from a warm HTTP cache, warm re-solve 3471ms.
+
 Every acceptance criterion in this section is now answered on real hardware:
-first load 2.1s, repeated solve 3.2s, cancellation works, one worker
-configured, all four levels proved optimal, and the phone reaches the same
-answers as the desktop.
+first load 2.1s cold, repeated solve 3.2-3.5s, cancellation works, one worker
+configured, all four levels proved optimal in both runs, and the phone reaches
+the same answers as the desktop.
+
+**One run is not a measurement, which is the second thing this exercise had to
+learn.** Between those two runs the fingerprint moved 1.15x while the ladder
+moved 1.69x, so it does not track the variation *within* one device either —
+the retraction below is broader than it first looked. The per-level shape is
+also the wrong way round for heat: levels 1-3 slowed 1.5-2.2x while level 4 and
+the warm re-solve barely moved (1.10x, 1.07x), and the slow run is the one that
+started from a warm cache with an idle CPU. That suggests a governor that had
+not ramped rather than a phone that had got hot, but it is a guess from two
+samples and is recorded as one.
 
 **And the measurement invalidated the curve above as a cross-device
 predictor.** The Pixel's worker scored 2817 on the spin probe against this
@@ -532,7 +548,8 @@ optimistic one.
 
 ### The consequence that actually decides the design
 
-A 72-hour reschedule costs **12.4 seconds on the phone this rota is run from**.
+A 72-hour reschedule costs **12 to 21 seconds on the phone this rota is run
+from**.
 Against the operating reality the app was built for — a mission appears and the
 rota has to be rebalanced inside twenty or thirty minutes — that is not close to
 a constraint. Speed is not the objection to MiniZinc, and the honest version of
@@ -541,7 +558,7 @@ that sentence is stronger than the bracketed one it replaces: the pessimistic
 unthrottled desktop.
 
 The objection is *when* it runs. The app re-solves on every `setDoc`, which
-means every keystroke in a name field. At 12.4 seconds — or at 3.2, the warm
+means every keystroke in a name field. At 12 to 21 seconds — or at 3.2, the warm
 re-solve of a single level — that is impossible, and this record had never
 stated it. So a MiniZinc adapter is not a drop-in replacement for `plan()`; it
 requires the solve to become explicit and asynchronous, with the document
