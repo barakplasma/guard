@@ -90,10 +90,9 @@ for (const r of rows) {
     + `${String(`${r.rssPeak}MB`).padStart(11)}`);
 }
 
-console.log('\nTo place a real device on this curve:');
-console.log('  1. serve prototype/minizinc/ over the LAN and open browser/index.html on it,');
-console.log('     or use chrome://inspect from a machine with the phone attached;');
-console.log('  2. read the "worker spin" line the page prints;');
-console.log('  3. find the row with the nearest worker spin. That row is the device.');
-console.log('\nThe page measures the same four solves, so a device can also just be read');
-console.log('directly - the curve is for reasoning about hardware nobody has to hand.');
+console.log('\nTo place a real device on this curve, open browser/standalone.html on it -');
+console.log('one file, no Node, no server, servable straight from a raw-file host. It');
+console.log('measures the same four solves, prints its own worker spin, and carries a copy');
+console.log('of the table above so it names its own row.');
+console.log('\nThe curve is for reasoning about hardware nobody has to hand. A device that');
+console.log('is to hand should just be read.');

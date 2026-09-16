@@ -42,8 +42,24 @@ CHROME=... node prototype/minizinc/browser.mjs 24 highs 4            # throttled
 CHROME=... node prototype/minizinc/pixelClass.mjs                    # the whole curve
 ```
 
-To measure a phone rather than reason about one, serve the same fixture on the
-LAN and open it there. The page prints what it measures; no harness is involved.
+To measure a phone rather than reason about one, there are two ways in and
+neither needs a checkout on the device.
+
+**`browser/standalone.html` needs nothing at all** — no Node, no server, no
+build step. It is one file with the model and both instances inlined and
+MiniZinc loaded from a CDN, so it runs straight off a raw-file host:
+
+```text
+https://raw.githack.com/barakplasma/guard/<branch>/prototype/minizinc/browser/standalone.html
+```
+
+Tap a horizon, wait, tap **Copy the result**. It prints its own worker spin rate,
+first load, four solve times, a warm re-solve and a cancellation check, then
+places itself against the desktop curve below without anyone having to do the
+arithmetic. The CDN is the one thing here the app itself would never do; this is
+a measurement page, not the app, and nothing in `prototype/` ships.
+
+**Or serve the same fixture on the LAN**, which keeps everything local:
 
 ```bash
 node prototype/minizinc/serve.mjs 72
