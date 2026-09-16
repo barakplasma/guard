@@ -24,7 +24,7 @@
  * hand-edits survive re-planning and sharing. See `plan`'s jsdoc.
  */
 
-import { getStrategy, DEFAULT_STRATEGY } from './strategies.js';
+import { getStrategy, DEFAULT_STRATEGY, MAX_UNBROKEN_MINUTES } from './strategies.js';
 import { validateSchedule } from './invariants.js';
 import { selectCrew, missingQualifications, requirementsOf } from './crew.js';
 import { preferredRest, overlapsRest, assessRest, restCost, restMetrics, restDeficit } from './rest.js';
@@ -481,23 +481,29 @@ function normalizePins(pins, employeeById, missionById, planStart, planEnd, warn
  * failure `rotation` was fixed for, arriving through the fairness key instead.
  *
  * The bound is the engine's own quality bar rather than a number invented here -
- * `invariants.js` calls three consecutive slots a `long-unbroken-run`, so two
- * slots is the most a debt may buy and a debt can never on its own build a run
- * this codebase would flag. The cost is that a larger debt settles two slots per
- * window as the period rolls forward instead of all at once, which is what
- * `scripts/fairnessAcrossRolls.mjs` measures.
+ * ADR 016 now caps the run directly, which is the better place for it, so this
+ * cap is no longer what keeps anybody off post for three days - it bounds how
+ * far one window's schedule may be tilted by a debt too old to settle here.
+ * Unclamped, a newcomer against a roster five hundred hours ahead takes 62 of a
+ * 72-hour window while everyone else takes 20.
  */
-function carriedDebts(employees, carried, shiftMinutes) {
+function carriedDebts(employees, carried) {
   const total = (e) => (e.carriedMinutes ?? 0) + (carried.get(e.id)?.minutes ?? 0) / MINUTE;
   if (employees.length === 0) return new Map();
   const floor = Math.min(...employees.map(total));
-  const cap = 2 * shiftMinutes;
+  // The same quantity as the longest run `balanced` will build (ADR 016), and
+  // for a reason rather than by coincidence: repaying a debt is *what* builds a
+  // run, so a window may not owe anyone more continuous duty than it is willing
+  // to hand them. Six hours of debt settles the worked case in eight rolls with
+  // no stretch over six hours; unclamped, the same case gives one guard 62 of a
+  // 72-hour window against everyone else's 20.
+  const cap = MAX_UNBROKEN_MINUTES;
   return new Map(employees.map((e) => [e.id, Math.min(total(e) - floor, cap)]));
 }
 
-function makeState(employees, strategy, carried = new Map(), shiftMinutes = 60) {
+function makeState(employees, strategy, carried = new Map()) {
   let seq = 0;
-  const debts = carriedDebts(employees, carried, shiftMinutes);
+  const debts = carriedDebts(employees, carried);
   return new Map(
     employees.map((e, index) => [
       e.id,
@@ -508,6 +514,7 @@ function makeState(employees, strategy, carried = new Map(), shiftMinutes = 60) 
         minutes: debts.get(e.id) ?? 0,
         carriedStints: (e.carriedStints ?? 0) + (carried.get(e.id)?.stints ?? 0),
         missionMinutes: new Map(), lastEnd: -Infinity, seq: seq++, stints: 0,
+        runMinutes: 0, runEnd: -Infinity,
         ...(strategy.seed ? strategy.seed(e, index) : null),
       },
     ]),
@@ -530,6 +537,13 @@ function occupy(st, mission, start, end, slotStart, counter) {
   // ever looks at start/end.
   st.busy.push({ start, end, slotStart, missionId: mission.id, ...(mission.type !== 'local' ? { remote: true } : null) });
   st.busyUntil = Math.max(st.busyUntil, end);
+  // The unbroken stretch ending at `end`, which `balanced` refuses to extend
+  // past a point unless nobody else is free (ADR 016). Tracked here rather than
+  // recomputed from `busy` because every row that lands does so through this
+  // function, pins included - a person mid-run is mid-run however they got
+  // there.
+  st.runMinutes = (st.runEnd === start ? st.runMinutes : 0) + (end - start) / MINUTE;
+  st.runEnd = end;
   const minutes = (end - start) / MINUTE;
   st.minutes += minutes;
   st.missionMinutes.set(mission.id, (st.missionMinutes.get(mission.id) ?? 0) + minutes);
@@ -848,7 +862,7 @@ function planOnce({
   }
 
   const strategy = getStrategy(strategyName);
-  const state = makeState(emps, strategy, carried, shiftMinutes);
+  const state = makeState(emps, strategy, carried);
   // On-call duty can be slept through, so pins on such missions must not push
   // anyone's sleep block out of the night, and staffing one must not cost the
   // crew their rest window - see `choose` and `assessRest` below.

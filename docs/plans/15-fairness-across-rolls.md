@@ -104,47 +104,63 @@ same fixture, same 36-hour debt, only the clamp changed:
 | debt cap | longest unbroken run | debt left after 8 rolls |
 |---|---|---|
 | 1 slot  | 2h  | 36h — repays nothing |
-| **2 slots** | **5h** | **30h — about an hour a roll** |
+| 2 slots | 5h  | 30h — about an hour a roll |
 | 4 slots | 11h | 10h — about 3.5h a roll |
 
-**Two slots is what ships**, and the cap is one line in `carriedDebts`. It is
-chosen against the engine's own quality bar rather than picked by feel:
-`invariants.js` calls three consecutive slots a `long-unbroken-run`, so a debt
-may never buy more than two. The cost is stated rather than hidden - a large
-debt settles as the period rolls forward instead of in one go.
+Every hour of repayment cost an hour of unbroken duty, and there was no setting
+that bought both.
+
+**ADR 016 then removed the trade**, by capping the run directly instead of
+capping what causes it. With that in place the same table reads:
+
+| debt cap | longest unbroken run | debt left after 8 rolls |
+|---|---|---|
+| 2 hours | 5h | 30h |
+| **6 hours** | **6h** | **0h — fully settled** |
+| unclamped | 6h | 0h |
+
+**Six hours is what ships**, one line in `carriedDebts`, and it is the same
+quantity as ADR 016's run cap in code rather than by coincidence: repaying a
+debt is *what* builds a run, so a window may not owe anyone more continuous duty
+than it is willing to hand them.
+
+The cap still has a job, just not that one. Unclamped, a newcomer against a
+roster five hundred hours ahead takes **62 of a 72-hour window** while everyone
+else takes 20 - in six-hour stretches, but still the whole window tilted onto
+one person. At six hours they take 33 against 27, which is the feature working.
 
 ## Consequences
 
-The gap now closes slowly instead of never:
+The gap closes completely, and the longest anybody stands while it does is six
+hours:
 
 ```
   roll   window spread   cumulative spread   busiest   idlest
-     2           2.0h               36.0h       36h       0h
-     4           2.0h               34.0h       66h      32h
-     6           2.0h               32.0h       96h      64h
-     8           2.0h               30.0h      126h      96h
+     2           7.0h               36.0h       36h       0h
+     4           7.0h               22.0h       64h      42h
+     6           7.0h               10.0h       94h      84h
+     8           0.0h                0.0h      120h     120h
 ```
 
-About an hour a roll against the un-clamped four rolls flat. Slow, converging,
-and it cannot put anybody on post for a day and a half to get there. Compare the
+Six rolls to repay two days of absence, and nothing left over. Compare the
 before table, where the same fixture sat at 36h from roll 2 to roll 8 and would
 have sat there forever.
 
-**This is the sharpest argument in the repo for ADR 011.** What is wanted here
-is "even out total duty *subject to* nobody standing an unbroken run" - two
-objectives that have to trade against each other. A greedy walk has one ordering
-and no way to trade, so the two collapse into a single knob where every hour of
-repayment costs an hour of unbroken duty. A solver states them as separate
-levels and trades them properly. The table above is what the absence of that
-costs, in hours.
+**The window spread is larger while it repays, and that is the trade working
+rather than failing.** Seven hours against zero: a window deliberately
+unbalanced is how somebody back from leave catches up, and a perfectly even
+window at roll 2 would be one that had given up. It returns to zero on its own, so the steady state that was already
+fine stays fine.
 
-**`scripts/unbrokenRuns.mjs` also records something already true on `main`.**
-The same fixture hands the returning guard a **forty-hour** unbroken run at the
-roll whose window still contains their absence - no carried duty involved.
-`balanced` evens out the window it is given, and that is what evening out looks
-like when one person is far behind inside it. Recorded rather than fixed:
-changing what `balanced` optimises is the owner's call, not a tidy-up, and it
-would change the schedule every already-shared link renders.
+**What this record nearly shipped is worth keeping in view.** Between the first
+implementation and this one, the honest reading was that a greedy minutes-first
+walk *cannot* have both - that "even out total duty subject to nobody standing
+an unbroken run" is two objectives which have to trade, and a single ordering
+has no way to trade them. That reading was wrong, and only wrong because the
+second objective could be expressed as a tier of its own rather than as a
+setting of the first. It was also the sharpest argument this repo had for
+ADR 011, and it evaporated on measurement. Worth remembering the next time a
+limitation looks fundamental.
 
 Worth knowing while reading those numbers: the app used to show only the window
 figure, so during repayment it displayed a spread that looks like a fault and is

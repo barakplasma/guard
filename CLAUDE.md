@@ -168,19 +168,42 @@ slot on, so a turn is one plan shift length, at least one.
 milliseconds — `occupy` divides by `MINUTE` on the way in. Seeding it cost an
 hour to a factor of 60,000.
 
-The debt is **normalized against the least-worked person and clamped to two
-shift slots** (`carriedDebts`), and both halves are load-bearing rather than
-tidy. In absolute hours, a newcomer joining a roster where everyone else has
-stood five hundred hours stood **72 of a 72-hour window without a break**.
-Unclamped, repaying a 36-hour gap bought **72 unbroken hours** — the
-eighty-eight-hour failure `rotation` was fixed for, arriving through the
-fairness key instead. That second one is not a bug in the seeding: under a
-greedy minutes-first rule, repayment rate and unbroken-run length are the same
-quantity seen twice, so the cap is the only knob and ADR 015 carries the
-measured curve. Two slots is chosen against the engine's own bar —
-`invariants.js` calls three consecutive slots a `long-unbroken-run`.
-`scripts/unbrokenRuns.mjs` is the guard rail; it also records a **forty-hour**
-run that `balanced` already produces on `main`, with no carried duty involved.
+The debt is **normalized against the least-worked person and clamped to
+`MAX_UNBROKEN_MINUTES`** (`carriedDebts`), and both halves are load-bearing
+rather than tidy. In absolute hours, a newcomer joining a roster where everyone
+else has stood five hundred hours stood **72 of a 72-hour window without a
+break**; normalizing fixes that, because a roster where everybody has stood five
+hundred hours is a roster in balance. Unclamped — even with runs capped — that
+newcomer still takes 62 of a 72-hour window against everyone else's 20, so the
+clamp bounds how far one window may be tilted by a debt too old to settle here.
+
+The clamp is the *same quantity* as ADR 016's run cap, in code rather than by
+coincidence: repaying a debt is what builds a run, so a window may not owe
+anyone more continuous duty than it is willing to hand them.
+
+### Nobody stands more than six hours if anyone else is free
+
+`balanced`'s first tier is `midRun` (ADR 016), above the minutes key, and it
+exists because evening out hours is *exactly* what builds an unbroken run —
+whoever is behind is the cheapest candidate for the next slot and the one after
+it. Before it, where somebody joined a period part-way through, **half of those
+plans put a guard on post for 24 hours or more**, up to a full 72
+(`scripts/unbrokenRunSurvey.mjs`).
+
+Six hours is measured, not felt: at six no golden fixture changes and no test
+fails; at three, one golden moves. `occupy` tracks the stretch, so a person
+mid-run is mid-run however they got there, pins included.
+
+It does not reach zero and cannot. Of the plans that still hand somebody 24h+,
+**100% have nobody spare at all** — everyone present is on post every slot and
+there is no one to hand over to. Those are staffing shortages, and
+`long-unbroken-run` is the right answer to them.
+
+This also removed what looked like a hard limit. Before it, repayment rate and
+run length were one quantity and the honest reading was that a greedy
+minutes-first walk could not have both — which was the sharpest argument this
+repo had for ADR 011, and was wrong. The second objective just needed a tier of
+its own rather than a setting of the first.
 
 While a debt is repaid the window spread is deliberately wide. That is the trade
 working, not failing, and the summary prints both figures so it does not read as a

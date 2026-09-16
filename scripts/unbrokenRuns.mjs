@@ -10,17 +10,14 @@
  *
  * Two reasons this script exists.
  *
- * **It measures something already true on `main`.** Eight guards, five seats,
- * the eighth away for the first two days: the window that still contains the
- * absence hands them a forty-hour unbroken run to catch up. No carried duty
- * involved, nothing to do with ADR 015. Recorded rather than fixed, because
- * fixing it means changing what `balanced` optimises and that is the owner's
- * call, not a tidy-up.
+ * **It is how ADR 016 was found.** Eight guards, five seats, the eighth away for
+ * the first two days: before that record, the window still containing the
+ * absence handed them a **forty-seven hour** unbroken run to catch up, with no
+ * carried duty involved at all. It now reads six at every roll.
  *
  * **It is the guard rail on ADR 015.** Carried duty enters the same fairness key,
- * so an unclamped debt buys a run as long as the debt: a 36-hour gap bought
- * seventy-two unbroken hours before the clamp existed. The clamp is measured
- * here, and so is what it costs - see the table in ADR 015.
+ * so before the run was capped directly a 36-hour debt bought seventy-two
+ * unbroken hours repaying itself. Both records are measured here.
  *
  * Run it with `node scripts/unbrokenRuns.mjs`. A measurement, not a test.
  */
@@ -89,7 +86,6 @@ for (let i = 0; i <= ROLLS; i++) {
   doc = freezeElapsedBeforeEdit(doc, { ...doc, start: doc.start + ROLL, end: doc.end + ROLL }, now);
 }
 
-console.log('\nRoll 1 is the pre-existing behaviour and has nothing to do with carried duty:');
-console.log('the window still contains the absence, so evening it out inside that window');
-console.log('means one very long stretch. The steady state afterwards is what ADR 015 is');
-console.log('answerable for - unclamped it read 72h, 58h, 34h as the debt was repaid.');
+console.log('\nEvery roll should read at or under six hours (ADR 016). Before that cap the');
+console.log('same fixture read 24h then 47h with no carried duty involved at all, and');
+console.log('72h, 58h, 34h once ADR 015 gave it a debt to repay.');

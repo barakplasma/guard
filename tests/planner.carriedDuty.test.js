@@ -30,6 +30,10 @@ const doc = (over = {}) => planSchema.parse({
 });
 
 const run = (d, now) => plan({ ...toPlannerInput(d, now), onInvariantViolation: 'report' });
+
+/** Four guards who have each stood five hundred hours already. */
+const VETERANS = [['e1', 'אבי'], ['e2', 'בני'], ['e3', 'גדי'], ['e4', 'דני']]
+  .map(([id, name]) => ({ id, name, carriedMinutes: 30000 }));
 const minutesOf = (result, id) => result.shifts
   .filter((s) => s.employeeId === id)
   .reduce((n, s) => n + (s.end - s.start), 0) / 60000;
@@ -159,21 +163,24 @@ test('a newcomer is not handed every hour there is', () => {
   // rather than in absolute hours, the newcomer stood 72 of a 72-hour window
   // without a break while the rest did 18 each.
   const HOURS = 72;
-  const veteran = (id, name) => ({ id, name, carriedMinutes: 30000 });
   const d = doc({
     end: BASE + HOURS * HOUR,
     employees: [
-      veteran('e1', 'אבי'), veteran('e2', 'בני'), veteran('e3', 'גדי'), veteran('e4', 'דני'),
+      ...VETERANS,
       { id: 'e5', name: 'חדש' },
     ],
     missions: [{ id: 'm1', name: 'שער', type: 'local', count: 2 }],
   });
   const result = run(d);
   const worked = (id) => minutesOf(result, id) / 60;
-  const spread = Math.max(...['e1', 'e2', 'e3', 'e4', 'e5'].map(worked))
-    - Math.min(...['e1', 'e2', 'e3', 'e4', 'e5'].map(worked));
-  assert.ok(spread <= 4, `everyone does roughly the same, spread was ${spread}h`);
-  assert.ok(worked('e5') < HOURS / 2, 'and the newcomer is not on post for the whole window');
+  const everyone = ['e1', 'e2', 'e3', 'e4', 'e5'].map(worked);
+  const spread = Math.max(...everyone) - Math.min(...everyone);
+  // Not asserting they come out level. The newcomer *is* behind and takes a
+  // little more, which is the feature working; what must not happen is the
+  // window tilting wholesale onto one person. Unclamped this reads 62h against
+  // everyone else's 20h, and before debts were normalized at all, 72h.
+  assert.ok(spread <= 8, `the window is not tilted onto one person, spread was ${spread}h`);
+  assert.ok(worked('e5') < HOURS / 2, 'and the newcomer is not on post for most of the window');
 });
 
 test('a debt cannot buy a long unbroken run', () => {
@@ -196,12 +203,12 @@ test('a debt cannot buy a long unbroken run', () => {
     .filter((s) => s.employeeId === 'e1')
     .sort((a, b) => a.start - b.start);
   let longest = 0;
-  let run_ = 0;
+  let stretch = 0;
   let prevEnd = null;
   for (const s of own) {
-    run_ = prevEnd === s.start ? run_ + (s.end - s.start) : s.end - s.start;
+    stretch = prevEnd === s.start ? stretch + (s.end - s.start) : s.end - s.start;
     prevEnd = s.end;
-    longest = Math.max(longest, run_);
+    longest = Math.max(longest, stretch);
   }
   assert.ok(longest / HOUR <= 6, `longest unbroken stretch was ${longest / HOUR}h`);
 });
