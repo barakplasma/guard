@@ -25,6 +25,11 @@
   drivers, which the user may accept in a big pinch; it is reported, never
   a veto. Night shift length is a lever the owner may vary to get more
   people to eight hours.
+- `balanced` (equal hours) is retired; round robin by longest wait is the
+  only fairness rule, and the `strategy` setting goes with it.
+- Backwards compatibility of shared links matters only for employee names
+  and qualifications. Everything else in the wire format may change under
+  a schema version bump with a migration that keeps those two.
 - Manual assignments must always win over automatic scheduling; show them with a lock icon. Automatically preserved elapsed assignments must use a distinct history icon and require an explicit correction before replacement.
 - Night rest is measured two ways inside the configured night hours: **total**
   rest (the configured per-qualification minimum is enforced and reported

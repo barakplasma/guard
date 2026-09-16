@@ -20,7 +20,7 @@ flowchart LR
     subgraph existing ["Exists today (src/lib)"]
         urlState["urlState.js<br/>decodePlan / encodePlan"]
         planSchema["planSchema.js<br/>planSchema · nightWindows · dailyOccurrences"]
-        planner["planner.js<br/>segmentGrid · acceptedPins · countAt<br/>isOutOfPeriod · carriedDebts"]
+        planner["planner.js<br/>segmentGrid · acceptedPins · countAt<br/>isOutOfPeriod"]
         pins["pins.js<br/>freezePastShifts · captureHistory"]
         context["PlanContext.jsx<br/>setDoc"]
     end
@@ -80,7 +80,6 @@ interface PreparedEmployee {
   id: EmployeeId;
   available: Interval;                 // clamped to the horizon
   qualifications: ReadonlySet<QualificationId>;
-  carriedDutyMinutes: DurationMinutes; // already normalized and clamped
   carriedStints: number;
   requiredNightRestMinutes: DurationMinutes; // 0 when nothing applies
   idleMinutesAtHorizonStart: DurationMinutes; // since their last logged duty ended
@@ -109,7 +108,6 @@ interface PreparedProblem {
   employees: readonly PreparedEmployee[];
   missions: readonly PreparedMission[];
   commitments: readonly Commitment[];
-  fairness: 'minutes' | 'gap';       // balanced or rotation, decision A
   issues: readonly PreparationIssue[];
   revision: ProblemRevision;
 }
@@ -184,7 +182,7 @@ exists:
 | `resolveEmployees(draft)`      | `normalizeEmployees` via `segmentGrid`'s `prepare`     | `requiredNightRestMinutes` from `tags[].minNightRestMinutes`                                                            |
 | `resolveMissions(draft)`       | `normalizeMissions`, `slotBoundsFor` via `segmentGrid` | the discriminated union; issues `mission-outside-window`, `tag-required-and-excluded`                                   |
 | `resolveCommitments(draft)`    | `acceptedPins` (planner.js)                            | provenance; issues `pin-conflict`, `pin-overflow`, `pin-unavailable`, `pin-availability-overridden`                     |
-| `resolveCarriedDuty(draft)`    | `carriedDebts` (planner.js, to be exported)            | nothing                                                                                                                 |
+| `resolveCarriedTurns(draft)`   | `isOutOfPeriod`, `resolvePinWindow`                    | `carriedStints` plus one turn per out-of-period pin, as `plan()` counts them today                                     |
 | `countStaleCommitments(draft)` | `isOutOfPeriod`, `isElapsedBeforePeriod`               | issue `pin-out-of-period` with `count` and `elapsed`                                                                    |
 | `resolveIdleAtStart(draft)`    | `isElapsedBeforePeriod`, `resolvePinWindow`            | minutes from the latest elapsed commitment's end to the horizon start, else from `lastDutyEnd`, capped at eight hours (`TARGET_REST_MINUTES`) |
 
@@ -195,13 +193,24 @@ sleep to aim for is eight hours, so a wait is only ever a number between zero
 and eight hours, and the only history that can affect it is a duty that ended
 inside the eight hours before the horizon starts. Out-of-period pins still in the document carry that. Once they have
 been exported and cleared, the employee's `lastDutyEnd`, an instant written by
-`clearStalePins` at the same moment as `carriedMinutes` and only when set, at
-the next free employee tuple position in ADR 006's table, carries it instead.
+`clearStalePins` at the same moment as `carriedStints`, carries it instead.
 A `lastDutyEnd` more than eight hours before the horizon is ignored.
 
 `PreparationIssue` is a discriminated union keyed on `code`, with the same
 codes and fields the engine's warnings carry today, so `findings.js` renders
 them unchanged.
+
+**Compatibility is owed to names and qualifications, nothing else.** The
+owner has set aside backwards compatibility for every other part of a shared
+link. So the wire format takes a `SCHEMA_VERSION` bump when this lands, and
+`decodePlan` gains one migration, `migrateLegacyPlan(raw)`, that keeps the
+employee list (id, name, qualification ids) and the qualification
+definitions, and starts everything else from `emptyPlan()`: missions, pins,
+period, night bounds, carried hours. The `strategy` field, `carriedMinutes`
+and ADR 006's append-only tuple discipline stop applying to new fields;
+`lastDutyEnd` is an ordinary employee field. ADR 006 is amended when the
+bump lands, and `tests/urlState.test.js`'s literal blob becomes a test of
+the migration rather than of byte identity.
 
 Two rules are the solver's and live here rather than in the model:
 
@@ -266,7 +275,7 @@ function enumerateSleepWindows(segments, nightOfSegment, minutes = TARGET_REST_M
 function deriveSymmetryClasses(instance): number[]
 // Same rule as prototype/minizinc/solve.mjs::symClasses, on the new arrays:
 // identical availability row, allowed row, qualification column, carried
-// minutes, stints, capped idle time at the start and rest requirement, and no
+// stints, capped idle time at the start and rest requirement, and no
 // commitment anywhere. 0 = singleton. The cap makes most of a rested roster
 // identical at the start, which is exactly when symmetry breaking pays.
 
@@ -330,7 +339,6 @@ array[Missions, Segments] of int: holdOfSegment; % indivisible hold, 0 = none
 % ---- people ---------------------------------------------------------------
 array[Employees, Segments] of bool: isAvailable;
 array[Employees, Missions] of bool: isAllowed;   % not excluded by tag or name
-array[Employees] of int: carriedDutyMinutes;     % normalized, clamped (ADR 015)
 array[Employees] of int: carriedStints;
 array[Employees] of int: idleMinutesAtHorizonStart; % since the last logged duty, capped
 array[Employees] of int: requiredNightRestMinutes; % 0 = no requirement
@@ -361,7 +369,6 @@ array[SleepWindows] of Nights:   sleepWindowNight;
 % ---- the ladder (optimize mode reads these; check mode ignores them) ------
 int: objectiveLevel;
 array[Levels] of int: objectiveCap;              % -1 = uncapped
-int: fairnessMode;                               % 0 = even minutes, 1 = round robin
 
 % ---- the decision ---------------------------------------------------------
 % One cell, one mission. Double booking is not a value this array can hold.
@@ -541,21 +548,14 @@ array[Employees] of var 0..longRunWindowCount: longRunsByEmployee :: output =
     | employee in Employees ];
 var 0..employeeCount * longRunWindowCount: longRunCount :: output = sum(longRunsByEmployee);
 
-% Level 8: fairness, one of two readings and never both (ADR 002).
-%
-% `balanced` evens out minutes, carried duty included (ADR 015).
+% Level 8: fairness is round robin, and nothing else (decision A, decision E).
+% Whoever has waited longest goes next, and somebody back from a long mission
+% goes to the end of the queue. Hours are never consulted; `dutyMinutes` is
+% reported for the summary table and optimised nowhere.
 array[Employees] of var 0..horizonMinutes: dutyMinutes :: output =
   [ sum(segment in Segments)(segmentMinutes[segment] * isOnDuty[employee, segment])
     | employee in Employees ];
-int: maxCarriedMinutes = max([0] ++ carriedDutyMinutes);
-array[Employees] of var 0..horizonMinutes + maxCarriedMinutes: totalDutyMinutes =
-  [ dutyMinutes[employee] + carriedDutyMinutes[employee] | employee in Employees ];
-var 0..horizonMinutes + maxCarriedMinutes: dutyMinutesSpread :: output =
-  max(totalDutyMinutes) - min(totalDutyMinutes);
-
-% `rotation` is round robin, as the owner restated it (decision A): whoever
-% has waited longest goes next, and somebody back from a long mission goes to
-% the end of the queue. Hours are never consulted. Stated globally rather than
+ Stated globally rather than
 % one slot at a time: the shortest wait before any turn the solver chose is as
 % long as it can be. A committed cell is not the solver's choice, so the wait
 % before it is not scored.
@@ -594,10 +594,7 @@ constraint forall(employee in Employees, segment in Segments)(
 % With no chosen turn at all the level is trivially proved.
 var 0..TARGET_REST_MINUTES: waitDeficitMinutes :: output = TARGET_REST_MINUTES - shortestWaitMinutes;
 
-var int: fairnessObjective = if fairnessMode == 1 then waitDeficitMinutes else dutyMinutesSpread endif;
-
-% Level 9: under round robin, once the bottleneck wait is settled, turns are
-% shared out. A turn is one distinct rotation slot entered, plus one per hold.
+% Level 9: once the bottleneck wait is settled, turns are shared out. A turn is one distinct rotation slot entered, plus one per hold.
 array[Employees] of var 0..missionCount * segmentCount: turnsTaken :: output =
   [ sum(mission in Missions, segment in Segments
         where seatsWanted[mission, segment] > 0
@@ -612,8 +609,6 @@ array[Employees] of var int: totalTurns =
   [ turnsTaken[employee] + carriedStints[employee] | employee in Employees ];
 var 0..missionCount * segmentCount + maxCarriedStints: turnSpread :: output =
   max(totalTurns) - min(totalTurns);
-
-var int: turnObjective = if fairnessMode == 1 then turnSpread else 0 endif;
 
 % Level 10: prefer distinct people for distinct required roles. A person on a
 % mission holding more than one of its required qualifications costs the
@@ -636,8 +631,8 @@ array[Levels] of var int: objectives = [
   targetRestShortfallMinutes,     % 5  eight hours off in total, everyone
   nightsWithoutTargetSleep,       % 6  eight hours in one stretch, for as many as possible
   longRunCount,                   % 7  nobody stands six hours if anyone is free
-  fairnessObjective,              % 8  even minutes, or the longest wait
-  turnObjective,                  % 9  turns shared out (round robin only)
+  waitDeficitMinutes,             % 8  the longest wait (round robin)
+  turnSpread,                     % 9  turns shared out
   sharedRoleCount                 % 10 distinct people for distinct roles
 ];
 
@@ -685,7 +680,6 @@ Every run receives the instance plus:
 |-----------------------|--------------------------------------------|------------------------|
 | `objectiveLevel`      | the level being minimised                  | `1` (unused)           |
 | `objectiveCap`        | proven optima of earlier levels, else `-1` | all `-1`               |
-| `fairnessMode`        | `0` for `minutes`, `1` for `gap`           | same                   |
 | `candidateAssignment` | absent                                     | the candidate's matrix |
 
 ### 4.5 What the prototype loses and gains
@@ -794,8 +788,7 @@ missing quantity or a version mismatch fail parsing, and a parse failure is a
 function decodeSolverOutput(raw: unknown, index, ...): { assignment: Uint8Array; quantities: NamedQuantities; diagnostics: SegmentDiagnostics }
 ```
 
-`NamedQuantities` has one field per objective plus `dutyMinutesSpread`,
-`shortestWaitMinutes` and `turnSpread`, whichever mode was solved.
+`NamedQuantities` has one field per objective plus `shortestWaitMinutes`.
 
 ## 7. Ladder (`src/solver/ladder.ts`)
 
@@ -951,10 +944,10 @@ function restMetricsFrom(accepted, index, draft): RestMetric[]
 // presentation figure beside the model's yes/no.
 
 function statsFrom(accepted, index, draft): Stats
-// perEmployee from dutyMinutes and turnsTaken; spreadMinutes,
-// totalSpreadMinutes and shortestWaitMinutes from the accepted quantities,
-// never re-summed. Under round robin the summary shows the shortest wait
-// beside the turns, since the spread of hours is not what was optimised.
+// perEmployee from dutyMinutes and turnsTaken; the shortest wait from the
+// accepted quantities, never re-summed. The summary shows hours because
+// people ask, and the shortest wait and turns because that is what was
+// optimised; the spread of hours is not shown as if it were a goal.
 ```
 
 None of these decide legality. `checkSchedule` in `invariants.js` stops being
@@ -1032,15 +1025,20 @@ rejected freezing on a timer.
 | `tests/solver.model.test.js`        | yes            | `MODEL_VERSION` in TypeScript equals the model's; both entry files compile (`model.check()`)                                                                                                                                                                                   |
 | `tests/solver.oracle.test.js`       | yes            | tiny exhaustive instances: brute force over the matrix agrees with the ladder on every level and on feasibility                                                                                                                                                                |
 | `tests/solver.metamorphic.test.js`  | yes            | splitting a segment at an off-grid instant (no new legal handover) leaves feasibility and every quantity unchanged                                                                                                                                                             |
-| `tests/solver.rotation.test.js`     | yes            | under `fairnessMode = 1`: no chosen turn begins after a wait shorter than the reported `shortestWaitMinutes`; a guard whose hold ends at the horizon start takes no local slot while anyone with a longer wait is free; two people both eight hours rested are interchangeable for the wait and only turns separate them; the oracle agrees on the bottleneck for tiny instances |
+| `tests/solver.rotation.test.js`     | yes            | no chosen turn begins after a wait shorter than the reported `shortestWaitMinutes`; a guard whose hold ends at the horizon start takes no local slot while anyone with a longer wait is free; two people both eight hours rested are interchangeable for the wait and only turns separate them; the oracle agrees on the bottleneck for tiny instances |
 | `tests/solver.sleep.test.js`        | yes            | `sleepsTarget` is true exactly when an eight-hour off-duty window lies inside the night and the person's availability; on-call duty counts as sleep; a night the person is absent for is not counted; a driver's six-hour minimum is level 4 and never raises or lowers the target |
-| `tests/solver.differential.test.js` | yes            | over the golden documents: MiniZinc's levels 1 and 2 are never worse than the engine's; every accepted schedule passes `checkSchedule` as evidence, not authority                                                                                                              |
+| `tests/solver.differential.test.js` | yes            | over the golden documents, while the engine is still authority: MiniZinc's levels 1 and 2 are never worse than the engine's; every accepted schedule passes `checkSchedule` as evidence, not authority                                                                                                              |
 | `tests/solver.e2e.mjs`              | browser        | the shipped wasm path completes optimize and check; offline reload serves every asset from the precache; cancel then re-solve leaks no worker; a stale completion never replaces the shown schedule                                                                            |
 
 `ci.yml`'s `check` job gains one step that installs the MiniZinc bundle so the
 `yes` rows run in CI; locally they skip with a message when the binary is
 absent. `tests/planner.golden.test.js` is untouched until step 6 and never
-regenerated to make this path pass.
+regenerated to make this path pass. At step 6 it retires with the engine:
+the assignments it pins are the greedy engine's, and the owner has set aside
+compatibility with them. Its successors are the oracle and metamorphic tests
+above, plus a new `tests/solver.golden.test.js` written from MiniZinc's
+accepted output, which is regenerated only through `scripts/writeGoldens.mjs`
+for an intentional model change.
 
 ## 14. Migration order
 
@@ -1077,7 +1075,7 @@ through `NativeRunner`, and prints the count of people sleeping eight hours and
 the shortest wait at each length. A measurement script like the others in
 `scripts/`, asserting nothing.
 
-## Decisions taken, and two still open
+## Decisions taken, and one still open
 
 - **A. `rotation` is round robin by longest wait.** Decided by the owner:
   nobody wants equal hours; whoever has waited longest since their last duty
@@ -1088,8 +1086,8 @@ the shortest wait at each length. A measurement script like the others in
   capped at the eight-hour target, maximised) with level 9 `turnSpread`
   behind it, and `idleMinutesAtHorizonStart` plus the `lastDutyEnd` field so
   a wait inside the last eight hours survives a roll (§2). The engine's
-  slot-by-slot ring order is not reproduced, so rotation goldens change at
-  step 6. The bottleneck form is deliberate: it says "call nobody back inside
+  slot-by-slot ring order is not reproduced, so the goldens change at step 6,
+  which the owner has accepted (decision E). The bottleneck form is deliberate: it says "call nobody back inside
   eight hours sooner than the schedule forces" without inventing a target
   gap, and the cap makes it a small-domain quantity a linear relaxation
   proves quickly. The recorded simplification is that any eight hours off
@@ -1115,20 +1113,18 @@ the shortest wait at each length. A measurement script like the others in
   Kept in TypeScript, because a proposal is a suggestion a person accepts and
   not a legality claim; whatever is accepted is then solved and checked by
   MiniZinc like any other edit.
-- **D. The carried-hours clamp, kept as assumed.** ADR 015: a guard back from
-  two days away is thirty-six hours behind, and the app remembers that debt.
-  Before it feeds fairness the debt is normalised against the least-worked
-  person and capped at six hours, so one person is not handed the whole window
-  to catch up. The choice was whether that capping happens in TypeScript
-  before the numbers reach the model, or inside the model. Kept in
-  TypeScript: it is a rule about the input, and it only matters under
-  `balanced`, which decision A says nobody wants.
-- **E. Open: retire `balanced`?** The owner said nobody wants equal hours.
-  `balanced` is still the default for every link that predates the strategy
-  field, and ADR 015's carried hours exist for it. Making round robin the
-  default changes every golden fixture and the meaning of old links, so it is
-  a product decision to take explicitly rather than a side effect of this
-  design. Until taken, both modes stay in the model.
+- **D. The carried-hours clamp, moot.** ADR 015 normalised and capped a
+  guard's carried hours before they fed `balanced`'s fairness. With `balanced`
+  retired (E) no hours feed fairness at all, so `carriedDebts` is not reused
+  and `carriedMinutes` is not read; what survives of ADR 015 is
+  `carriedStints`, which feeds `turnSpread`, and now `lastDutyEnd`.
+- **E. `balanced` is retired; round robin is the only fairness rule.**
+  Decided by the owner, together with setting aside backwards compatibility
+  for everything but names and qualifications. The `strategy` field goes,
+  the model has one level 8 and one level 9, and the golden fixtures are
+  regenerated once at step 6 from MiniZinc's accepted output (§13). The
+  summary table keeps showing hours, because people ask, but nothing
+  optimises them.
 - **F. Open: where `lastDutyEnd` is written.** §2 assumes `clearStalePins`
   stamps it when it converts out-of-period pins into carried totals. If the
   export-and-clear button is ever split from the roll, the stamp has to move
