@@ -14,6 +14,13 @@
   preserved and clearly report actual rest shortfalls.
 - Resolve daily wall-clock times in the viewer's timezone, matching night windows.
 - Schedule work continues on `main`; the old PR #28 branch is gone.
+- The `rotation` strategy means round robin by longest wait, not equal
+  hours: whoever has waited longest since their last duty goes next, and
+  somebody back from a long mission joins the end of the queue for local
+  missions. Nobody wants equal hours.
+- Six hours of continuous night sleep is a metric to maximise across as
+  many people as possible, never an enforced minimum. Night shift length
+  is a lever the owner may vary to get more people to six hours.
 - Manual assignments must always win over automatic scheduling; show them with a lock icon. Automatically preserved elapsed assignments must use a distinct history icon and require an explicit correction before replacement.
 - Night rest is measured two ways inside the configured night hours: **total**
   rest (the configured per-qualification minimum is enforced and reported
