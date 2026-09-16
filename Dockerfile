@@ -15,3 +15,10 @@ LABEL org.opencontainers.image.licenses="MIT"
 
 COPY Caddyfile /etc/caddy/Caddyfile
 COPY dist/ /srv/
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD ["curl", "--fail", "--silent", "--show-error", "--output", "/dev/null", "http://127.0.0.1/"]
+
+# The base image grants Caddy permission to bind ports 80 and 443, while its
+# runtime data directories are writable by an unprivileged process.
+USER 10001:10001
