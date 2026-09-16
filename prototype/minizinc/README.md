@@ -11,7 +11,8 @@ of the model is visible before anything replaces the hand-written engine.
 | `fromPlan.mjs` | plan input -> instance, and an answer back to shift rows |
 | `oracle.mjs` | brute force over every feasible assignment, plus the random instances |
 | `check.mjs` | model vs. oracle on small random instances |
-| `vsEngine.mjs` | model vs. the shipped engine, at the instants the engine calls short |
+| `vsEngine.mjs` | model vs. the engine, at the instants it calls short — a *weaker* question |
+| `vsPlan.mjs` | model vs. the engine over a whole horizon — the honest comparison |
 | `scaling.mjs` | how far it goes, and on which backend |
 | `browser.mjs` + `browser/` | the real WebAssembly path, served without COOP/COEP |
 
@@ -23,7 +24,8 @@ carries every backend named below. Measured with 2.9.3.
 
 ```bash
 node prototype/minizinc/check.mjs 400 21      # agree with the oracle
-node prototype/minizinc/vsEngine.mjs 400      # find what the engine misses
+node prototype/minizinc/vsEngine.mjs 400      # the per-instant question
+node prototype/minizinc/vsPlan.mjs 250       # the whole-horizon one
 node prototype/minizinc/scaling.mjs highs     # how far it goes
 node prototype/minizinc/scaling.mjs chuffed 24
 ```
@@ -82,25 +84,46 @@ never notice. Checked on HiGHS and on Chuffed, which agree.
 Each round is additionally required to have **proved** optimality rather than
 merely reported a bound.
 
-**Against the engine.** Over 400 generated plans from `scripts/offGridFuzz.mjs`'s
-generator, seed included, so both scripts look at the same instances:
+**Against the engine, per instant.** Over 400 generated plans from
+`scripts/offGridFuzz.mjs`'s generator, seed included:
 
 ```
 shortage instants solved  : 1292
 model found a full crew   : 36  (2.8%)
 model agreed it was short : 1256
-plans with a shortage     : 305
-...of which falsely short : 36  (11.8%)
 ```
 
-The 2.8% is the same number `offGridFuzz.mjs` reports from a bespoke recursive
-search, which is the point: the model finds a full crew on exactly the class
-that script proved the greedy walk misses, and agrees with it on the other 97%.
-Two independent searches landing on the same figure is worth more than either
-alone.
+Same figure that script reports from a bespoke recursive search. Two independent
+searches agreeing is worth having - but both answer a **weaker question than the
+engine does**, and taking 2.8% as a defect rate was wrong.
 
-The second denominator is the one a person feels. 11.8% of the plans that said
-"not enough people" had enough people.
+**Against the engine, over a whole horizon.** The per-instant oracles never
+commit anyone past the instant they are looking at. The engine holds a local
+mission in whole grid slots, so when an off-grid mission claims two commanders
+at +30 minutes, the people who could have covered an hourly post from :00 are
+not free for the whole hour and it leaves the post empty. An instant-wise oracle
+calls that a false shortage. It is not one; it is ADR 002's slot discipline,
+chosen on purpose.
+
+`vsPlan.mjs` runs the same generator over the full 12 hours through the adapter,
+solving each instance twice - once where crew may change hands inside a slot,
+once with churn pinned to zero so a slot is indivisible exactly as it is for the
+engine:
+
+```
+plans compared over 12h                       : 250
+seats the engine left empty                   : 844
+...that a slot-disciplined optimum also leaves: 744   (88%)
+greedy loss - the real defect                 :  100  (12%), on 29 of 250 plans
+further seats a relaxed slot rule would save  :   39
+```
+
+**88% of what the engine reports short is genuinely short.** About **12% is the
+greedy walk losing**, on roughly one plan in nine. Smaller than the earlier
+framing and measured on the right question - in seats rather than instants, over
+the horizon the engine actually plans.
+
+It cuts against the case for replacing the engine, which is why it is here.
 
 ## The objectives
 

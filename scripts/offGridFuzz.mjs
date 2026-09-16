@@ -14,6 +14,20 @@
  * ponytail: brute force is exponential in headcount, hence the cap at eight
  * employees and four missions. It is an oracle for small instances, not a
  * scheduler.
+ *
+ * **Read the number carefully.** This asks a *per-instant* question and the
+ * engine answers a harder one. A local mission is held in whole grid slots, so
+ * when an off-grid mission claims two commanders at +30 minutes, the people who
+ * could have covered an hourly post from :00 are not free for the whole hour
+ * and the engine leaves it empty. This oracle never commits anyone past the
+ * instant it is looking at, so it calls that a false shortage. It is not one -
+ * it is ADR 002's slot discipline, chosen on purpose.
+ *
+ * `prototype/minizinc/vsPlan.mjs` asks the same generator over a whole horizon
+ * and decomposes the answer: of the seats the engine reports short, 88% are
+ * genuinely short, and about 12% are the greedy walk losing to an optimal
+ * slot-disciplined assignment. That 12% is the defect; this 2.8% is an upper
+ * bound on a weaker question. See ADR 008's correction.
  */
 import { plan } from '../src/lib/planner.js';
 

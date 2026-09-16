@@ -247,6 +247,40 @@ in the engine's control flow - a local segment is filled once and not
 revisited - and only became a thing that had to be *stated* when the control
 flow went away.
 
+### Correction: what that 2.8% measures
+
+Both searches above are **per-instant**: at the moment the engine reports a
+shortage, can the people free right then cover every seat? The engine has to
+answer something harder. A local mission is held in whole grid slots, so when an
+off-grid mission claims two commanders at +30 minutes, the people who could have
+covered an hourly post from :00 are not free for the whole hour and the engine
+leaves it empty. An instant-wise oracle never commits anyone past the instant it
+is looking at, so it calls that a false shortage. It is not one; it is ADR 002's
+slot discipline, chosen on purpose.
+
+`vsPlan.mjs` asks the same generator over the whole 12-hour horizon, through the
+adapter, solving each instance twice - once where crew may change hands inside a
+slot, and once with churn pinned to zero so a slot is indivisible exactly as it
+is for the engine:
+
+```
+plans compared over 12h                       : 250
+seats the engine left empty                   : 844
+...that a slot-disciplined optimum also leaves: 744   (88%)
+greedy loss - the real defect                 : 100   (12%), on 29 of 250 plans
+further seats a relaxed slot rule would save  :  39
+```
+
+**88% of what the engine reports short is genuinely short.** About **12% is the
+greedy walk losing to an optimal assignment**, on roughly one plan in nine. That
+is a smaller claim than "2.8% of instants are false" and a better one: it is
+measured on the question the engine actually answers, counted in seats rather
+than instants, and it says what a solver would buy rather than what an oracle
+can imagine.
+
+It also says the engine is in better shape than the earlier evidence suggested,
+which cuts against the case this record makes. Recorded here for that reason.
+
 ### What the prototype does not model
 
 Scoped deliberately to ADR 008's defect 3 - who stands where on a given segment
@@ -478,8 +512,9 @@ silently and confidently.
 ## Evidence
 
 `scripts/midScheduleCallout.mjs` (the reported case, now a regression fixture),
-`scripts/offGridFuzz.mjs` (2.8% of shortage instants still provably false on
-main), `scripts/completenessSearch.mjs`, and `prototype/minizinc/` for the model
-and the two measurements above. MiniZinc 2.9.3 with Chuffed 0.13.2. Release counts from the npm registry,
+`scripts/offGridFuzz.mjs` (2.8% of shortage *instants* provably coverable, which
+the correction above puts in proportion), `scripts/completenessSearch.mjs`, and
+`prototype/minizinc/` for the model and the measurements above -
+`vsPlan.mjs` being the one that decomposes the engine's shortfall. MiniZinc 2.9.3 with Chuffed 0.13.2. Release counts from the npm registry,
 read 2026-09-15: `minizinc` 409 versions, 27 stable. Invariant rules read from
 `src/lib/invariants.js`. #40's ordering change in `planner.js` phase 3.

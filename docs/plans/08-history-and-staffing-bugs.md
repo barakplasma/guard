@@ -192,6 +192,42 @@ shortage instants checked : 19806
 provably false shortages  : 560  (2.8%)
 ```
 
+### What that 2.8% does and does not mean
+
+**Corrected 2026-09-16, by the whole-horizon measurement the prototype made
+possible.** Both `offGridFuzz.mjs` and the model's `vsEngine.mjs` ask a
+**per-instant** question: at the moment the engine reports a shortage, can the
+people free right then cover every seat? Two independent searches agree the
+answer is yes 2.8% of the time.
+
+That question is weaker than the one the engine has to answer, and reading the
+number as "2.8% defects" overstates it. A local mission is held in whole grid
+slots. When an off-grid mission claims two commanders at +30 minutes, the people
+who could have covered an hourly post from :00 are not free for the whole hour,
+so the engine leaves it empty - and an instant-wise oracle, which never commits
+anyone past the instant it is looking at, calls that a false shortage. It is not
+a false shortage; it is the slot discipline, which ADR 002 chose on purpose.
+
+`node prototype/minizinc/vsPlan.mjs 250` asks the same generator over the whole
+12-hour horizon, through the real adapter, and solves each instance twice - once
+where crew may change hands inside a slot, and once with churn pinned to zero so
+a slot is indivisible exactly as it is for the engine:
+
+```
+plans compared over 12h                       : 250
+seats the engine left empty                   : 844
+...that a slot-disciplined optimum also leaves: 744   (88%)
+greedy loss - the real defect                 : 100   (12%), on 29 of 250 plans
+further seats a relaxed slot rule would save  :  39
+```
+
+So **88% of what the engine reports short is genuinely short**, and about
+**12% is the greedy walk losing to an optimal assignment** - on roughly one plan
+in nine. That is a smaller claim than the earlier framing and a better one: it
+is measured on the question the engine is actually answering, in seats rather
+than instants, and it says what a solver would buy.
+
+
 Some survivors involve no off-grid mission at all, so this is not a residue of
 the off-grid case specifically.
 
@@ -209,7 +245,8 @@ the normal path. **Defect 1 is fixed**; defect 2 waits on the log and the export
 in ADRs 009 and 012.
 
 Defect 3 was initially rated as rare, which was wrong, and #40 has since fixed
-the reported shape. The class remains open at 2.8% of shortage instants on
+the reported shape. The class remains open - see the correction below for what
+its size actually is - at 2.8% of shortage instants on
 random off-grid instances, so the argument for ADR 011 stands - but the acute
 version of the bug is no longer in production.
 

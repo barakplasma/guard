@@ -44,7 +44,10 @@ scarce people, and nothing ever reconsiders a placement.
 **#40 has since fixed the reported shape**, adding `offGridPriority` so every
 offset in that script now passes. `scripts/offGridFuzz.mjs` shows it closed the
 shape rather than the class: 2.8% of shortage instants over random off-grid
-instances remain provably false, some with no off-grid mission involved.
+instances are coverable by the people free at that instant, some with no
+off-grid mission involved. Measured over a whole horizon instead, where a slot
+has to be held whole, the engine's real loss to greedy ordering is about 12% of
+the seats it reports short - see ADR 008's correction.
 
 So ADR 011 is still the fix, for the class rather than for a live outage. It is
 also beyond what the per-segment matcher rejected there could do: the trade
@@ -91,8 +94,9 @@ hardware.
 Treat continuous re-planning as the primary use case. Concretely:
 
 1. **ADR 011 is the fix for the class, not a nice-to-have.** #40 removed the
-   acute symptom, so it is not an outage; 2.8% of shortage instants remain
-   provably false, and each ordering key so far has closed the instance in front
+   acute symptom, so it is not an outage; about 12% of the seats the engine
+   reports short are reachable by an optimal slot-disciplined assignment, and
+   each ordering key so far has closed the instance in front
    of it. It stays last in sequence, because ADR 009 must come first.
 2. **Re-planning may move any generated assignment in the future**, and must be
    able to, or it cannot absorb the change it exists to absorb.

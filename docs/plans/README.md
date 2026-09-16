@@ -47,10 +47,12 @@ be taken or left on its own:
   accepted "for now", on ownership and failure surface rather than solving
   technology. The prototype now exists in `prototype/minizinc/` and has already
   corrected the record twice. It agrees with a brute-force oracle over 420
-  random instances and finds a full crew on 2.8% of the instants the shipped
-  engine calls short, independently reproducing `offGridFuzz.mjs`'s figure -
-  and it showed that **Chuffed, which this ADR named explicitly, is the wrong
-  backend**: it stops proving optimality past a four-hour horizon, where HiGHS
+  random instances, and it **corrected the evidence this whole branch rested
+  on**: measured over a whole horizon rather than one instant at a time, 88% of
+  the seats the engine reports short are genuinely short and about 12% are the
+  greedy walk losing - not the "2.8% provably false" that `offGridFuzz.mjs`'s
+  per-instant oracle suggested. It also showed that **Chuffed, which this ADR
+  named explicitly, is the wrong backend**: it stops proving optimality past a four-hour horizon, where HiGHS
   in the same WebAssembly bundle proves a perfectly balanced 72-hour schedule in
   under eight seconds.
 - **012** records the 72-hour horizon and what it does to the others: it settles

@@ -175,10 +175,18 @@ export function solveRota(inst, opts = {}) {
   // level is a bound on a sum over every assignment, and a MIP relaxation gives
   // that away for free where lazy clause generation has to search for it.
   const cfg = { solver: 'highs', timeLimitMs: 0, mzn: MODEL, ...opts };
-  let caps = { capUnmet: -1, capUnfilled: -1, capChurn: -1 };
+  // A caller may pin a cap before the ladder starts and may climb only part of
+  // it. `vsPlan.mjs` uses both to hold `slotChurn` at zero from the first level,
+  // which is how the engine treats a slot - indivisible - so the two can be
+  // compared on the same terms.
+  let caps = {
+    capUnmet: cfg.capUnmet ?? -1,
+    capUnfilled: cfg.capUnfilled ?? -1,
+    capChurn: cfg.capChurn ?? -1,
+  };
   let best = null;
   const levels = [];
-  for (const level of [1, 2, 3, 4]) {
+  for (const level of cfg.levels ?? [1, 2, 3, 4]) {
     const got = runOnce(inst, level, caps, cfg);
     if (!got) return null;
     best = got;
@@ -186,7 +194,8 @@ export function solveRota(inst, opts = {}) {
     levels.push({ level, objective: reached, proved: got.proved });
     if (level === 1) caps = { ...caps, capUnmet: got.unmetQualifications };
     if (level === 2) caps = { ...caps, capUnfilled: got.unfilledSeats };
-    if (level === 3) caps = { ...caps, capChurn: got.slotChurn };
+    // A cap the caller pinned is theirs, not the ladder's to overwrite.
+    if (level === 3 && cfg.capChurn == null) caps = { ...caps, capChurn: got.slotChurn };
   }
   return { ...best, levels };
 }

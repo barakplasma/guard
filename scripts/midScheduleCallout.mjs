@@ -32,7 +32,12 @@
  *     failure, which was true for these fixtures and is not true in general.
  *
  * `offGridFuzz.mjs` is the companion that asks whether #40 closed the class
- * rather than the shape. It did not: 2.8% of shortage instants over random
+ * rather than the shape. It did not, though the size of what remains was
+ * overstated at first - `prototype/minizinc/vsPlan.mjs` measures it over a
+ * whole horizon at about 12% of the seats reported short, against the
+ * instant-wise 2.8% below. See ADR 008's correction.
+ *
+ * 2.8% of shortage instants over random
  * off-grid instances remain provably false.
  *
  * Run it with `node scripts/midScheduleCallout.mjs`. A measurement, not a test.
