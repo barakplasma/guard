@@ -35,6 +35,8 @@
 - The default planning window is 24 hours.
 - A hated mission such as kitchen duty falls to a person once per rotation
   (7, 14 or 21 days, set per mission); this is its own priority level.
+- How many days of past duty the scheduler remembers (21 by default) is a
+  plan setting the user edits in the UI, like the per-mission rotation days.
 - The last priority levels mix people up: nobody always does the same
   mission when they could rotate (drivers swap morning and night patrol,
   a person guards locally one day and goes on patrol the next), and night

@@ -1238,6 +1238,71 @@ returned by identity, that only logged rows before the window are ever
 dropped, that they drop oldest first, and that the result encodes under the
 limit.
 
+## 18. Memory settings in the UI
+
+Both memory numbers are the user's to set, in the same controls the plan
+already uses for numbers: the MUI Number Spinner composition in
+`NumberField.jsx`, with its 44-pixel touch buttons, which is what AGENTS.md
+requires for a phone.
+
+**Plan-level: how far back the schedule remembers.**
+
+```js
+// src/lib/planSchema.js
+memoryDays: z.number().int().min(1).max(90).default(21),
+
+// src/components/SettingsBar.jsx, beside the shift length
+<NumberField
+  label={t.memoryDays}
+  value={doc.memoryDays}
+  onChange={(n) => setField('memoryDays', n)}
+  min={1} max={90} step={1} testId="memory-days"
+/>
+```
+
+`t.memoryDays` and `t.memoryDaysHelp` go in `strings.js` like every other
+label; the help text says what the number does in the user's terms: how many
+days of past duty count towards whose turn it is, night duty, mission
+rotation and the once-per-rotation rule. It reaches the solver as
+`PreparedProblem.memoryDays` through `prepareProblem`, which is the only
+route in, and `readDutyMemory` reads exactly that many days back.
+
+**Per mission: how often a hated mission may come round.**
+
+```js
+// src/lib/planSchema.js, on missionSchema
+repeatAfterDays: z.number().int().min(1).max(90).nullable().default(null),
+
+// src/pages/MissionsPage.jsx, in the mission card beside the headcounts
+<NumberField
+  label={t.repeatAfterDays}
+  value={mission.repeatAfterDays}
+  nullable
+  min={1} max={90} step={1}
+  testId={`mission-repeat-days-${mission.id}`}
+  onChange={(value) => onChange({ repeatAfterDays: value })}
+/>
+```
+
+Empty means no rule, which is what every mission but the kitchen wants, so
+the field is nullable and shows blank rather than a misleading zero. It is
+offered on every mission type: a remote or daily mission can be the hated
+one as easily as a local one.
+
+**When the two disagree.** A cooldown longer than the memory cannot be
+observed: the log the model reads stops before the cooldown does. That is a
+preparation issue, `cooldown-beyond-memory`, naming the mission and both
+numbers, rendered as an informational finding, and the mission card shows the
+same sentence as helper text under the field while it is true. Nothing is
+clamped silently; the person who typed 28 into a plan that remembers 21 is
+told which number to change.
+
+`tests/memory-settings.e2e.mjs` taps both spinners on the three phone
+viewports, asserts the values land in the document and the link, and asserts
+the helper text appears and disappears as the two numbers cross; the
+unit-level counterpart lives in `tests/solver.memory.test.js` (§13), which
+already covers what `readDutyMemory` does with `memoryDays`.
+
 ## Decisions taken, and none still open
 
 - **A. `rotation` is round robin by longest wait.** Decided by the owner:
@@ -1291,7 +1356,9 @@ limit.
 - **F. Export, never clear.** Decided by the owner: there is no export-and-
   clear button, only export. Logged duty stays in the document and is the
   model's memory (§2), so `lastDutyEnd` and the carried totals are not
-  needed and are gone. The default window is 24 hours.
+  needed and are gone. The default window is 24 hours. How far back the
+  memory reaches, and each mission's once-per-rotation days, are set in the
+  UI (§18).
 - **G. A hated mission comes round once per rotation.** Decided by the
   owner: kitchen duty and its like should fall to a person once per 7, 14 or
   21 days. A mission carries `repeatAfterDays`; level 8
