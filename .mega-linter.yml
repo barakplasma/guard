@@ -1,11 +1,16 @@
 # MegaLinter, JavaScript flavor.
 #
-# The workflow (.github/workflows/ci.yml) runs the flavor whole; what it does
-# *not* run is configured here, and every exclusion below has a reason rather
-# than a shrug.
+# The workflow (.github/workflows/ci.yml) runs the flavor whole and marks the
+# whole run advisory with DISABLE_ERRORS; what it does *not* run is configured
+# here, and every exclusion below has a reason rather than a shrug.
+#
+# Nothing in this file takes effect if the workflow sets the same key as an env
+# variable: an env variable replaces the file's value instead of adding to it.
+# That is why DISABLE_LINTERS lives here and nowhere else.
 
 # Let zizmor authenticate when it resolves action references. The workflow token
-# remains scoped by the job's explicit permissions.
+# remains scoped by the job's explicit permissions. Inert while the linter is
+# disabled below, and kept so that re-enabling it is a one-line change.
 ACTION_ZIZMOR_UNSECURED_ENV_VARIABLES:
   - GITHUB_TOKEN
 
@@ -14,6 +19,13 @@ ACTION_ZIZMOR_UNSECURED_ENV_VARIABLES:
 GITHUB_COMMENT_REPORTER: false
 
 DISABLE_LINTERS:
+  # zizmor reports 48 findings against the workflows as they stand - unpinned
+  # action references, the checkout credential left on disk, and workflow-wide
+  # write permissions. They are real and are being fixed in the pull request
+  # that reworks the workflow permissions, which also adds .github/zizmor.yml.
+  # Enabling it here first would bury this branch's own diff in that backlog.
+  - ACTION_ZIZMOR
+
   # Spell-checking is off permanently. This app is Hebrew-only and the codebase
   # is full of protocol tokens and domain shorthand, so cspell's 140 findings
   # were: Hebrew words (סידור, משמרות, שיבוץ), iCalendar keywords (DTSTART,
@@ -25,17 +37,20 @@ DISABLE_LINTERS:
 
   # `standard` enforces a style this repository does not use - it wants no
   # semicolons, and every file here has them. With APPLY_FIXES it does not
-  # report that, it *rewrites*: one run reformatted 17 source files and
-  # committed them. Linting JavaScript here is oxlint's job (`npm run lint`,
-  # .oxlintrc.json), which already gates every pull request in the `check` job
-  # and carries three documented rule exceptions. Two linters with different
-  # opinions about the same files end with the louder one winning.
+  # report that, it *rewrites*: one run reformatted 20 source files, and its
+  # single actual error was `self` and `caches` undefined in a service worker,
+  # which is what a service worker is. Linting JavaScript here is oxlint's job
+  # (`npm run lint`, .oxlintrc.json), which already gates every pull request in
+  # the `check` job and carries three documented rule exceptions. Two linters
+  # with different opinions about the same files end with the louder one
+  # winning - and under APPLY_FIXES the louder one wins by committing.
   - JAVASCRIPT_STANDARD
 
-# Reported, never blocking. These are advisory by nature: a style opinion, a
-# duplication heuristic, or a link that was reachable yesterday. Worth seeing in
-# the job summary, not worth failing a pull request over.
-DISABLE_ERRORS_LINTERS:
-  - COPYPASTE_JSCPD
-  - MARKDOWN_MARKDOWNLINT
-  - SPELL_LYCHEE
+# The golden assignment fixtures are written by scripts/writeGoldens.mjs, and
+# reformatting them is the one thing CLAUDE.md says must never happen casually:
+# under APPLY_FIXES the job commits what it rewrites, so any pull request that
+# legitimately touches a golden would come back with all four of them reflowed
+# and the real diff buried. prettier wants to rewrite every one of them today.
+# Every other JSON file in the repo is already prettier-clean, so it keeps the
+# rest.
+JSON_PRETTIER_FILTER_REGEX_EXCLUDE: (tests/fixtures/)

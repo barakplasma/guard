@@ -383,23 +383,39 @@ viewports). It fails on horizontal overflow and on any table cell whose content 
 column — the shape of every mobile layout bug reported so far.
 
 CI also runs **MegaLinter's JavaScript flavor** on every pull request (`ci.yml`, configured in
-`.mega-linter.yml`). Two things there are load-bearing and will look like arbitrary exclusions to
+`.mega-linter.yml`). It is **advisory, never blocking** — the job sets `DISABLE_ERRORS`, so every
+finding lands in the job summary and the step still exits 0. What gates a pull request is the
+`check` job: `oxlint`, the scheduler tests, the build. MegaLinter earns its place on what oxlint
+does not cover — workflows, YAML, shell, the Dockerfile, Markdown, secrets and dependency
+scanning — and not by holding a merge over a style opinion.
+
+**Which linters run is configured in `.mega-linter.yml` and nowhere else.** A MegaLinter env
+variable on the workflow step *replaces* the file's value rather than adding to it, so a
+`DISABLE_LINTERS: ACTION_ZIZMOR` on the step silently discarded every entry in the file — which is
+how `standard` kept running, and rewriting, after being disabled there.
+
+Advisory does not mean harmless, because the job also runs with `APPLY_FIXES: all` and commits what
+a linter rewrites. So two exclusions in that file are load-bearing and will look arbitrary to
 anyone tidying up:
 
 - **`JAVASCRIPT_STANDARD` is off.** It enforces a no-semicolon style this repo does not use, and
-  the job runs with `APPLY_FIXES: all` — so it does not report the difference, it *rewrites* and
-  commits. One run reformatted 17 source files that way. JavaScript here is `oxlint`'s job, which
-  already gates every pull request in the `check` job and carries three documented rule exceptions
-  in `.oxlintrc.json`. MegaLinter earns its place on what oxlint does not cover: workflows, YAML,
-  shell, the Dockerfile, Markdown, secrets and dependency scanning.
+  under `APPLY_FIXES` it does not report the difference, it *rewrites* and commits — one run
+  reformatted 20 source files that way. Its single actual error was `self` and `caches` being
+  undefined in a service worker, which is what a service worker is. JavaScript here is `oxlint`'s
+  job, which carries three documented rule exceptions in `.oxlintrc.json`.
 - **`SPELL_CSPELL` is off permanently.** All 140 of its findings were Hebrew product words,
   iCalendar keywords, British spellings or deliberate identifiers like `emps` and `sleepable` —
   not one was a typo.
+- **`tests/fixtures/` is excluded from `JSON_PRETTIER`.** prettier wants to reflow all four golden
+  fixtures, which `scripts/writeGoldens.mjs` writes — so any pull request that legitimately touched
+  one would come back with every golden reformatted and the real assignment diff buried under it.
+  Every other JSON file here is already prettier-clean, so nothing else needed excluding.
 
-`jscpd`, `markdownlint` and `lychee` are listed in `DISABLE_ERRORS_LINTERS`: advisory by nature,
-reported into the job summary without failing the build. `.github/zizmor.yml` requires actions to
-be pinned to a ref rather than a hash, which still rejects `@main` while keeping the rolling major
-tags the workflows deliberately track.
+`ACTION_ZIZMOR` is off here for a reason with an end date rather than a permanent one: it reports
+48 findings against the workflows as they stand, and the branch that reworks the workflow
+permissions fixes them and adds a `.github/zizmor.yml` requiring actions to be pinned to a ref
+rather than a hash (which rejects `@main` while keeping the rolling major tags the workflows
+deliberately track). Re-enable it by deleting one line once that lands.
 
 Note that **actionlint only lints the shell inside `run:` blocks when `shellcheck` is on `PATH`**:
 running it locally without shellcheck installed reports clean and CI does not.

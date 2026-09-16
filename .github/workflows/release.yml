@@ -14,10 +14,10 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write   # create releases
-  packages: write   # push to GHCR
-  pages: write      # deploy to Pages
-  id-token: write   # Pages deploy attestation
+  contents: write # create releases
+  packages: write # push to GHCR
+  pages: write # deploy to Pages
+  id-token: write # Pages deploy attestation
 
 # The group is deliberately named `release-v2-`, not `release-`. Run 31124152979
 # is wedged in `queued` with all seven of its jobs already terminal, and GitHub
