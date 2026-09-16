@@ -319,6 +319,49 @@ None of these is a MiniZinc complaint. They are the ordinary craft of the tool,
 and they are the part that does not transfer to a hand-written alternative,
 which is worth knowing before choosing one.
 
+### The browser path
+
+Served to a real Chromium over plain HTTP with **no COOP/COEP headers**, which
+is the GitHub Pages condition.
+
+```
+crossOriginIsolated: false
+solvers in the wasm: org.minizinc.chuffed, org.minizinc.mip.coin-bc,
+                     org.minizinc.gecode_presolver, org.minizinc.mip.highs
+init (fetch+compile): 245ms
+24h: four levels, all OPTIMAL, 6.4s wall
+72h: four levels, all OPTIMAL, 13.7s wall
+```
+
+Both land on `unmet=0 unfilled=0 churn=0 imbalance=0`, the same answers the
+native run gives, at roughly twice the time.
+
+- **No `crossOriginIsolated` needed.** This was the single hosting risk in this
+  record - `release.yml` publishes to GitHub Pages, which cannot set COOP/COEP,
+  and that is what ruled out `or-tools-wasm` below. It does not rule out
+  MiniZinc. Closed.
+- **HiGHS is genuinely in the WebAssembly build**, not only in its build script,
+  so the amended backend ships as-is.
+- **The solve never touches the main thread.** Throttling the main thread to a
+  fifth of its speed - 6057 to 1041 spins per millisecond, measured inside the
+  page - left solve times unchanged. Fifteen seconds of solving does not freeze
+  the UI.
+
+Assets are 19MB raw, **5.2MB gzipped**: what a service worker has to precache
+and a phone fetches once.
+
+Three of this record's acceptance criteria remain untouched by it, and the first
+is untouched *because* of the third finding above:
+
+- **A Pixel-class figure.** CDP CPU throttling reaches the main thread and not
+  the worker, so a desktop core did all the solving at every throttle setting.
+  Thirteen seconds here is not thirteen seconds on a phone.
+- **Peak memory.** The 2MB JS heap the page reports excludes WebAssembly memory,
+  which is where all of it is. Unmeasured.
+- **Offline.** The assets came from a running server. Precaching 5.2MB through
+  workbox and surviving a reload with the network gone is untested, and it is
+  the criterion that matters most against the no-network rule.
+
 ### What the timings do not say
 
 231ms per instant, which is three solver *processes* with startup dominating at

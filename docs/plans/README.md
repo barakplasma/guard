@@ -88,10 +88,16 @@ Suggested order, updated now that 009's core rule has landed:
    what made the horizon measurement possible. It imports `segmentGrid`,
    `acceptedPins` and `countAt` from the engine rather than re-deriving any of
    them.
-5. **011's browser path** is what is now in front, and it is the last acceptance
-   criterion nothing has touched. Everything measured so far spawns a native
-   binary; shipping means a WebAssembly worker, assets the service worker has to
-   cache, and a phone. The model's remaining levels - history, rest, rotation
+5. ~~011's browser path~~ - **measured**. The model solves a 72-hour horizon to
+   proven optimality in a real Chromium in 13.7s, off the main thread, served
+   **without COOP/COEP** - so GitHub Pages can host it, which was this ADR's
+   one hosting risk. HiGHS is genuinely in the WebAssembly build. Assets are
+   5.2MB gzipped.
+6. **What 011 still needs** is offline behaviour (precaching 5.2MB through
+   workbox and surviving a reload with no network - the criterion that matters
+   most against the no-network rule), peak WebAssembly memory, and a real phone
+   figure, which CDP throttling cannot give because it reaches the main thread
+   and not the worker. The model's remaining levels - history, rest, rotation
    turn counting - are the other half, and are modelling work rather than
    measurement.
 

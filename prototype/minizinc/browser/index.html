@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>rota.mzn in a browser</title></head>
+<body>
+<pre id="log">starting…</pre>
+<script type="module">
+// ADR 011's last untouched acceptance criterion: the real WebAssembly path,
+// not a spawned binary. Everything measured before this ran a native MiniZinc
+// four times per plan, which says nothing about what a phone would pay.
+import * as MiniZinc from './minizinc.mjs';
+
+const log = document.getElementById('log');
+const out = [];
+const say = (line) => { out.push(line); log.textContent = out.join('\n'); };
+
+// What the page reports back to the harness. `crossOriginIsolated` is the one
+// that decides whether this can be hosted on GitHub Pages at all: it is false
+// unless COOP/COEP headers are set, which Pages cannot set.
+window.rotaProbe = { crossOriginIsolated: window.crossOriginIsolated, levels: [], error: null };
+
+const mark = () => performance.now();
+
+// Is CPU throttling actually reaching the code that does the work? A busy loop
+// on the main thread, timed. The solver runs in a Web Worker, and if the worker
+// is not throttled then any "phone" figure from this page is a desktop figure
+// wearing a hat.
+{
+  const t = performance.now();
+  let n = 0;
+  while (performance.now() - t < 50) n++;
+  window.rotaProbe.spinPerMs = Math.round(n / 50);
+}
+
+try {
+  const t0 = mark();
+  await MiniZinc.init({
+    workerURL: new URL('./minizinc-worker.js', location.href).href,
+    wasmURL: new URL('./minizinc.wasm', location.href).href,
+    dataURL: new URL('./minizinc.data', location.href).href,
+  });
+  window.rotaProbe.initMs = Math.round(mark() - t0);
+  say(`init: ${window.rotaProbe.initMs}ms, crossOriginIsolated=${window.crossOriginIsolated}`);
+
+  const solvers = await MiniZinc.solvers();
+  window.rotaProbe.solvers = solvers.map((s) => s.id);
+  say(`solvers: ${window.rotaProbe.solvers.join(', ')}`);
+
+  const [mzn, dzn] = await Promise.all([
+    fetch('./rota.mzn').then((r) => r.text()),
+    fetch('./instance.dzn').then((r) => r.text()),
+  ]);
+
+  const solver = new URLSearchParams(location.search).get('solver') || 'highs';
+  // The same ladder `solve.mjs` climbs, in the browser: each level capped by
+  // the last level's proven optimum.
+  const caps = { capUnmet: -1, capUnfilled: -1, capChurn: -1 };
+  const names = ['unmetQualifications', 'unfilledSeats', 'slotChurn', 'imbalance'];
+  for (const level of [1, 2, 3, 4]) {
+    const model = new MiniZinc.Model();
+    model.addFile('rota.mzn', mzn);
+    model.addDznString(dzn.replace(/^level = \d+;$/m, `level = ${level};`)
+      .replace(/^capUnmet = -?\d+;$/m, `capUnmet = ${caps.capUnmet};`)
+      .replace(/^capUnfilled = -?\d+;$/m, `capUnfilled = ${caps.capUnfilled};`)
+      .replace(/^capChurn = -?\d+;$/m, `capChurn = ${caps.capChurn};`));
+    const started = mark();
+    const result = await model.solve({ options: { solver, statistics: true } });
+    const ms = Math.round(mark() - started);
+    const text = String(result.status);
+    if (level === 1) window.rotaProbe.shape = Object.keys(result.solution?.output ?? {});
+    // The model's `output` item is plain text, so whatever key it lands under,
+    // the numbers are in it. Searching the whole object avoids guessing.
+    const blob = JSON.stringify(result.solution?.output ?? {});
+    const values = {};
+    for (const n of names) {
+      const m = blob.match(new RegExp(`${n} = (\\d+);`));
+      values[n] = m ? Number(m[1]) : null;
+    }
+    window.rotaProbe.levels.push({ level, ms, status: text, ...values });
+    say(`level ${level}: ${ms}ms ${text} ${names.map((n) => `${n}=${values[n]}`).join(' ')}`);
+    if (level === 1) caps.capUnmet = values.unmetQualifications;
+    if (level === 2) caps.capUnfilled = values.unfilledSeats;
+    if (level === 3) caps.capChurn = values.slotChurn;
+  }
+  if (performance.memory) {
+    window.rotaProbe.heapMB = Math.round(performance.memory.usedJSHeapSize / 1048576);
+    say(`js heap: ${window.rotaProbe.heapMB}MB`);
+  }
+} catch (e) {
+  window.rotaProbe.error = String(e && e.stack ? e.stack : e);
+  say(`ERROR ${window.rotaProbe.error}`);
+}
+window.rotaProbe.done = true;
+say('done');
+</script>
+</body>
+</html>

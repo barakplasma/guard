@@ -13,6 +13,7 @@ of the model is visible before anything replaces the hand-written engine.
 | `check.mjs` | model vs. oracle on small random instances |
 | `vsEngine.mjs` | model vs. the shipped engine, at the instants the engine calls short |
 | `scaling.mjs` | how far it goes, and on which backend |
+| `browser.mjs` + `browser/` | the real WebAssembly path, served without COOP/COEP |
 
 ## Running it
 
@@ -25,6 +26,14 @@ node prototype/minizinc/check.mjs 400 21      # agree with the oracle
 node prototype/minizinc/vsEngine.mjs 400      # find what the engine misses
 node prototype/minizinc/scaling.mjs highs     # how far it goes
 node prototype/minizinc/scaling.mjs chuffed 24
+```
+
+The browser measurement needs two packages that are deliberately not saved, the
+same convention `tests/e2e.mjs` uses:
+
+```bash
+npm i --no-save minizinc playwright
+CHROME=/path/to/chromium node prototype/minizinc/browser.mjs 72 highs
 ```
 
 ## The headline: not Chuffed
@@ -153,9 +162,56 @@ Time is a **segment index**, never an epoch millisecond. The horizon is 72 hours
 (ADR 012), so a caller maps absolute instants onto `1..nS` before the model sees
 them and back again afterwards.
 
-## What is still unmeasured
+## The browser path
 
-The browser path. `scaling.mjs` spawns a native binary four times per plan;
-shipping means a WebAssembly worker, `.wasm` and `.data` assets served and
-cached by the service worker, and a Pixel-class phone rather than this machine.
-Nothing here says what that costs.
+Everything above spawns a native binary, which says nothing about what the app
+would pay. `browser.mjs` serves the model to a real Chromium over plain HTTP
+with **no COOP/COEP headers**, because that is the GitHub Pages condition and a
+measurement taken under headers Pages cannot set would answer a question nobody
+asked.
+
+```
+crossOriginIsolated: false
+solvers in the wasm: org.minizinc.chuffed, org.minizinc.mip.coin-bc,
+                     org.minizinc.gecode_presolver, org.minizinc.mip.highs
+init (fetch+compile): 245ms
+
+24h horizon (26 segments)              72h horizon (74 segments)
+  level 1:  1174ms OPTIMAL               level 1:  3179ms OPTIMAL
+  level 2:  1653ms OPTIMAL               level 2:  4296ms OPTIMAL
+  level 3:  1481ms OPTIMAL               level 3:  3597ms OPTIMAL
+  level 4:   913ms OPTIMAL               level 4:  2299ms OPTIMAL
+  wall     6405ms                        wall    13720ms
+```
+
+Both end at `unmet=0 unfilled=0 churn=0 imbalance=0` - the same answers the
+native run gives, at roughly twice the time.
+
+Three things this settles:
+
+- **No `crossOriginIsolated`, so no COOP/COEP.** GitHub Pages, which
+  `release.yml` publishes to, can host this. That was the single hosting risk
+  ADR 011 flagged and it is closed.
+- **HiGHS really is in the WebAssembly build**, not only in the build script.
+  The amended backend is shippable as-is.
+- **The solve never touches the main thread.** Throttling the main thread to a
+  fifth of its speed (6057 -> 1041 spins/ms, measured in the page) left the
+  solve times unchanged. A fifteen-second solve does not freeze the UI.
+
+Assets: 19MB raw, **5.2MB gzipped** (4.9MB `.wasm`, 0.3MB `.data`). That is the
+number the service worker has to precache and a phone has to fetch once.
+
+### What the browser measurement still does not say
+
+**A phone figure.** The finding above cuts both ways: CDP CPU throttling reaches
+the main thread and not the worker, so this machine's desktop-class core did all
+the solving at both throttle settings. Thirteen seconds here is not thirteen
+seconds on a Pixel, and nothing here says what it is.
+
+**Peak memory.** The 2MB JS heap the page reports excludes the WebAssembly
+memory, which is where all of it lives. ADR 011 asks for peak memory with one
+worker and this does not measure it.
+
+**Offline and service-worker caching.** The page fetches its assets from a
+server that is running. Precaching 5.2MB through workbox, and surviving a
+reload with the network gone, is untested.
