@@ -375,9 +375,18 @@ For layout changes run `tests/mobile-viewports.mjs` too (same server, three phon
 viewports). It fails on horizontal overflow and on any table cell whose content is wider than its
 column — the shape of every mobile layout bug reported so far.
 
+CI also runs **MegaLinter's JavaScript flavor** on every pull request, configured in
+`.mega-linter.yml`. Its **JavaScript linters are switched off on purpose** — this repo lints with
+`oxlint`, and eslint, standard, prettier or biome running beside it means two tools with different
+opinions about the same files, where the louder one wins by reformatting everything. MegaLinter is
+here for what `oxlint` does not cover: workflows, YAML, shell, the Dockerfile, Markdown, and a
+secret scan. Every other omission is named in that file with its reason; the spell checkers and
+`jscpd` in particular would fight the Hebrew copy and the deliberately-shared fuzz generators.
+`.yamllint.yml` and `.markdownlint.json` hold the two rule sets that needed relaxing, both for
+stated reasons rather than to silence a complaint.
+
 `lz-string` is CommonJS: import it as a default and destructure, or the Node test run breaks while
 the Vite build keeps working.
-
 
 ## Daily missions, qualifications, and output checks
 

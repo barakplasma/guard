@@ -46,7 +46,7 @@ ADR 011 selected **Chuffed, explicitly**. On measurement that is the wrong
 backend for this model, and the record has been corrected. The same fixture at
 each horizon, `proved` being one character per lexicographic level:
 
-```
+```text
 solver: highs                                  solver: chuffed
 horizon segments elapsed proved imbalance      horizon segments elapsed proved imbalance
      2h        3   712ms   yyyy         2           2h        3   356ms   yyyy         2
@@ -87,7 +87,7 @@ merely reported a bound.
 **Against the engine, per instant.** Over 400 generated plans from
 `scripts/offGridFuzz.mjs`'s generator, seed included:
 
-```
+```text
 shortage instants solved  : 1292
 model found a full crew   : 36  (2.8%)
 model agreed it was short : 1256
@@ -110,7 +110,7 @@ solving each instance twice - once where crew may change hands inside a slot,
 once with churn pinned to zero so a slot is indivisible exactly as it is for the
 engine:
 
-```
+```text
 plans compared over 12h                       : 250
 seats the engine left empty                   : 844
 ...that a slot-disciplined optimum also leaves: 744   (88%)
@@ -195,7 +195,7 @@ with **no COOP/COEP headers**, because that is the GitHub Pages condition and a
 measurement taken under headers Pages cannot set would answer a question nobody
 asked.
 
-```
+```text
 crossOriginIsolated: false
 solvers in the wasm: org.minizinc.chuffed, org.minizinc.mip.coin-bc,
                      org.minizinc.gecode_presolver, org.minizinc.mip.highs
@@ -233,7 +233,7 @@ number the service worker has to precache and a phone has to fetch once.
 whole ladder again. Both, because a cache miss served by a socket that happened
 to still be open would look exactly like success.
 
-```
+```text
 warm pass    : 7 assets cached by the service worker
 offline pass : network cut, server stopped, reloaded
   level 1-4: all OPTIMAL, 5.4s wall, imbalance 0
@@ -247,7 +247,7 @@ The JS heap the page reports is 2MB and means nothing here: WebAssembly memory
 is not in it, and that is where all of this lives. Resident memory over the
 whole browser process tree, sampled every 200ms:
 
-```
+```text
 horizon   idle     peak    delta
     6h   830MB   1114MB   +284MB
    24h   831MB   1085MB   +254MB

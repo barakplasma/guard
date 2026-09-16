@@ -20,7 +20,7 @@ tests, and all sit outside `npm test` on purpose.
 `node scripts/historyDriftCheck.mjs` applies each kind of edit through the real
 `setDoc` path, three days into a seven-day rota, then re-reads the past:
 
-```
+```text
   edit                                erased   invented   unreachable
   add an employee                         0          0             0
   raise a mission headcount               0         72             0
@@ -72,7 +72,7 @@ into deletion of the thing that is supposed to survive.
 
 `node scripts/rollForwardLoss.mjs` shows it:
 
-```
+```text
   step                                          logged
   after the freeze records elapsed shifts       288
   after rolling the window forward              288
@@ -130,7 +130,7 @@ it is editable.
 `node scripts/completenessSearch.mjs` searches for rosters that can be staffed
 in full but which the engine reports short. It finds them:
 
-```
+```text
 employees: e1[medic] e2[commander] e3[driver,commander] e4[driver,commander,medic]
 missions : m1 count=1 requires=commanderx1
          | m2 count=2 requires=driverx1+commanderx1
@@ -163,7 +163,7 @@ unconstrained post any of the other guards could have held.
 `node scripts/midScheduleCallout.mjs` reproduces it. Eight guards, two of them
 drivers, gate needs three and patrol needs two:
 
-```
+```text
   callout starts   crew it gets                 result
   +  0 minutes    שומר 1 (driver), שומר 2 (driver) ok
   + 20 minutes    שומר 1 (driver), שומר 7     SHORT A DRIVER
@@ -200,7 +200,7 @@ It closed the shape, not the class. `node scripts/offGridFuzz.mjs` runs random
 off-grid instances against the current engine and brute-forces each reported
 shortage:
 
-```
+```text
 shortage instants checked : 19806
 provably false shortages  : 560  (2.8%)
 ```
@@ -226,7 +226,7 @@ a false shortage; it is the slot discipline, which ADR 002 chose on purpose.
 where crew may change hands inside a slot, and once with churn pinned to zero so
 a slot is indivisible exactly as it is for the engine:
 
-```
+```text
 plans compared over 12h                       : 250
 seats the engine left empty                   : 844
 ...that a slot-disciplined optimum also leaves: 744   (88%)
@@ -239,7 +239,6 @@ So **88% of what the engine reports short is genuinely short**, and about
 in nine. That is a smaller claim than the earlier framing and a better one: it
 is measured on the question the engine is actually answering, in seats rather
 than instants, and it says what a solver would buy.
-
 
 Some survivors involve no off-grid mission at all, so this is not a residue of
 the off-grid case specifically.

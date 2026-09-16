@@ -19,7 +19,7 @@ level. Nothing in the key it ranks on says a person has to sleep.
 anything**, so ADR 015 plays no part. Plans where the seats outnumber the people
 are skipped, since there the strategy has no choice to make:
 
-```
+```text
   everyone present from the start (1059 plans)
     longest run <3h    :   705  66.6%
     longest run 3-6h   :   265  25.0%

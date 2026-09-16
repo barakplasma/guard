@@ -128,8 +128,8 @@ be taken or left on its own:
 - **014** adds per-person exclusions - **implemented**, at wire position 14,
   with one shared `isExcluded` predicate replacing five copies of the tag check
   - and the softer rule that scarce qualifications should be kept uncommitted so
-  they can answer a callout. That second half is an objective term and waits for
-  011.
+  they can answer a callout. That second half is an objective term, and waits
+  for ADR 011.
 
 - **016** is the one to read first. Evening out hours is *what produces* an
   unbroken run, so where somebody joined a period part-way through - leave, a

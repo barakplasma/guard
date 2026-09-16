@@ -27,7 +27,7 @@ engine does. It shows the moment somebody is away.
 window rolled forward a day at a time, with the eighth guard away for the first
 two days and then back. Before this record:
 
-```
+```text
   roll   window spread   cumulative spread   busiest   idlest
      1           0.0h               18.0h       18h       0h
      2           0.0h               36.0h       36h       0h
@@ -134,7 +134,7 @@ one person. At six hours they take 33 against 27, which is the feature working.
 The gap closes completely, and the longest anybody stands while it does is six
 hours:
 
-```
+```text
   roll   window spread   cumulative spread   busiest   idlest
      2           7.0h               36.0h       36h       0h
      4           7.0h               22.0h       64h      42h

@@ -1,0 +1,19 @@
+# Used by MegaLinter's YAML_YAMLLINT.
+extends: default
+
+rules:
+  # GitHub Actions workflows conventionally omit the `---` marker, and every
+  # example in GitHub's own documentation does.
+  document-start: disable
+
+  # A workflow's `on:` is a key, not a boolean. Without this, every workflow in
+  # this repository reports a false positive on line 3.
+  truthy:
+    check-keys: false
+
+  # The workflows here carry long explanatory comments - why a concurrency group
+  # is named `release-v2-`, why the e2e suites run on pull requests rather than
+  # after merge - and rewrapping prose to 80 columns to satisfy a linter would
+  # make them harder to read, not easier.
+  line-length:
+    max: 120

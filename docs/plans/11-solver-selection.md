@@ -45,7 +45,8 @@ so the trade can be judged rather than inherited.
 production scheduling engine.** Not Pumpkin, and not a production solver plus a
 separate oracle or fallback.
 
-*(The backend named here was Chuffed. It is HiGHS - see the amendment above.)*
+The backend named here was originally Chuffed; it is HiGHS, for the reasons in
+the amendment above.
 
 ### Priority order
 
@@ -207,7 +208,7 @@ level below it.
 **The model finds what the engine misses.** Run over `scripts/offGridFuzz.mjs`'s
 own generator and seed, so both are looking at the same instances:
 
-```
+```text
 shortage instants solved  : 1292
 model found a full crew   : 36  (2.8%)
 model agreed it was short : 1256
@@ -263,7 +264,7 @@ adapter, solving each instance twice - once where crew may change hands inside a
 slot, and once with churn pinned to zero so a slot is indivisible exactly as it
 is for the engine:
 
-```
+```text
 plans compared over 12h                       : 250
 seats the engine left empty                   : 844
 ...that a slot-disciplined optimum also leaves: 744   (88%)
@@ -303,7 +304,7 @@ both drivers inserted twenty minutes past the hour - stretched to each horizon.
 a result: the ladder passes each optimum down as a cap, so an unproven one
 poisons every level below it.
 
-```
+```text
 solver: highs                                  solver: chuffed
 horizon segments elapsed proved imbalance      horizon segments elapsed proved imbalance
      2h        3   712ms   yyyy         2           2h        3   356ms   yyyy         2
@@ -358,7 +359,7 @@ which is worth knowing before choosing one.
 Served to a real Chromium over plain HTTP with **no COOP/COEP headers**, which
 is the GitHub Pages condition.
 
-```
+```text
 crossOriginIsolated: false
 solvers in the wasm: org.minizinc.chuffed, org.minizinc.mip.coin-bc,
                      org.minizinc.gecode_presolver, org.minizinc.mip.highs
@@ -394,7 +395,7 @@ proved. The app's no-network rule survives the solver.
 reports is 2MB and means nothing: WebAssembly memory is not in it. Resident
 memory over the browser process tree, sampled every 200ms:
 
-```
+```text
 horizon   idle     peak    delta
     6h   830MB   1114MB   +284MB
    24h   831MB   1085MB   +254MB
@@ -455,14 +456,14 @@ It fixed the shape, not the class. `node scripts/offGridFuzz.mjs` runs random
 off-grid instances against the current engine and brute-forces each reported
 shortage:
 
-```
+```text
 shortage instants checked : 19806
 provably false shortages  : 560  (2.8%)
 ```
 
 One surviving example needs no off-grid mission at all:
 
-```
+```text
   employees: e1[driver] e2[commander] e3[driver,medic] e4[commander]
              e5[commander,medic] e6[commander]
   m1: count=1 requires=driverx1        whole plan
