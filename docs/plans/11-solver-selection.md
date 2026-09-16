@@ -427,6 +427,24 @@ pay: a real horizon is one instance, not 1292, and the browser path is a
 WebAssembly worker rather than a spawned binary. The number that matters is
 still unmeasured, and getting it needs the adapter this prototype does not have.
 
+## A prerequisite, not a consequence
+
+Raised in review and agreed: **the history freeze must capture the accepted
+result, never recompute it.**
+
+`freezeElapsedBeforeEdit` calls `runPlanner(toPlannerInput(prev))` - deliberately
+without `now`, since passing it makes the engine decline to plan the very hours
+the freeze is about to record. With today's deterministic engine that reproduces
+what was on screen. With an asynchronous solver, a time limit, a different
+incumbent or a version bump, it does not, and the app would freeze assignments
+nobody ever saw as though somebody had agreed to them.
+
+That is a defect this record *creates*, so it belongs to this record: the
+accepted schedule result has to be retained and its elapsed rows appended, and
+history must never be reconstructed by solving again. It should land **before**
+any solver does, not alongside - it is cheap against the current engine and
+becomes a data-integrity bug the moment the engine stops being deterministic.
+
 ## Acceptance criteria
 
 The MiniZinc prototype must pass, before it replaces anything:
@@ -438,7 +456,9 @@ The MiniZinc prototype must pass, before it replaces anything:
 - exhaustive checks against a brute-force oracle on small random instances -
   **met by the prototype** (`prototype/minizinc/check.mjs`), for the scope the
   prototype models;
-- the **real production browser bundle, offline**.
+- the **real production browser bundle, offline**;
+- the history freeze capturing the accepted result rather than recomputing it,
+  per the prerequisite above.
 
 Plus representative Pixel-class measurements for first load, repeated solve
 time, cancellation, peak memory and worker cleanup. **Configure one worker
