@@ -93,13 +93,15 @@ Suggested order, updated now that 009's core rule has landed:
    **without COOP/COEP** - so GitHub Pages can host it, which was this ADR's
    one hosting risk. HiGHS is genuinely in the WebAssembly build. Assets are
    5.2MB gzipped.
-6. **What 011 still needs** is offline behaviour (precaching 5.2MB through
-   workbox and surviving a reload with no network - the criterion that matters
-   most against the no-network rule), peak WebAssembly memory, and a real phone
-   figure, which CDP throttling cannot give because it reaches the main thread
-   and not the worker. The model's remaining levels - history, rest, rotation
-   turn counting - are the other half, and are modelling work rather than
-   measurement.
+   Offline works too: cache the assets, cut the network, stop the server,
+   reload, and the ladder still proves every level.
+6. **What 011 still needs** is a real phone. Peak memory is now measured and it
+   is the finding to weigh: 250-400MB resident, flat across horizons, almost
+   all of it MiniZinc rather than Chromium. A background tab that size is one
+   Android may reclaim. CDP CPU throttling cannot give the speed figure because
+   it reaches the main thread and not the worker. The model's remaining levels -
+   history, rest, rotation turn counting - are the other half, and are modelling
+   work rather than measurement.
 
 ## Verification
 

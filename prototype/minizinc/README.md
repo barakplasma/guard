@@ -34,6 +34,8 @@ same convention `tests/e2e.mjs` uses:
 ```bash
 npm i --no-save minizinc playwright
 CHROME=/path/to/chromium node prototype/minizinc/browser.mjs 72 highs
+OFFLINE=1  CHROME=... node prototype/minizinc/browser.mjs 24 highs   # cache, cut the network, reload
+NO_SOLVE=1 CHROME=... node prototype/minizinc/browser.mjs 24 highs   # memory baseline
 ```
 
 ## The headline: not Chuffed
@@ -201,17 +203,53 @@ Three things this settles:
 Assets: 19MB raw, **5.2MB gzipped** (4.9MB `.wasm`, 0.3MB `.data`). That is the
 number the service worker has to precache and a phone has to fetch once.
 
+### Offline
+
+`OFFLINE=1` loads the page once behind a crude precaching service worker, then
+**cuts the network at the browser and stops the server**, reloads, and runs the
+whole ladder again. Both, because a cache miss served by a socket that happened
+to still be open would look exactly like success.
+
+```
+warm pass    : 7 assets cached by the service worker
+offline pass : network cut, server stopped, reloaded
+  level 1-4: all OPTIMAL, 5.4s wall, imbalance 0
+```
+
+It works. The app's no-network rule survives the solver.
+
+### Peak memory, which is the real risk
+
+The JS heap the page reports is 2MB and means nothing here: WebAssembly memory
+is not in it, and that is where all of this lives. Resident memory over the
+whole browser process tree, sampled every 200ms:
+
+```
+horizon   idle     peak    delta
+    6h   830MB   1114MB   +284MB
+   24h   831MB   1085MB   +254MB
+   72h   833MB   1177MB   +344MB
+   72h   831MB   1236MB   +405MB   (second run)
+baseline  821MB    821MB     +0MB   (page loaded, MiniZinc never initialised)
+```
+
+Two things follow, and the second is the one to worry about.
+
+**It does not grow with the horizon.** 6 hours and 72 hours cost the same within
+run-to-run noise, so this is the price of having MiniZinc *loaded*, not of the
+plan being long. A rolling 72-hour horizon does not make it worse.
+
+**It is 250-400MB, and the baseline row says essentially all of it is MiniZinc.**
+A page that loads and initialises nothing costs nothing measurable. On a phone
+that is a real risk: a background tab holding a third of a gigabyte is a tab
+Android may reclaim, and this measurement was taken on a machine with room to
+spare. ADR 011's "configure one worker initially" now has a number behind it.
+
 ### What the browser measurement still does not say
 
-**A phone figure.** The finding above cuts both ways: CDP CPU throttling reaches
-the main thread and not the worker, so this machine's desktop-class core did all
-the solving at both throttle settings. Thirteen seconds here is not thirteen
-seconds on a Pixel, and nothing here says what it is.
-
-**Peak memory.** The 2MB JS heap the page reports excludes the WebAssembly
-memory, which is where all of it lives. ADR 011 asks for peak memory with one
-worker and this does not measure it.
-
-**Offline and service-worker caching.** The page fetches its assets from a
-server that is running. Precaching 5.2MB through workbox, and surviving a
-reload with the network gone, is untested.
+**A phone figure.** The main-thread finding above cuts both ways: CDP CPU
+throttling reaches the main thread and not the worker, so this machine's
+desktop-class core did all the solving at every throttle setting. Fourteen
+seconds here is not fourteen seconds on a Pixel, and nothing here says what it
+is. Given the memory number, that measurement should happen on real hardware
+before anything ships.

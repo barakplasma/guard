@@ -31,7 +31,33 @@ const mark = () => performance.now();
   window.rotaProbe.spinPerMs = Math.round(n / 50);
 }
 
-try {
+// Register the probe service worker and wait for it to have everything, so the
+// harness can cut the network and reload. Skipped unless asked for: the online
+// measurement should not pay for a cache it does not use.
+if (new URLSearchParams(location.search).has('sw') && 'serviceWorker' in navigator) {
+  try {
+    const reg = await navigator.serviceWorker.register('./sw.js', { scope: './' });
+    await navigator.serviceWorker.ready;
+    const cache = await caches.open('rota-probe-v1');
+    const keys = await cache.keys();
+    window.rotaProbe.cached = keys.length;
+    say(`service worker: ${reg.active ? 'active' : 'registered'}, ${keys.length} assets cached`);
+  } catch (e) {
+    window.rotaProbe.swError = String(e);
+    say(`service worker failed: ${e}`);
+  }
+}
+
+// A baseline pass: load the page, import nothing further, solve nothing. The
+// difference against a normal run is what having MiniZinc *loaded* costs, as
+// opposed to what Chromium costs for having a tab open at all.
+if (new URLSearchParams(location.search).has('noSolve')) {
+  say('baseline: page loaded, MiniZinc not initialised');
+  window.rotaProbe.done = true;
+  window.rotaProbe.baseline = true;
+}
+
+if (!window.rotaProbe.baseline) try {
   const t0 = mark();
   await MiniZinc.init({
     workerURL: new URL('./minizinc-worker.js', location.href).href,

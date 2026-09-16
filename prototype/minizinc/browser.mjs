@@ -9,6 +9,11 @@
  * means a WebAssembly worker, an 18.8MB `.wasm` and a 0.5MB `.data` that the
  * service worker has to cache, all on a phone.
  *
+ * With `OFFLINE=1` it asks a fourth, and the one that matters most against this
+ * project's no-network rule: the page is loaded once with a service worker
+ * precaching the assets, the network is then cut at the browser, and the whole
+ * ladder is run again from cache alone.
+ *
  * Three questions, in order of how much they could cost:
  *
  *   1. Does it need `crossOriginIsolated`? COOP/COEP headers cannot be set on
@@ -25,6 +30,7 @@
  */
 
 import { createServer } from 'node:http';
+import { readdirSync, readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, dirname, extname } from 'node:path';
@@ -87,11 +93,12 @@ const server = createServer(async (req, res) => {
       return res.end(dzn);
     }
     if (path === '/favicon.ico') { res.writeHead(204); return res.end(); }
-    const local = path === '/' || path === '/index.html'
-      ? join(HERE, 'browser/index.html')
-      : path === '/rota.mzn'
-        ? join(HERE, 'rota.mzn')
-        : join(DIST, path.replace(/^\//, ''));
+    // The page and its service worker live in `browser/`, the model beside this
+    // file, and everything else in the installed package's `dist/`.
+    const name = path === '/' ? 'index.html' : path.replace(/^\//, '');
+    const candidates = [join(HERE, 'browser', name), join(HERE, name), join(DIST, name)];
+    const local = candidates.find((c) => existsSync(c));
+    if (!local) throw new Error('not found');
     const body = await readFile(local);
     // No COOP/COEP. See the note at the top: that is the condition being tested.
     res.writeHead(200, { 'content-type': TYPES[extname(local)] ?? 'application/octet-stream' });
@@ -104,6 +111,43 @@ const server = createServer(async (req, res) => {
 
 await new Promise((r) => server.listen(0, r));
 const { port } = server.address();
+
+/**
+ * Resident memory of the whole browser process tree, in MB.
+ *
+ * The JS heap the page reports excludes WebAssembly memory, which is where all
+ * of this solver's memory is - so it reads 2MB while the wasm holds hundreds.
+ * RSS over the process tree is coarser and attributes Chromium's own footprint
+ * to the solver, but it is the only figure here that includes the thing being
+ * measured. Reported as a delta from idle for that reason.
+ */
+function treeRssMB(rootPid) {
+  const kids = new Map();
+  for (const entry of readdirSync('/proc')) {
+    if (!/^\d+$/.test(entry)) continue;
+    try {
+      const stat = readFileSync(`/proc/${entry}/stat`, 'utf8');
+      const ppid = Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1]);
+      kids.set(Number(entry), ppid);
+    } catch { /* the process went away mid-read */ }
+  }
+  const wanted = new Set([rootPid]);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const [pid, ppid] of kids) {
+      if (!wanted.has(pid) && wanted.has(ppid)) { wanted.add(pid); grew = true; }
+    }
+  }
+  let kb = 0;
+  for (const pid of wanted) {
+    try {
+      const m = /VmRSS:\s+(\d+) kB/.exec(readFileSync(`/proc/${pid}/status`, 'utf8'));
+      if (m) kb += Number(m[1]);
+    } catch { /* same */ }
+  }
+  return Math.round(kb / 1024);
+}
 
 const browser = await chromium.launch(
   process.env.CHROME ? { executablePath: process.env.CHROME } : {},
@@ -124,12 +168,49 @@ page.on('response', (r) => {
   bodies.push(r.body().then((b) => { transferred += b.length; }).catch(() => {}));
 });
 
+// Playwright's `Browser` exposes no pid, so find the Chromium tree by name.
+// Crude, and fine here: this sandbox runs exactly one.
+const rootPid = (() => {
+  for (const entry of readdirSync('/proc')) {
+    if (!/^\d+$/.test(entry)) continue;
+    try {
+      const cmd = readFileSync(`/proc/${entry}/cmdline`, 'utf8');
+      if (cmd.includes('chrome-linux/chrome') && !cmd.includes('--type=')) return Number(entry);
+    } catch { /* gone */ }
+  }
+  return null;
+})();
+const idleRss = rootPid ? treeRssMB(rootPid) : 0;
+let peakRss = idleRss;
+const sampler = rootPid ? setInterval(() => {
+  peakRss = Math.max(peakRss, treeRssMB(rootPid));
+}, 200) : null;
+
+const offline = process.env.OFFLINE === '1';
+const query = `solver=${solver}${offline ? '&sw=1' : ''}${process.env.NO_SOLVE === '1' ? '&noSolve=1' : ''}`;
+
 const opened = Date.now();
-await page.goto(`http://localhost:${port}/?solver=${solver}`, { waitUntil: 'load' });
+await page.goto(`http://localhost:${port}/?${query}`, { waitUntil: 'load' });
 await page.waitForFunction(() => window.rotaProbe?.done, null, { timeout: 15 * 60 * 1000 });
-const result = await page.evaluate(() => window.rotaProbe);
+let result = await page.evaluate(() => window.rotaProbe);
 await Promise.all(bodies);
-const wall = Date.now() - opened;
+let wall = Date.now() - opened;
+
+if (offline) {
+  const cached = result.cached;
+  console.log(`warm pass          : ${cached} assets cached by the service worker`);
+  // Cut the network at the browser *and* stop the server, so a cache miss
+  // cannot be quietly served by a socket that was still open.
+  await page.context().setOffline(true);
+  server.close();
+  const reloaded = Date.now();
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForFunction(() => window.rotaProbe?.done, null, { timeout: 15 * 60 * 1000 });
+  result = await page.evaluate(() => window.rotaProbe);
+  wall = Date.now() - reloaded;
+  console.log('offline pass       : network cut, server stopped, reloaded\n');
+}
+if (sampler) clearInterval(sampler);
 
 console.log(`cpu throttle       : ${throttle}x (main-thread spin ${result.spinPerMs}/ms)`);
 console.log(`fixture            : ${hours}h horizon, ${inst.nE} guards, ${inst.nM} missions, ${inst.nS} segments`);
@@ -138,10 +219,12 @@ console.log(`solvers in the wasm: ${(result.solvers ?? []).join(', ') || '(none 
 if (result.shape) console.log(`solution output keys: ${result.shape.join(', ')}`);
 console.log(`bytes over the wire: ${(transferred / 1048576).toFixed(1)}MB`);
 console.log(`init (fetch+compile): ${result.initMs}ms`);
+if (result.baseline) console.log('baseline pass      : MiniZinc never initialised');
 for (const l of result.levels) {
   console.log(`  level ${l.level}: ${String(l.ms).padStart(6)}ms  ${l.status}  unmet=${l.unmetQualifications} unfilled=${l.unfilledSeats} churn=${l.slotChurn} imbalance=${l.imbalance}`);
 }
-if (result.heapMB) console.log(`js heap            : ${result.heapMB}MB`);
+if (result.heapMB) console.log(`js heap            : ${result.heapMB}MB  (excludes wasm memory - see the note on treeRssMB)`);
+if (rootPid) console.log(`browser tree rss   : ${idleRss}MB idle -> ${peakRss}MB peak  (+${peakRss - idleRss}MB)`);
 console.log(`wall clock         : ${wall}ms`);
 if (result.error) console.log(`\nERROR\n${result.error}`);
 

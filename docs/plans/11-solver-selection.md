@@ -350,17 +350,39 @@ native run gives, at roughly twice the time.
 Assets are 19MB raw, **5.2MB gzipped**: what a service worker has to precache
 and a phone fetches once.
 
-Three of this record's acceptance criteria remain untouched by it, and the first
-is untouched *because* of the third finding above:
+**Offline works.** The page is loaded once behind a precaching service worker,
+the network is cut at the browser *and* the server stopped - both, because a
+cache miss served by a socket that happened to still be open would look exactly
+like success - and the whole ladder runs again from cache in 5.4s, all levels
+proved. The app's no-network rule survives the solver.
 
-- **A Pixel-class figure.** CDP CPU throttling reaches the main thread and not
-  the worker, so a desktop core did all the solving at every throttle setting.
-  Thirteen seconds here is not thirteen seconds on a phone.
-- **Peak memory.** The 2MB JS heap the page reports excludes WebAssembly memory,
-  which is where all of it is. Unmeasured.
-- **Offline.** The assets came from a running server. Precaching 5.2MB through
-  workbox and surviving a reload with the network gone is untested, and it is
-  the criterion that matters most against the no-network rule.
+**Peak memory is the finding that should worry somebody.** The JS heap the page
+reports is 2MB and means nothing: WebAssembly memory is not in it. Resident
+memory over the browser process tree, sampled every 200ms:
+
+```
+horizon   idle     peak    delta
+    6h   830MB   1114MB   +284MB
+   24h   831MB   1085MB   +254MB
+   72h   833MB   1177MB   +344MB
+   72h   831MB   1236MB   +405MB   (second run)
+baseline  821MB    821MB     +0MB   (page loaded, MiniZinc never initialised)
+```
+
+It does **not** grow with the horizon - 6 hours and 72 hours cost the same
+within noise - so this is the price of having MiniZinc loaded, not of the plan
+being long, and rolling the window forward does not make it worse. But it is
+250-400MB, and the baseline row says essentially all of it is MiniZinc rather
+than Chromium. A background tab holding a third of a gigabyte is a tab Android
+may reclaim. This record's "configure one worker initially" now has a number
+behind it, and that number is the strongest argument yet for keeping the
+hand-written engine as the thing that renders a shared link.
+
+**One criterion is still untouched: a Pixel-class figure.** The main-thread
+finding above is why - CDP CPU throttling reaches the main thread and not the
+worker, so a desktop core did all the solving at every throttle setting.
+Fourteen seconds here is not fourteen seconds on a phone. Given the memory
+number, that measurement should happen on real hardware before anything ships.
 
 ### What the timings do not say
 
