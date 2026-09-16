@@ -177,15 +177,15 @@ on a half-typed document. It reuses the existing rules rather than restating
 them, so each helper below is a thin function over an export that already
 exists:
 
-| Helper                         | Reuses                                                 | Adds                                                                                                |
-|--------------------------------|--------------------------------------------------------|-----------------------------------------------------------------------------------------------------|
-| `resolveNights(draft)`         | `nightWindows` (planSchema.js)                         | nothing                                                                                             |
-| `resolveOccurrences(draft,m)`  | `dailyOccurrences` (planSchema.js)                     | issue `daily-missing-clock` when a bound is null                                                    |
-| `resolveEmployees(draft)`      | `normalizeEmployees` via `segmentGrid`'s `prepare`     | `requiredNightRestMinutes` from `tags[].minNightRestMinutes`                                        |
-| `resolveMissions(draft)`       | `normalizeMissions`, `slotBoundsFor` via `segmentGrid` | the discriminated union; issues `mission-outside-window`, `tag-required-and-excluded`               |
-| `resolveCommitments(draft)`    | `acceptedPins` (planner.js)                            | provenance; issues `pin-conflict`, `pin-overflow`, `pin-unavailable`, `pin-availability-overridden` |
-| `resolveCarriedDuty(draft)`    | `carriedDebts` (planner.js, to be exported)            | nothing                                                                                             |
-| `countStaleCommitments(draft)` | `isOutOfPeriod`, `isElapsedBeforePeriod`               | issue `pin-out-of-period` with `count` and `elapsed`                                                |
+| Helper                         | Reuses                                                 | Adds                                                                                                                    |
+|--------------------------------|--------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------|
+| `resolveNights(draft)`         | `nightWindows` (planSchema.js)                         | nothing                                                                                                                 |
+| `resolveOccurrences(draft,m)`  | `dailyOccurrences` (planSchema.js)                     | issue `daily-missing-clock` when a bound is null                                                                        |
+| `resolveEmployees(draft)`      | `normalizeEmployees` via `segmentGrid`'s `prepare`     | `requiredNightRestMinutes` from `tags[].minNightRestMinutes`                                                            |
+| `resolveMissions(draft)`       | `normalizeMissions`, `slotBoundsFor` via `segmentGrid` | the discriminated union; issues `mission-outside-window`, `tag-required-and-excluded`                                   |
+| `resolveCommitments(draft)`    | `acceptedPins` (planner.js)                            | provenance; issues `pin-conflict`, `pin-overflow`, `pin-unavailable`, `pin-availability-overridden`                     |
+| `resolveCarriedDuty(draft)`    | `carriedDebts` (planner.js, to be exported)            | nothing                                                                                                                 |
+| `countStaleCommitments(draft)` | `isOutOfPeriod`, `isElapsedBeforePeriod`               | issue `pin-out-of-period` with `count` and `elapsed`                                                                    |
 | `resolveIdleAtStart(draft)`    | `isElapsedBeforePeriod`, `resolvePinWindow`            | minutes from the latest elapsed commitment's end to the horizon start, else from `lastDutyEnd`, else the horizon length |
 
 `resolveIdleAtStart` is what lets round robin survive a roll (decision A).
@@ -999,19 +999,19 @@ rejected freezing on a timer.
 
 ## 13. Tests
 
-| File                                | Needs MiniZinc | Asserts                                                                                                                                                                                                                        |
-|-------------------------------------|----------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `tests/solver.schemas.test.js`      | no             | wrong dimensions, out-of-range mission index and version mismatch are rejected; fast-check: every parsed matrix has at most one mission per cell                                                                               |
-| `tests/solver.compile.test.js`      | no             | `seatsWanted` equals `countAt` per segment; global edges are the union of `segmentGrid`'s; commitments equal `acceptedPins`; elapsed recorded segments carry the recorded headcount; symmetry classes exclude anyone committed |
-| `tests/solver.ladder.test.js`       | no             | with `RecordedRunner`: UNKNOWN, ERROR, malformed, cancelled and cap-infeasible never yield a candidate; SATISFIED stops the ladder with `provenLevels = level - 1`; caps are the previous optima                               |
-| `tests/solver.check.test.js`        | no             | objective mismatch rejects; accepted quantities are the check run's; stale revision is discarded by the session                                                                                                                |
-| `tests/solver.model.test.js`        | yes            | `MODEL_VERSION` in TypeScript equals the model's; both entry files compile (`model.check()`)                                                                                                                                   |
-| `tests/solver.oracle.test.js`       | yes            | tiny exhaustive instances: brute force over the matrix agrees with the ladder on every level and on feasibility                                                                                                                |
-| `tests/solver.metamorphic.test.js`  | yes            | splitting a segment at an off-grid instant (no new legal handover) leaves feasibility and every quantity unchanged                                                                                                             |
+| File                                | Needs MiniZinc | Asserts                                                                                                                                                                                                                                                                        |
+|-------------------------------------|----------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `tests/solver.schemas.test.js`      | no             | wrong dimensions, out-of-range mission index and version mismatch are rejected; fast-check: every parsed matrix has at most one mission per cell                                                                                                                               |
+| `tests/solver.compile.test.js`      | no             | `seatsWanted` equals `countAt` per segment; global edges are the union of `segmentGrid`'s; commitments equal `acceptedPins`; elapsed recorded segments carry the recorded headcount; symmetry classes exclude anyone committed                                                 |
+| `tests/solver.ladder.test.js`       | no             | with `RecordedRunner`: UNKNOWN, ERROR, malformed, cancelled and cap-infeasible never yield a candidate; SATISFIED stops the ladder with `provenLevels = level - 1`; caps are the previous optima                                                                               |
+| `tests/solver.check.test.js`        | no             | objective mismatch rejects; accepted quantities are the check run's; stale revision is discarded by the session                                                                                                                                                                |
+| `tests/solver.model.test.js`        | yes            | `MODEL_VERSION` in TypeScript equals the model's; both entry files compile (`model.check()`)                                                                                                                                                                                   |
+| `tests/solver.oracle.test.js`       | yes            | tiny exhaustive instances: brute force over the matrix agrees with the ladder on every level and on feasibility                                                                                                                                                                |
+| `tests/solver.metamorphic.test.js`  | yes            | splitting a segment at an off-grid instant (no new legal handover) leaves feasibility and every quantity unchanged                                                                                                                                                             |
 | `tests/solver.rotation.test.js`     | yes            | under `fairnessMode = 1`: no chosen turn begins after a wait shorter than the reported `shortestWaitMinutes`; a guard whose hold ends at the horizon start takes no local slot while anyone with a longer wait is free; the oracle agrees on the bottleneck for tiny instances |
-| `tests/solver.sleep.test.js`        | yes            | `sleepsSixHours` is true exactly when a six-hour off-duty window lies inside the night and the person's availability; on-call duty counts as sleep; a night the person is absent for is not counted                                             |
-| `tests/solver.differential.test.js` | yes            | over the golden documents: MiniZinc's levels 1 and 2 are never worse than the engine's; every accepted schedule passes `checkSchedule` as evidence, not authority                                                              |
-| `tests/solver.e2e.mjs`              | browser        | the shipped wasm path completes optimize and check; offline reload serves every asset from the precache; cancel then re-solve leaks no worker; a stale completion never replaces the shown schedule                            |
+| `tests/solver.sleep.test.js`        | yes            | `sleepsSixHours` is true exactly when a six-hour off-duty window lies inside the night and the person's availability; on-call duty counts as sleep; a night the person is absent for is not counted                                                                            |
+| `tests/solver.differential.test.js` | yes            | over the golden documents: MiniZinc's levels 1 and 2 are never worse than the engine's; every accepted schedule passes `checkSchedule` as evidence, not authority                                                                                                              |
+| `tests/solver.e2e.mjs`              | browser        | the shipped wasm path completes optimize and check; offline reload serves every asset from the precache; cancel then re-solve leaks no worker; a stale completion never replaces the shown schedule                                                                            |
 
 `ci.yml`'s `check` job gains one step that installs the MiniZinc bundle so the
 `yes` rows run in CI; locally they skip with a message when the binary is
@@ -1037,11 +1037,11 @@ outcome, its quantities and a diff of assignments. Only step 6 flips
 
 ## 15. Time budgets
 
-| Run                     | Limit | Why                                                              |
-|-------------------------|-------|------------------------------------------------------------------|
-| optimize, per level     | 20 s  | the Pixel's slowest measured level was 7.6 s                     |
-| check                   | 5 s   | a fixed instance propagates; anything longer is a model problem  |
-| whole ladder (10 levels)| 200 s | a hard bound, not an expectation; `unknown` is the honest answer |
+| Run                      | Limit | Why                                                              |
+|--------------------------|-------|------------------------------------------------------------------|
+| optimize, per level      | 20 s  | the Pixel's slowest measured level was 7.6 s                     |
+| check                    | 5 s   | a fixed instance propagates; anything longer is a model problem  |
+| whole ladder (10 levels) | 200 s | a hard bound, not an expectation; `unknown` is the honest answer |
 
 ## 16. One question the model answers that the engine could not
 
