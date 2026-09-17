@@ -94,6 +94,25 @@ function MissionCard({ mission, doc, onChange, onRemove, onDuplicate, onAssign }
             </Tooltip>
           )}
 
+          {/* A flag and not a number of days: "once per rotation" is the rule,
+              and a rotation's length is a fact about the roster rather than a
+              figure to type in. Offered on every type - a remote or daily
+              mission can be the hated one as easily as a local one. */}
+          <Tooltip title={t.hardMissionHelp}>
+            <FormControlLabel
+              sx={{ flexShrink: 0 }}
+              control={(
+                <Switch
+                  size="small"
+                  checked={mission.hard ?? false}
+                  onChange={(e) => onChange({ hard: e.target.checked })}
+                  data-testid={`mission-hard-${mission.id}`}
+                />
+              )}
+              label={t.hardMission}
+            />
+          </Tooltip>
+
           <Tooltip title={t.onCallHelp}>
             <FormControlLabel
               sx={{ flexShrink: 0 }}

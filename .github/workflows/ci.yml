@@ -83,6 +83,29 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # The solver modules are TypeScript, which nothing else in this repo
+      # checks: Vite and `node --test` both *strip* the types rather than
+      # verifying them, so without this step a branded id used in the wrong
+      # place ships green.
+      - name: Typecheck
+        run: npm run typecheck
+
+      # The tests that actually exercise the model need a solver. Without it
+      # they report skipped rather than passed, which is honest locally and
+      # useless in CI - so CI installs one.
+      - name: Install MiniZinc
+        run: |
+          set -euo pipefail
+          version=2.9.3
+          url="https://github.com/MiniZinc/MiniZincIDE/releases/download/${version}/MiniZincIDE-${version}-bundle-linux-x86_64.tgz"
+          curl -sSfL "$url" -o /tmp/minizinc.tgz
+          mkdir -p /opt/minizinc
+          tar -xzf /tmp/minizinc.tgz -C /opt/minizinc --strip-components=1
+          echo "/opt/minizinc/bin" >> "$GITHUB_PATH"
+
+      - name: Check MiniZinc
+        run: minizinc --version
+
       # Scheduler unit tests plus the fast-check invariants. These are the only
       # guard against a fairness or double-booking regression, so they gate the
       # build rather than running after it.
@@ -147,6 +170,9 @@ jobs:
           node tests/short-shifts.e2e.mjs
           node tests/assignment-badges.e2e.mjs
           node tests/carried-duty.e2e.mjs
+          node tests/memory-settings.e2e.mjs
+          node tests/urlState.fifo.e2e.mjs
+          node tests/solver.e2e.mjs
           node tests/mobile-viewports.mjs
         env:
           BASE: http://localhost:4173

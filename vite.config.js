@@ -32,7 +32,15 @@ export default defineConfig({
       // precaching the build output is all that offline support needs - there
       // is no API to fall back to.
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
+        // `wasm` and `data` are MiniZinc's, copied into public/solver by
+        // scripts/copyMinizincAssets.mjs. They have to be precached like
+        // everything else: the app promises to work offline after first load,
+        // and a solver that fetches its own runtime on first use breaks that.
+        globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2,wasm,data}'],
+        // Workbox's default ceiling is 2 MiB, which would silently leave the
+        // 19 MB `.wasm` out of the precache - and the first offline solve
+        // would then fail on a network the app said it did not need.
+        maximumFileSizeToCacheInBytes: 24 * 1024 * 1024,
         navigateFallback: 'index.html',
       },
       manifest: {

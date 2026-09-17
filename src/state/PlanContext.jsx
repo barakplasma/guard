@@ -2,7 +2,7 @@ import {
   createContext, useCallback, useContext, useEffect, useMemo, useRef, useState,
 } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { decodePlan, encodePlan, PARAM } from '../lib/urlState.js';
+import { decodePlan, encodePlan, fitPlanToFragment, PARAM } from '../lib/urlState.js';
 import { emptyPlan, makeId, planSchema, prunePins } from '../lib/planSchema.js';
 import {
   applyClearPin, applyClearPinsForMission, applyMissionAssignees, applySwap,
@@ -98,9 +98,17 @@ export function PlanProvider({ children }) {
     // deleting them here cost 288 assignments per unrelated edit. Removal is
     // explicit now.
     const parsed = planSchema.parse(prunePins(captureHistory(previous, frozen)));
-    const encoded = encodePlan(parsed);
+    // Last, after the history has been captured and the dangling references
+    // cleared, so whatever drops here is always a stamped record. The log is
+    // never cleared and so only grows; the fragment's size is the document's
+    // ceiling, and when a plan would not fit, the oldest logged shifts drop
+    // first. Silent apart from the notice, which is the owner's choice over a
+    // clear button: the export is the durable record.
+    const fitted = fitPlanToFragment(parsed);
+    if (fitted.dropped > 0) setNotice(t.logTrimmed(fitted.dropped));
+    const encoded = encodePlan(fitted.doc);
     lastBlob.current = encoded;
-    lastDoc.current = parsed;
+    lastDoc.current = fitted.doc;
     const params = new URLSearchParams(location.search);
     params.set(PARAM, encoded);
     navigate({ pathname: location.pathname, search: `?${params}` }, { replace: true });
