@@ -83,13 +83,19 @@ export const missionSchema = z.object({
   // night-rest requirement instead of breaking it. Absent from every link
   // written before this field existed, which reads as plain duty.
   onCall: z.boolean().default(false),
-  // The once-per-rotation rule: a mission everybody hates - kitchen duty is
-  // the case the owner named - should fall to a person once every 7, 14 or 21
-  // days rather than whenever the queue happens to reach them. `null` is "no
-  // rule", which is what every other mission wants and what every link written
-  // before this field existed means. Offered on every mission type: a remote or
-  // daily mission can be the hated one as easily as a local one.
-  repeatAfterDays: z.number().int().min(1).max(90).nullable().default(null),
+  // A mission everybody hates - kitchen duty is the case the owner named -
+  // goes round as many people as possible before it comes back to anybody.
+  //
+  // Deliberately a flag and not a number of days. "Once per rotation" is what
+  // the owner asked for, and a rotation's length is a fact about the roster,
+  // not a figure to type in: with ten people and a daily kitchen a rotation is
+  // ten days, and it becomes five the moment half of them are away. The
+  // scheduler reads the length off the log instead of taking a guess at it,
+  // which is also why there is nothing here that can outrun `memoryDays`.
+  //
+  // Offered on every mission type: a remote or daily mission can be the hated
+  // one as easily as a local one.
+  hard: z.boolean().default(false),
 });
 
 /**
@@ -158,6 +164,14 @@ export const planSchema = z.object({
   pins: z.array(pinSchema).default([]),
   tags: z.array(z.object({ id, name: z.string().max(80),
     minNightRestMinutes: z.number().int().min(1).max(1440).nullable().default(null),
+    // Drivers and commanders have their own job. A hard mission still goes
+    // round everybody else before it repeats, and whoever holds a qualification
+    // marked here simply is not one of the people it is going round - so their
+    // never having done the kitchen does not stop anyone else taking a second
+    // turn at it. It is not an exclusion: `excludes` already says "never this
+    // person", and this says "not in the rotation, but still available when
+    // there is nobody else".
+    exemptFromHardMissions: z.boolean().default(false),
   })).default([]),
 });
 
@@ -337,8 +351,8 @@ export function toPlannerInput(doc, now) {
       shiftMinutes: m.shiftMinutes ?? undefined,
       nightShiftMinutes: m.nightShiftMinutes ?? undefined,
       onCall: m.onCall,
-      // `repeatAfterDays` and `memoryDays` are deliberately not passed: the
-      // engine has no notion of a cooldown or of a memory horizon, and a field
+      // `hard` and `memoryDays` are deliberately not passed: the engine has no
+      // notion of a hard mission's rotation or of a memory horizon, and a field
       // that reaches it inert is worse than one that never does. The solver
       // path reads them straight off the document in `src/solver/prepare.ts`.
       ...(m.type === 'daily' ? { occurrences: dailyOccurrences(doc, m) } : {}),

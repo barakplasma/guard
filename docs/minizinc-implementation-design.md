@@ -1171,9 +1171,9 @@ outcome, its quantities and a diff of assignments. Only step 6 flips
 |--------------------------|-------|------------------------------------------------------------------|
 | optimize, per level      | 20 s  | the Pixel's slowest measured level was 7.6 s                     |
 | check                    | 5 s   | a fixed instance propagates; anything longer is a model problem  |
-| whole ladder (16 levels) | 320 s | a hard bound, not an expectation; `unknown` is the honest answer |
+| whole ladder (17 levels) | 340 s | a hard bound, not an expectation; `unknown` is the honest answer |
 
-Sixteen solves per plan sounds worse than it is: the default window is now
+Seventeen solves per plan sounds worse than it is: the default window is now
 24 hours, a third of the 72-hour instance every figure in ADR 011 was
 measured on, and a level whose optimum is zero on the first incumbent proves
 in propagation. The sweep in §16 is where the real number gets measured.
@@ -1443,7 +1443,7 @@ Two smaller ones: `planner.js` gained an export, `normalizedInput`, so the
 adapter reads the findings the existing normalization already raised instead of
 deriving them a second time; and the differential suite runs over documents
 *shaped* after the golden ones rather than the golden ones themselves, because
-sixteen proved levels over a 163-segment week is a measurement exercise rather
+seventeen proved levels over a 163-segment week is a measurement exercise rather
 than a unit test.
 
 
@@ -1484,21 +1484,10 @@ design's, one to fourteen, and the ladder now runs to sixteen.
   Three unbroken hours in the kitchen is one turn at the kitchen, so the level
   now reads `beginsVisit`, a run of consecutive segments on one mission however
   many slots it spans; `turnsOnMission` keeps counting slots, because that is
-  the unit levels 12 and 15 are about. And `heldWithinCooldown` was a boolean
-  stamped once at the horizon start, so on a plan longer than the rotation a
-  seven-day cooldown that ran out on the third day stayed active through the
-  seventh. It is now `[Employees, Missions, Segments]` - a parameter, computed
-  in `compile.ts` from each mission's last logged turn, so it costs the solver
-  nothing and answers exactly.
+  the unit levels 13 and 16 are about.
 
-  What is left is deliberate and recorded in the model: the "one per extra
-  visit" term is blind to *when* the extra visit falls, so two kitchen turns
-  eight days apart under a seven-day rule cost the same as two eight hours
-  apart. Telling those apart means comparing two decisions rather than a
-  decision against a parameter, which is quadratic in segments. It only bites
-  on a plan longer than the rotation, it over-charges rather than
-  under-charges, and level 15's `missionRepeatCost` already prefers sending the
-  mission elsewhere.
+  The timing half of that finding was answered by removing the timing. See
+  below.
 
 One more, outside the model. `readDutyMemory` charged every logged turn against
 the *plan's* `shiftMinutes`, so a twelve-hour remote hold in the log read as
@@ -1507,3 +1496,50 @@ two-hour חמ"ל slot read as two. A mission held whole is one turn however long
 ran, and a local turn is charged against its own mission's shift length - the
 same rule `ringKeys` follows inside the engine. The type is read from the pin's
 own `record` first, because a recorded pin outlives the mission it names.
+
+
+## The cooldown became a rotation, and the days went away
+
+The review's remaining cooldown finding was that `repeatAfterDays` did not have
+its stated meaning within one plan: two kitchen turns eight days apart under a
+seven-day rule cost the same as two eight hours apart. The owner's answer was
+not to add the date arithmetic but to drop it:
+
+> mark certain missions as hard, and spread them on as many people as possible
+> before repeating, except to exempt qualifications (usually drivers or
+> commanders)
+
+That is the same rule the days were approximating, stated without them. A
+rotation's length is a fact about the roster rather than a figure to type in:
+with ten people and a daily kitchen a rotation is ten days, and five the moment
+half of them are away. So `repeatAfterDays` is gone - the field, the UI spinner,
+the `cooldown-beyond-memory` issue that existed only because a number could
+outrun the memory, and the per-segment `heldWithinCooldown` parameter built to
+make that number expire on time. Mission wire position 15 is now a flag.
+
+Two levels replace the one, and the split is load-bearing rather than tidy:
+
+- **Level 10, `exemptHardVisits`.** How many times somebody holding an exempt
+  qualification took a hard mission. Minimised first.
+- **Level 11, `hardMissionSpread`.** `max - min` over the visit counts of the
+  people who *are* in the rotation, logged visits included. That says exactly
+  "everybody once before anybody twice", and needs no dates.
+
+The exemption cannot be folded into the spread, and `scripts/hardMissionExemption.mjs`
+is the standing proof. Three people, one a commander, a kitchen running three
+days: the answer wanted is 2/1/0 with the commander sitting out, and *every*
+single-number form - max over everyone minus min over the rotation, the spread
+alone, the spread plus a charge per exempt visit - scores 1/1/1 at least as
+well, and so hands the commander a kitchen day. Lexicographic tiers are what
+this model has instead of weights, so the exemption is a tier.
+
+An exemption is not an exclusion, and the difference is the point of having
+both. `excludes` says "never this person" and means it; exempt says "not in the
+rotation, but still available when there is nobody else", which is why level 10
+is soft like every other level here and reports what it could not avoid.
+
+The log's half of the visit count is read in runs, not rows (`visitsOf` in
+`prepare.ts`): the freeze writes one pin per elapsed slot, so four unbroken
+hours in the kitchen arrive as four rows and are one turn at the kitchen.
+Counting rows would say somebody who stood one long stint had been round four
+times and push them to the back of a rotation they have had one turn in.

@@ -28,6 +28,7 @@ const doc = planSchema.parse({
   shiftMinutes: 60,
   employees: [{ id: 'e1', name: 'דנה' }, { id: 'e2', name: 'יוסי' }],
   missions: [{ id: 'kitchen', name: 'מטבח', type: 'local', count: 1 }],
+  tags: [{ id: 'cmd', name: 'מפקד' }],
   pins: [],
 });
 
@@ -65,31 +66,27 @@ try {
     assert.equal(await memory.inputValue(), '20', 'a tap moved it');
     assert.equal((await planOnPage(page)).memoryDays, 20, 'and the link carries it');
 
-    /* --- the mission's once-per-rotation days --- */
+    /* --- the mission's hard flag --- */
     await page.goto(`${baseUrl}/#/missions?${new URL(await page.url()).hash.split('?')[1]}`, { waitUntil: 'networkidle' });
-    const repeat = page.getByTestId('mission-repeat-days-kitchen');
-    await repeat.waitFor();
-    assert.equal(await repeat.inputValue(), '', 'empty means no rule, not a misleading zero');
+    const hard = page.getByTestId('mission-hard-kitchen');
+    await hard.waitFor();
+    assert.equal(await hard.isChecked(), false, 'off until somebody says otherwise');
 
-    await page.getByTestId('mission-repeat-days-kitchen-increment').tap();
+    await hard.tap();
     await page.waitForTimeout(150);
-    const after = await planOnPage(page);
-    assert.equal(after.missions[0].repeatAfterDays, 1, 'the mission carries the rule');
+    assert.equal((await planOnPage(page)).missions[0].hard, true, 'the mission carries the rule');
 
-    /* --- and what happens when the two disagree --- */
-    await repeat.fill('60');
-    await repeat.blur();
-    await page.waitForTimeout(200);
-    const warning = page.getByTestId('mission-repeat-warning-kitchen');
-    await warning.waitFor();
-    const text = await warning.innerText();
-    assert.match(text, /60/, 'the helper text names the cooldown');
-    assert.match(text, /20/, 'and the memory it outruns');
+    /* --- and the qualification exemption beside it --- */
+    await page.goto(`${baseUrl}/#/employees?${new URL(await page.url()).hash.split('?')[1]}`, { waitUntil: 'networkidle' });
+    const exempt = page.getByTestId('tag-exempt-cmd');
+    await exempt.waitFor();
+    assert.equal(await exempt.isChecked(), false);
 
-    await repeat.fill('7');
-    await repeat.blur();
-    await page.waitForTimeout(200);
-    assert.equal(await warning.count(), 0, 'and it goes away once they agree');
+    await exempt.tap();
+    await page.waitForTimeout(150);
+    const tags = (await planOnPage(page)).tags;
+    assert.equal(tags.find((tag) => tag.id === 'cmd').exemptFromHardMissions, true,
+      'and the link carries the exemption');
 
     const fits = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
     assert.ok(fits, `no horizontal overflow at ${viewport.width}px`);

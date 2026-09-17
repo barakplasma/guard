@@ -3,9 +3,6 @@ import { t } from '../strings.js';
 export const ERROR_FINDINGS = new Set(['engine-bug', 'missing-required-tag', 'rest-unsatisfied', 'understaffed', 'long-shift']);
 export const INFO_FINDINGS = new Set([
   'pin-availability-overridden', 'pin-out-of-period', 'pin-excluded-tag',
-  // A cooldown longer than the memory is a mismatch between two numbers the
-  // user set, not a fault in the schedule: it says which one to change.
-  'cooldown-beyond-memory',
 ]);
 export function findingText(w, doc) {
   const person = doc.employees.find((e) => e.id === w.employeeId)?.name ?? w.employeeId;
@@ -19,7 +16,6 @@ export function findingText(w, doc) {
     case 'rest-incomplete': return t.restIncomplete(person);
     case 'pin-excluded-tag': return t.pinExcluded(person, mission);
     case 'tag-required-and-excluded': return t.contradictoryTag(mission, tag);
-    case 'cooldown-beyond-memory': return t.cooldownBeyondMemory(mission, w.repeatAfterDays, w.memoryDays);
     case 'daily-missing-clock': return t.dailyMissingClock(mission);
     case 'target-sleep-missed': return t.targetSleepMissed(person);
     case 'too-many-missions': return t.tooManyMissions(w.count, w.limit);

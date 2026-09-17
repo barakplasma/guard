@@ -36,7 +36,7 @@ export interface Interval {
 export const MODEL_VERSION = 1;
 
 /** Must equal `LEVEL_COUNT` in `model/rota-core.mzn`. */
-export const LEVEL_COUNT = 16;
+export const LEVEL_COUNT = 17;
 
 /**
  * Eight hours off: the rest target the owner optimises for, and the cap on how
@@ -66,15 +66,13 @@ export interface DutyMemory {
   readonly turns: number;
   readonly nightMinutes: DurationMinutes;
   readonly turnsOnMission: ReadonlyMap<MissionId, number>;
-  readonly heldWithinCooldown: ReadonlySet<MissionId>;
   /**
-   * When each mission's last logged turn ended, so the cooldown can be asked
-   * about *a moment* rather than only about the horizon start. A boolean
-   * stamped once at the horizon is right for a 24-hour window and wrong for a
-   * plan longer than the rotation: a cooldown that expires on the third day
-   * would otherwise stay active through the seventh.
+   * How many separate times the log shows this person at each mission - a run
+   * of touching ranges, not a logged row. This is the unit a hard mission's
+   * rotation counts in; `turnsOnMission` counts slots, which is what the
+   * mission-variety level is about.
    */
-  readonly lastTurnOnMission: ReadonlyMap<MissionId, InstantMs>;
+  readonly visitsOnMission: ReadonlyMap<MissionId, number>;
   /** 24 counts: turns begun in each hour of the day, on the viewer's clock. */
   readonly hourHolds: readonly number[];
 }
@@ -86,6 +84,8 @@ export interface PreparedEmployee {
   readonly qualifications: ReadonlySet<QualificationId>;
   /** 0 when no tag the person holds asks for one. */
   readonly requiredNightRestMinutes: DurationMinutes;
+  /** Holds a qualification marked exempt: outside a hard mission's rotation. */
+  readonly exemptFromHardMissions: boolean;
   readonly memory: DutyMemory;
 }
 
@@ -104,8 +104,8 @@ interface MissionCommon {
   readonly requires: readonly Requirement[];
   readonly exclusions: Exclusions;
   readonly onCall: boolean;
-  /** The once-per-rotation rule: 7, 14 or 21 for the kitchen. `null` = no rule. */
-  readonly repeatAfterDays: number | null;
+  /** The once-per-rotation rule: it goes round everybody before it repeats. */
+  readonly hard: boolean;
 }
 
 export type PreparedMission =
@@ -155,7 +155,6 @@ export type PreparationIssue =
   | { readonly code: 'pin-unavailable'; readonly missionId: MissionId; readonly employeeId: EmployeeId }
   | { readonly code: 'pin-availability-overridden'; readonly missionId: MissionId; readonly employeeId: EmployeeId; readonly start: InstantMs; readonly end: InstantMs }
   | { readonly code: 'pin-out-of-period'; readonly count: number; readonly elapsed: number }
-  | { readonly code: 'cooldown-beyond-memory'; readonly missionId: MissionId; readonly repeatAfterDays: number; readonly memoryDays: number }
   | { readonly code: 'too-many-missions'; readonly count: number; readonly limit: number };
 
 export interface PreparedProblem {
@@ -204,11 +203,11 @@ export interface SolverInstance {
   readonly recentTurns: readonly number[];
   readonly recentNightMinutes: readonly number[];
   readonly recentTurnsOnMission: readonly (readonly number[])[];
-  /** `[employee][mission][segment]`: was the last logged turn on it still inside the cooldown then? */
-  readonly heldWithinCooldown: readonly (readonly (readonly boolean[])[])[];
+  readonly recentVisitsOnMission: readonly (readonly number[])[];
+  readonly isHardMission: readonly boolean[];
+  readonly isExemptFromHard: readonly boolean[];
   readonly recentHourHolds: readonly (readonly number[])[];
   readonly hourOfSegment: readonly number[];
-  readonly repeatAfterDays: readonly number[];
   readonly requiredNightRestMinutes: readonly number[];
   readonly symmetryClass: readonly number[];
 
@@ -260,7 +259,8 @@ export interface NamedQuantities {
   readonly nightsWithoutTargetSleep: number;
   readonly nightsWithoutMinimumSleep: number;
   readonly longRunCount: number;
-  readonly cooldownBreachCount: number;
+  readonly exemptHardVisits: number;
+  readonly hardMissionSpread: number;
   readonly waitDeficitMinutes: number;
   readonly turnSpread: number;
   readonly sharedRoleCount: number;
@@ -335,7 +335,8 @@ export const OBJECTIVE_ORDER = [
   'nightsWithoutTargetSleep',
   'nightsWithoutMinimumSleep',
   'longRunCount',
-  'cooldownBreachCount',
+  'exemptHardVisits',
+  'hardMissionSpread',
   'waitDeficitMinutes',
   'turnSpread',
   'sharedRoleCount',

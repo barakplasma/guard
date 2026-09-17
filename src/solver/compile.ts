@@ -23,7 +23,6 @@ import type {
 } from './types.ts';
 
 const MINUTE = 60_000;
-const DAY = 24 * 60 * MINUTE;
 
 /** What the ladder adds to an instance per run. */
 export interface LadderParams {
@@ -293,21 +292,13 @@ export interface MemoryTables {
   recentTurns: number[];
   recentNightMinutes: number[];
   recentTurnsOnMission: number[][];
-  /** `[employee][mission][segment]`, so the cooldown can expire mid-plan. */
-  heldWithinCooldown: boolean[][][];
+  recentVisitsOnMission: number[][];
+  isHardMission: boolean[];
+  isExemptFromHard: boolean[];
   recentHourHolds: number[][];
-  repeatAfterDays: number[];
 }
 
-/**
- * @param segments the global grid, because the cooldown is a question about a
- *   moment: "was this person's last logged turn on this mission still inside
- *   its `repeatAfterDays` when *this segment* began?". Asked once at the
- *   horizon start it is right for a 24-hour window and wrong for a plan longer
- *   than the rotation, where a cooldown expiring on the third day would stay
- *   active through the seventh.
- */
-export function memoryTables(problem: PreparedProblem, segments: readonly Interval[]): MemoryTables {
+export function memoryTables(problem: PreparedProblem): MemoryTables {
   return {
     idleMinutesAtHorizonStart: problem.employees.map((e) => e.memory.idleMinutesAtHorizonStart),
     recentTurns: problem.employees.map((e) => e.memory.turns),
@@ -315,15 +306,12 @@ export function memoryTables(problem: PreparedProblem, segments: readonly Interv
     recentTurnsOnMission: problem.employees.map(
       (e) => problem.missions.map((m) => e.memory.turnsOnMission.get(m.id) ?? 0),
     ),
-    heldWithinCooldown: problem.employees.map((e) => problem.missions.map((m) => {
-      const lastEnd = e.memory.lastTurnOnMission.get(m.id);
-      const cooldownMs = (m.repeatAfterDays ?? 0) * DAY;
-      return segments.map((segment) => lastEnd !== undefined
-        && cooldownMs > 0
-        && segment.start - lastEnd < cooldownMs);
-    })),
+    recentVisitsOnMission: problem.employees.map(
+      (e) => problem.missions.map((m) => e.memory.visitsOnMission.get(m.id) ?? 0),
+    ),
+    isHardMission: problem.missions.map((m) => m.hard),
+    isExemptFromHard: problem.employees.map((e) => e.exemptFromHardMissions),
     recentHourHolds: problem.employees.map((e) => [...e.memory.hourHolds]),
-    repeatAfterDays: problem.missions.map((m) => m.repeatAfterDays ?? 0),
   };
 }
 
@@ -415,7 +403,8 @@ export function deriveSymmetryClasses(
     memory.recentTurns[index],
     memory.recentNightMinutes[index],
     memory.recentTurnsOnMission[index].join(','),
-    memory.heldWithinCooldown[index].map((row) => row.map((v) => (v ? 1 : 0)).join('')).join(','),
+    memory.recentVisitsOnMission[index].join(','),
+    memory.isExemptFromHard[index] ? 1 : 0,
     memory.recentHourHolds[index].join(','),
   ].join('|');
 
@@ -459,7 +448,7 @@ export function compileInstance(problem: PreparedProblem): { instance: SolverIns
   const pins = commitmentTriples(problem, segments);
   const requirements = requirementTables(problem);
   const nights = nightOfSegment(problem, segments);
-  const memory = memoryTables(problem, segments);
+  const memory = memoryTables(problem);
   const longRun = enumerateLongRunWindows(segments);
   const sleep = enumerateSleepWindows(segments, nights);
   const shortSleep = enumerateSleepWindows(segments, nights, MINIMUM_SLEEP_MINUTES);
@@ -488,10 +477,11 @@ export function compileInstance(problem: PreparedProblem): { instance: SolverIns
     recentTurns: memory.recentTurns,
     recentNightMinutes: memory.recentNightMinutes,
     recentTurnsOnMission: memory.recentTurnsOnMission,
-    heldWithinCooldown: memory.heldWithinCooldown,
+    recentVisitsOnMission: memory.recentVisitsOnMission,
+    isHardMission: memory.isHardMission,
+    isExemptFromHard: memory.isExemptFromHard,
     recentHourHolds: memory.recentHourHolds,
     hourOfSegment: hourOfSegment(segments),
-    repeatAfterDays: memory.repeatAfterDays,
     requiredNightRestMinutes: problem.employees.map((e) => e.requiredNightRestMinutes),
     symmetryClass: deriveSymmetryClasses(problem, isAvailable, isAllowed, requirements.holdsRequirement, memory),
 
@@ -542,7 +532,7 @@ export function compileInstance(problem: PreparedProblem): { instance: SolverIns
  */
 export function instanceToJsonData(instance: SolverInstance, ladder: LadderParams): Record<string, unknown> {
   const data: Record<string, unknown> = { ...instance };
-  for (const key of ['seatsWanted', 'slotOfSegment', 'holdOfSegment', 'recentTurnsOnMission', 'heldWithinCooldown', 'holdsRequirement'] as const) {
+  for (const key of ['seatsWanted', 'slotOfSegment', 'holdOfSegment', 'recentTurnsOnMission', 'recentVisitsOnMission', 'holdsRequirement'] as const) {
     const value = data[key] as readonly unknown[];
     if (value.length === 0) data[key] = [];
   }

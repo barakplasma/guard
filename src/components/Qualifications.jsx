@@ -1,5 +1,7 @@
 import { useState } from 'react';
-import { Autocomplete, Button, IconButton, Paper, Stack, TextField, Typography } from '@mui/material';
+import {
+  Autocomplete, Button, FormControlLabel, IconButton, Paper, Stack, Switch, TextField, Tooltip, Typography,
+} from '@mui/material';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
 import { usePlan } from '../state/PlanContext.jsx';
 import { makeId } from '../lib/planSchema.js';
@@ -108,10 +110,24 @@ export default function QualificationManager() {
           </Button>
         )}
         </Stack>
+        <Tooltip title={t.exemptFromHardMissionsHelp}>
+          <FormControlLabel
+            sx={{ flexShrink: 0 }}
+            control={(
+              <Switch
+                size="small"
+                checked={tag.exemptFromHardMissions ?? false}
+                onChange={(e) => change(tag.id, { exemptFromHardMissions: e.target.checked })}
+                data-testid={`tag-exempt-${tag.id}`}
+              />
+            )}
+            label={t.exemptFromHardMissions}
+          />
+        </Tooltip>
         <IconButton aria-label={t.remove} data-testid={`remove-tag-${tag.id}`} onClick={() => setPending(tag)}><DeleteOutlineIcon /></IconButton>
       </Stack>)}
     </Stack>
-    <Button data-testid="add-tag" onClick={() => update((d) => ({ ...d, tags: [...d.tags, { id: makeId('q', d.tags.map((tag) => tag.id)), name: '', minNightRestMinutes: null }] }))}>{t.addQualification}</Button>
+    <Button data-testid="add-tag" onClick={() => update((d) => ({ ...d, tags: [...d.tags, { id: makeId('q', d.tags.map((tag) => tag.id)), name: '', minNightRestMinutes: null, exemptFromHardMissions: false }] }))}>{t.addQualification}</Button>
     {doc.tags.length > 0 && <Typography variant="caption" sx={{ display: 'block' }}>{t.restHelp}</Typography>}
     <ConfirmDialog open={pending != null} title={t.removeQualification}
       body={pending ? t.removeQualificationBody(pending.name,

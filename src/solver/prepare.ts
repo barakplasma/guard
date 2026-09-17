@@ -113,9 +113,9 @@ interface Tally {
   turns: number;
   nightMinutes: number;
   turnsOnMission: Map<MissionId, number>;
-  heldWithinCooldown: Set<MissionId>;
   hourHolds: number[];
-  lastOnMission: Map<MissionId, number>;
+  /** Every logged range per mission, unmerged; `visitsOf` counts the runs. */
+  rangesOnMission: Map<MissionId, { start: number; end: number }[]>;
 }
 
 const blankTally = (): Tally => ({
@@ -123,10 +123,31 @@ const blankTally = (): Tally => ({
   turns: 0,
   nightMinutes: 0,
   turnsOnMission: new Map(),
-  heldWithinCooldown: new Set(),
   hourHolds: Array.from({ length: 24 }, () => 0),
-  lastOnMission: new Map(),
+  rangesOnMission: new Map(),
 });
+
+/**
+ * How many separate times this person went to that mission.
+ *
+ * A *visit* is a run of touching logged ranges, not a logged row: the freeze
+ * writes one pin per elapsed slot, so four unbroken hours in the kitchen
+ * arrive here as four rows and are one turn at the kitchen. That distinction
+ * is the whole point of the unit - counting rows would say somebody who stood
+ * one long stint had been round four times and push them to the back of a
+ * rotation they have only had one turn in.
+ */
+function visitsOf(ranges: readonly { start: number; end: number }[]): number {
+  if (ranges.length === 0) return 0;
+  const sorted = [...ranges].sort((a, b) => a.start - b.start || a.end - b.end);
+  let visits = 1;
+  let reach = sorted[0].end;
+  for (const range of sorted.slice(1)) {
+    if (range.start > reach) visits += 1;
+    reach = Math.max(reach, range.end);
+  }
+  return visits;
+}
 
 interface LoggedTurn {
   employeeId: EmployeeId;
@@ -212,9 +233,6 @@ export function loggedTurns(draft: Draft, memoryDays: number): LoggedTurn[] {
 export function readDutyMemory(draft: Draft, memoryDays = DEFAULT_MEMORY_DAYS): Map<EmployeeId, DutyMemory> {
   const turns = loggedTurns(draft, memoryDays);
   const nights = memoryNights(draft, draft.start - memoryDays * DAY);
-  const repeatById = new Map<string, number | null>(
-    draft.missions.map((m: Draft) => [m.id, m.repeatAfterDays ?? null]),
-  );
 
   const byEmployee = new Map<EmployeeId, Tally>();
   for (const employee of draft.employees) {
@@ -237,7 +255,9 @@ export function readDutyMemory(draft: Draft, memoryDays = DEFAULT_MEMORY_DAYS): 
     at.turns += stints;
     at.turnsOnMission.set(turn.missionId, (at.turnsOnMission.get(turn.missionId) ?? 0) + stints);
     at.lastEnd = Math.max(at.lastEnd, turn.end);
-    at.lastOnMission.set(turn.missionId, Math.max(at.lastOnMission.get(turn.missionId) ?? -Infinity, turn.end));
+    const ranges = at.rangesOnMission.get(turn.missionId) ?? [];
+    ranges.push({ start: turn.start, end: turn.end });
+    at.rangesOnMission.set(turn.missionId, ranges);
     at.hourHolds[new Date(turn.start).getHours()] += 1;
     for (const night of nights) {
       at.nightMinutes += Math.max(0, Math.min(turn.end, night.end) - Math.max(turn.start, night.start)) / MINUTE;
@@ -246,11 +266,6 @@ export function readDutyMemory(draft: Draft, memoryDays = DEFAULT_MEMORY_DAYS): 
 
   const out = new Map<EmployeeId, DutyMemory>();
   for (const [employeeId, at] of byEmployee) {
-    for (const [missionId, lastEnd] of at.lastOnMission) {
-      const repeatAfterDays = repeatById.get(missionId);
-      if (!repeatAfterDays) continue;
-      if (draft.start - lastEnd < repeatAfterDays * DAY) at.heldWithinCooldown.add(missionId);
-    }
     const idle = at.lastEnd === -Infinity
       ? TARGET_REST_MINUTES
       : Math.max(0, Math.min(TARGET_REST_MINUTES, Math.round((draft.start - at.lastEnd) / MINUTE)));
@@ -259,9 +274,8 @@ export function readDutyMemory(draft: Draft, memoryDays = DEFAULT_MEMORY_DAYS): 
       turns: at.turns,
       nightMinutes: Math.round(at.nightMinutes) as DutyMemory['nightMinutes'],
       turnsOnMission: at.turnsOnMission,
-      heldWithinCooldown: at.heldWithinCooldown,
-      lastTurnOnMission: new Map(
-        [...at.lastOnMission].filter(([, end]) => Number.isFinite(end)) as [MissionId, InstantMs][],
+      visitsOnMission: new Map(
+        [...at.rangesOnMission].map(([missionId, ranges]) => [missionId, visitsOf(ranges)]),
       ),
       hourHolds: at.hourHolds,
     });
@@ -338,16 +352,24 @@ export function prepareProblem(draft: Draft, clock: { now: number }): PreparedPr
     turns: 0,
     nightMinutes: 0 as DutyMemory['nightMinutes'],
     turnsOnMission: new Map(),
-    heldWithinCooldown: new Set(),
-    lastTurnOnMission: new Map(),
+    visitsOnMission: new Map(),
     hourHolds: Array.from({ length: 24 }, () => 0),
   };
 
+  const exemptTags = new Set<string>(
+    (draft.tags ?? []).filter((tag: Draft) => tag.exemptFromHardMissions).map((tag: Draft) => tag.id),
+  );
   const employees: PreparedEmployee[] = normalized.employees.map((employee: Draft) => ({
     id: employee.id as EmployeeId,
     available: interval(employee.start, employee.end),
     qualifications: new Set((employee.tags ?? []) as QualificationId[]),
     requiredNightRestMinutes: requiredNightRest(employee, draft.tags ?? []) as PreparedEmployee['requiredNightRestMinutes'],
+    // Drivers and commanders are not in a hard mission's rotation. Read off
+    // the qualification list rather than named per mission: it is a fact about
+    // the role, and the owner's phrasing was "exempt qualifications".
+    exemptFromHardMissions: (employee.tags ?? []).some(
+      (tag: string) => exemptTags.has(tag),
+    ),
     memory: memory.get(employee.id as EmployeeId) ?? emptyMemory,
   }));
 
@@ -355,21 +377,12 @@ export function prepareProblem(draft: Draft, clock: { now: number }): PreparedPr
   const missions: PreparedMission[] = [];
   for (const mission of normalized.missions) {
     const raw = rawById.get(mission.id) ?? mission;
-    const repeatAfterDays: number | null = raw.repeatAfterDays ?? null;
-    if (repeatAfterDays != null && repeatAfterDays > memoryDays) {
-      issues.push({
-        code: 'cooldown-beyond-memory',
-        missionId: mission.id as MissionId,
-        repeatAfterDays,
-        memoryDays,
-      });
-    }
     const common = {
       id: mission.id as MissionId,
       requires: requirementsOf(mission),
       exclusions: exclusionsOf(mission),
       onCall: Boolean(mission.onCall),
-      repeatAfterDays,
+      hard: Boolean(raw.hard),
     };
     for (const requirement of common.requires) {
       if (common.exclusions.tags.has(requirement.tag)) {

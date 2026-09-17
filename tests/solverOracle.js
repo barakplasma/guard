@@ -253,16 +253,22 @@ export function score(instance, assignment) {
 
   const turnsOnMission = turnsOnMissionOf(instance, assignment);
   const visitStarts = visitsOnMissionOf(instance, assignment);
-  let cooldownBreachCount = 0;
-  for (let e = 0; e < instance.employeeCount; e++) {
-    for (let m = 0; m < instance.missionCount; m++) {
-      if (instance.repeatAfterDays[m] <= 0) continue;
-      const starts = visitStarts[e][m];
-      // One if any visit begins while the log's own cooldown is still running
-      // at that segment, and one for every extra visit inside this window.
-      const insideLogged = starts.some((s) => instance.heldWithinCooldown[e][m][s]);
-      cooldownBreachCount += (insideLogged ? 1 : 0) + Math.max(0, starts.length - 1);
+  // A hard mission goes round everybody before it comes back to anybody, which
+  // is max - min over the visit counts. Exempt people are left out of the min
+  // (their zero must not hold the spread open) but stay in the max (so parking
+  // the mission on them is not free).
+  let exemptHardVisits = 0;
+  let hardMissionSpread = 0;
+  for (let m = 0; m < instance.missionCount; m++) {
+    if (!instance.isHardMission[m]) continue;
+    const inRotation = [];
+    for (let e = 0; e < instance.employeeCount; e++) {
+      if (instance.isExemptFromHard[e]) { exemptHardVisits += visitStarts[e][m].length; continue; }
+      if (!instance.isAllowed[e][m]) continue;
+      inRotation.push(instance.recentVisitsOnMission[e][m] + visitStarts[e][m].length);
     }
+    if (inRotation.length === 0) continue;
+    hardMissionSpread += Math.max(...inRotation) - Math.min(...inRotation);
   }
 
   const dutyMinutes = [];
@@ -333,7 +339,8 @@ export function score(instance, assignment) {
     nightsWithoutTargetSleep,
     nightsWithoutMinimumSleep,
     longRunCount,
-    cooldownBreachCount,
+    exemptHardVisits,
+    hardMissionSpread,
     waitDeficitMinutes: TARGET_REST_MINUTES - shortestWaitMinutes,
     turnSpread: Math.max(...totalTurns) - Math.min(...totalTurns),
     sharedRoleCount,

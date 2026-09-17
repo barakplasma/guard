@@ -114,10 +114,9 @@ export function encodePlan(doc) {
       // `trimTail`, so the same holds - a mission excluding nobody encodes
       // exactly as it did before this field existed (ADR 006, ADR 014).
       x.excludeEmployees ?? [],
-      // Position 15: the once-per-rotation cooldown in days, written only when
-      // set. A mission with no rule - every mission but the kitchen - encodes
-      // to exactly the bytes it always did.
-      x.repeatAfterDays ?? null,
+      // Position 15: the hard-mission flag, written only when true. Every
+      // mission but the kitchen encodes to exactly the bytes it always did.
+      x.hard ? 1 : null,
     ], MISSION_TUPLE_WAS)),
     // Position 5 is the history record (ADR 006's table, ADR 012's correction),
     // written only once a pin has become a record of duty. One nested array
@@ -135,7 +134,12 @@ export function encodePlan(doc) {
     // existed parses and keeps its old meaning. Written only when it differs
     // from that default, so those links keep their exact bytes too.
     ...(doc.memoryDays != null && doc.memoryDays !== DEFAULT_MEMORY_DAYS ? { md: doc.memoryDays } : {}),
-    ...(doc.tags?.length ? { tg: doc.tags.map((t) => [t.id, t.name, t.minNightRestMinutes]) } : {}),
+    // Qualification position 3 is the hard-mission exemption, written only when
+    // true, so a plan whose qualifications are all in the rotation encodes to
+    // exactly the bytes it always did.
+    ...(doc.tags?.length
+      ? { tg: doc.tags.map((t) => trimTail([t.id, t.name, t.minNightRestMinutes, t.exemptFromHardMissions ? 1 : null], 3)) }
+      : {}),
   };
   return compressToEncodedURIComponent(JSON.stringify(compact));
 }
@@ -173,14 +177,16 @@ export function decodePlan(blob) {
       nightStart: raw.ns ?? undefined,
       nightEnd: raw.ne ?? undefined,
       memoryDays: raw.md ?? undefined,
-      tags: (raw.tg ?? []).map(([id, name, minNightRestMinutes]) => ({ id, name, minNightRestMinutes })),
+      tags: (raw.tg ?? []).map(([id, name, minNightRestMinutes, exemptFromHardMissions]) => ({
+        id, name, minNightRestMinutes, exemptFromHardMissions: exemptFromHardMissions === 1,
+      })),
       employees: (raw.emp ?? []).map(([id, name, s, e, tags, carriedMinutes, carriedStints]) => ({
         id, name, start: inTs(s), end: inTs(e), tags,
         carriedMinutes: carriedMinutes ?? 0,
         carriedStints: carriedStints ?? 0,
       })),
       missions: (raw.mis ?? []).map((
-        [id, name, type, s, e, count, nightCount, shiftMinutes, nightShiftMinutes, dayStart, dayEnd, requires, excludes, onCall, excludeEmployees, repeatAfterDays],
+        [id, name, type, s, e, count, nightCount, shiftMinutes, nightShiftMinutes, dayStart, dayEnd, requires, excludes, onCall, excludeEmployees, hard],
       ) => ({
         id,
         name,
@@ -201,7 +207,7 @@ export function decodePlan(blob) {
         excludes: excludes ?? [],
         onCall: onCall === 1,
         excludeEmployees: excludeEmployees ?? [],
-        repeatAfterDays: repeatAfterDays ?? null,
+        hard: hard === 1,
       })),
       pins: (raw.pin ?? []).map(([missionId, employeeId, s, e, f, rec]) => ({
         missionId,

@@ -11,7 +11,7 @@
 include "lex_lesseq.mzn";
 
 int: MODEL_VERSION = 1;
-int: LEVEL_COUNT = 16;
+int: LEVEL_COUNT = 17;
 int: OFF_DUTY = 0;
 
 % ---- sizes ----------------------------------------------------------------
@@ -54,10 +54,11 @@ array[Employees] of int: idleMinutesAtHorizonStart; % since the last logged duty
 array[Employees] of int: recentTurns;
 array[Employees] of int: recentNightMinutes;
 array[Employees, Missions] of int: recentTurnsOnMission;
-array[Employees, Missions, Segments] of bool: heldWithinCooldown; % at that segment's start
+array[Employees, Missions] of int: recentVisitsOnMission;  % runs, not rows
 array[Employees, Hours] of int: recentHourHolds;   % turns begun at that hour of day
 array[Segments] of int: hourOfSegment;             % 0..23, at the segment's start
-array[Missions] of int: repeatAfterDays;           % 0 = no once-per-rotation rule
+array[Missions] of bool: isHardMission;           % goes round everybody before it repeats
+array[Employees] of bool: isExemptFromHard;      % a driver or a commander: not in that rotation
 array[Employees] of int: requiredNightRestMinutes; % 0 = no requirement
 array[Employees] of int: symmetryClass;            % 0 = nobody else is like me
 
@@ -234,8 +235,8 @@ var 0..employeeCount * nightCount * maxRequiredNightRest: restShortfallMinutes :
   sum(employee in Employees, night in Nights where requiredNightRestMinutes[employee] > 0)(
     max(0, requiredNightRestMinutes[employee] - nightRestMinutes[employee, night]));
 
-% Level 5: shortfall against eight hours off in total, for everyone present.
-% A configured minimum above eight ratchets the target up, never down.
+% Levels 5 and 6: eight hours off in total, for everyone present. A configured
+% minimum above eight ratchets the target up, never down.
 array[Employees, Nights] of bool: isPresentForNight =
   array2d(Employees, Nights, [
     exists(segment in Segments where nightOfSegment[segment] == night)(
@@ -335,26 +336,24 @@ array[Employees] of var 0..longRunWindowCount: longRunsByEmployee :: add_to_outp
     | employee in Employees ];
 var 0..employeeCount * longRunWindowCount: longRunCount :: add_to_output = sum(longRunsByEmployee);
 
-% Level 10: a mission everyone hates comes round once per rotation. A mission
-% with `repeatAfterDays` set, kitchen say, costs one for every person who
-% *begins a visit to it while their last logged turn on it is still inside the
-% cooldown*, and one more for every extra visit inside this window. Above round
-% robin on purpose: this decides who is eligible for the kitchen, the wait
-% decides who goes next among them.
+% Levels 10 and 11: a mission everyone hates goes round as many people as
+% possible before it comes back to anybody. Kitchen duty is the case the owner
+% named.
 %
-% The first term is per segment rather than per person because the cooldown
-% expires at a moment, not at the horizon: on a plan longer than the rotation,
-% a seven-day cooldown that runs out on the third day must stop charging on the
-% fourth. `heldWithinCooldown` carries that answer for every segment, computed
-% once in `compile.ts` from the log.
+% Deliberately a *spread* and not a cooldown in days. "Once per rotation" is
+% the rule, and a rotation's length is a fact about the roster rather than a
+% number to type in: with ten people and a daily kitchen a rotation is ten
+% days, and five the moment half of them are away. Minimising
+% max - min over everyone's visit count says exactly "everybody once before
+% anybody twice" and needs no date arithmetic at all - which is also why
+% nothing here can outrun `memoryDays`, and why two turns eight days apart and
+% two eight hours apart are no longer the same question asked wrongly.
 %
-% The second term is deliberately blind to *when* the extra visit falls: two
-% kitchen turns eight days apart under a seven-day rule cost one here, the same
-% as two turns eight hours apart. Telling them apart needs a comparison between
-% two decisions rather than between a decision and a parameter, and the cost is
-% quadratic in segments. It only bites on a plan longer than the rotation, it
-% over-charges rather than under-charges, and level 15's `missionRepeatCost`
-% already prefers sending the mission elsewhere.
+% Drivers and commanders have their own job, and are not in that rotation at
+% all - neither holding it open by never having gone, nor counted when it goes
+% round. Whether they take one anyway is the level above's question. That is
+% the difference between this and `excludes`, which says "never this person"
+% and means it.
 array[Employees, Missions] of var 0..segmentCount: turnsOnMission :: add_to_output =
   array2d(Employees, Missions, [
     sum(segment in Segments
@@ -367,11 +366,10 @@ array[Employees, Missions] of var 0..segmentCount: turnsOnMission :: add_to_outp
     | employee in Employees, mission in Missions ]);
 
 % A *visit* is a run of consecutive segments on one mission, however many
-% rotation slots it spans. That distinction is this level's, not the ladder's
-% elsewhere: three unbroken hours in the kitchen is one turn at the kitchen,
-% not three, and charging the second and third as "came round again inside the
-% cooldown" punishes a single stint for being long. `turnsOnMission` keeps
-% counting slots, because that is the unit levels 12 and 15 are about.
+% rotation slots it spans: three unbroken hours in the kitchen is one turn at
+% the kitchen, not three, and charging the second and third as "came round
+% again" punishes a single stint for being long. `turnsOnMission` keeps
+% counting slots, because that is the unit levels 13 and 16 are about.
 array[Employees, Missions, Segments] of var bool: beginsVisit =
   array3d(Employees, Missions, Segments, [
     seatsWanted[mission, segment] > 0
@@ -385,13 +383,50 @@ array[Employees, Missions] of var 0..segmentCount: visitsOnMission =
     sum(segment in Segments)(beginsVisit[employee, mission, segment])
     | employee in Employees, mission in Missions ]);
 
-var 0..employeeCount * missionCount * (segmentCount + 1): cooldownBreachCount :: add_to_output =
-  sum(employee in Employees, mission in Missions where repeatAfterDays[mission] > 0)(
-    bool2int(exists(segment in Segments where heldWithinCooldown[employee, mission, segment])(
-      beginsVisit[employee, mission, segment]))
-    + max(0, visitsOnMission[employee, mission] - 1));
+% What the log remembers plus what this window adds. The log's half is counted
+% in runs too (`visitsOf` in prepare.ts), because the freeze writes one pin per
+% elapsed slot and four unbroken hours must not read as four turns.
+array[Employees, Missions] of var int: totalVisitsOnMission =
+  array2d(Employees, Missions, [
+    recentVisitsOnMission[employee, mission] + visitsOnMission[employee, mission]
+    | employee in Employees, mission in Missions ]);
 
-% Level 11: fairness is round robin, and nothing else. Whoever has waited
+% A mission with nobody in its rotation - everyone allowed on it is exempt -
+% contributes nothing rather than an empty `min`.
+array[Missions] of bool: hasRotation =
+  [ isHardMission[mission]
+      /\ exists(employee in Employees)(isAllowed[employee, mission] /\ not isExemptFromHard[employee])
+    | mission in Missions ];
+
+% Level 10: a driver or a commander does not take the kitchen while anybody
+% else could. Its own level, above the spread rather than folded into it,
+% because one number cannot hold both: with three people, one of them a
+% commander, and a kitchen running three days, *every* single-number form of
+% "leave them out of the rotation" scores 1/1/1 at least as well as 2/1/0 and
+% so hands the commander a kitchen day - exactly backwards
+% (`scripts/hardMissionExemption.mjs`). Lexicographic tiers are what this model
+% has instead of weights, so this is a tier.
+%
+% Soft, like every level here: with nobody else available the mission is still
+% staffed and the exemption is reported rather than enforced.
+var 0..employeeCount * segmentCount: exemptHardVisits :: add_to_output =
+  sum(employee in Employees, mission in Missions
+      where isHardMission[mission] /\ isExemptFromHard[employee])(
+    visitsOnMission[employee, mission]);
+
+% Level 11: and among the people who *are* in the rotation, it goes round as
+% many of them as possible before it comes back to anybody. `max - min` over
+% their visit counts says exactly "everybody once before anybody twice".
+var 0..employeeCount * missionCount * (segmentCount + 1): hardMissionSpread :: add_to_output =
+  sum(mission in Missions where hasRotation[mission])(
+    max([ totalVisitsOnMission[employee, mission]
+        | employee in Employees
+        where isAllowed[employee, mission] /\ not isExemptFromHard[employee] ])
+    - min([ totalVisitsOnMission[employee, mission]
+          | employee in Employees
+          where isAllowed[employee, mission] /\ not isExemptFromHard[employee] ]));
+
+% Level 12: fairness is round robin, and nothing else. Whoever has waited
 % longest goes next, and somebody back from a long mission goes to the end of
 % the queue. Hours are never consulted; `dutyMinutes` is reported for the
 % summary table and optimised nowhere.
@@ -442,11 +477,11 @@ var 0..TARGET_REST_MINUTES: shortestWaitMinutes :: add_to_output =
     | employee in Employees, segment in Segments ]);
 
 % Minimised, so the wait is maximised. Zero means everyone the solver chose
-% had eight hours off first; from there the queue is turns alone (level 12).
+% had eight hours off first; from there the queue is turns alone (level 13).
 % With no chosen turn at all the level is trivially proved.
 var 0..TARGET_REST_MINUTES: waitDeficitMinutes :: add_to_output = TARGET_REST_MINUTES - shortestWaitMinutes;
 
-% Level 12: once the bottleneck wait is settled, turns are shared out, the
+% Level 13: once the bottleneck wait is settled, turns are shared out, the
 % turns the log remembers included. A turn is one distinct rotation slot
 % entered, plus one per hold.
 array[Employees] of var 0..missionCount * segmentCount: turnsTaken :: add_to_output =
@@ -457,7 +492,7 @@ array[Employees] of var 0..missionCount * segmentCount + maxRecentTurns: totalTu
 var 0..missionCount * segmentCount + maxRecentTurns: turnSpread :: add_to_output =
   max(totalTurns) - min(totalTurns);
 
-% Level 13: prefer distinct people for distinct required roles. A person on a
+% Level 14: prefer distinct people for distinct required roles. A person on a
 % mission holding more than one of its required qualifications costs the
 % surplus, so a driver who is also the commander is chosen only when nobody
 % else can hold the second seat. An approximation, recorded as one.
@@ -469,7 +504,7 @@ var 0..employeeCount * segmentCount * requirementCount: sharedRoleCount :: add_t
                    where requirementMission[requirement] == mission)(
                  holdsRequirement[requirement, employee]) - 1));
 
-% Level 14: night is much harder than day, so night duty is evened out over
+% Level 15: night is much harder than day, so night duty is evened out over
 % the memory horizon, not only inside this window. Somebody who only ever
 % stands 01:00 while another only ever stands 13:00 is what this level exists
 % to stop.
@@ -483,7 +518,7 @@ array[Employees] of var 0..totalNightMinutes + maxRecentNightMinutes: totalNight
 var 0..totalNightMinutes + maxRecentNightMinutes: nightDutySpreadMinutes :: add_to_output =
   max(totalNightMinutesHeld) - min(totalNightMinutesHeld);
 
-% Level 15: rotate people across missions. Every turn on a mission costs the
+% Level 16: rotate people across missions. Every turn on a mission costs the
 % number of turns the log already shows that person on that mission, so
 % whoever has done it least lately is the cheapest to send. With enough drivers
 % this is what swaps who takes the morning and the night patrol, and what sends
@@ -494,7 +529,7 @@ var 0..missionRepeatCeiling: missionRepeatCost :: add_to_output =
   sum(employee in Employees, mission in Missions)(
     recentTurnsOnMission[employee, mission] * turnsOnMission[employee, mission]);
 
-% Level 16: not the same person at the same night hour every night. Standing a
+% Level 17: not the same person at the same night hour every night. Standing a
 % night segment costs the number of turns the log shows that person beginning
 % at that hour of the day, so the 01:00 post moves around.
 int: nightHourRepeatCeiling = segmentCount
@@ -514,13 +549,14 @@ array[Levels] of var int: objectives = [
   nightsWithoutTargetSleep,       % 7  eight hours in one stretch, for as many as possible
   nightsWithoutMinimumSleep,      % 8  six in one stretch, as the tier under it
   longRunCount,                   % 9  nobody stands six hours if anyone is free
-  cooldownBreachCount,            % 10 kitchen once per rotation
-  waitDeficitMinutes,             % 11 the longest wait (round robin)
-  turnSpread,                     % 12 turns shared out
-  sharedRoleCount,                % 13 distinct people for distinct roles
-  nightDutySpreadMinutes,         % 14 night duty evened out over the memory
-  missionRepeatCost,              % 15 rotate people across missions
-  nightHourRepeatCost             % 16 not the same night hour every night
+  exemptHardVisits,               % 10 drivers and commanders are not in that rotation
+  hardMissionSpread,              % 11 and it goes round everybody who is
+  waitDeficitMinutes,             % 12 the longest wait (round robin)
+  turnSpread,                     % 13 turns shared out
+  sharedRoleCount,                % 14 distinct people for distinct roles
+  nightDutySpreadMinutes,         % 15 night duty evened out over the memory
+  missionRepeatCost,              % 16 rotate people across missions
+  nightHourRepeatCost             % 17 not the same night hour every night
 ];
 
 constraint forall(level in Levels where objectiveCap[level] >= 0)(

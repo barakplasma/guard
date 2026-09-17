@@ -33,8 +33,15 @@
 - History is exported, never cleared: there is no clear button and no
   automatic removal of logged duty. The log is the scheduler's memory.
 - The default planning window is 24 hours.
-- A hated mission such as kitchen duty falls to a person once per rotation
-  (7, 14 or 21 days, set per mission); this is its own priority level.
+- A hated mission such as kitchen duty is marked **hard**, and goes round as
+  many people as possible before it comes back to anybody. A rotation's length
+  is a fact about the roster, not a number to set: with ten people and a daily
+  kitchen a rotation is ten days, and five the moment half of them are away, so
+  the scheduler reads it off the log rather than taking a guess in days.
+  Qualifications may be marked **exempt** - drivers and commanders, usually -
+  and whoever holds one is not in that rotation: their never having cooked does
+  not block anybody else, and they take a hard mission only when there is
+  nobody else. Two priority levels, the exemption above the spread.
 - How many days of past duty the scheduler remembers (21 by default) is a
   plan setting the user edits in the UI, like the per-mission rotation days.
 - The last priority levels mix people up: nobody always does the same

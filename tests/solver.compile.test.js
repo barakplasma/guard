@@ -181,9 +181,10 @@ test('deriveSymmetryClasses only groups adjacent rows, which is what the model c
       recentTurns: instance.recentTurns,
       recentNightMinutes: instance.recentNightMinutes,
       recentTurnsOnMission: instance.recentTurnsOnMission,
-      heldWithinCooldown: instance.heldWithinCooldown,
+      recentVisitsOnMission: instance.recentVisitsOnMission,
       recentHourHolds: instance.recentHourHolds,
-      repeatAfterDays: instance.repeatAfterDays,
+      isHardMission: instance.isHardMission,
+      isExemptFromHard: instance.isExemptFromHard,
     },
   );
   // e1 and e3 are identical but not adjacent, so neither may be ordered

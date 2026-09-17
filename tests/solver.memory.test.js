@@ -23,7 +23,7 @@ const withLog = (pins, overrides = {}) => docOf({
   employees: people(2),
   missions: [
     { id: 'm1', name: 'Gate', type: 'local', count: 1 },
-    { id: 'm2', name: 'Kitchen', type: 'local', count: 1, repeatAfterDays: 7 },
+    { id: 'm2', name: 'Kitchen', type: 'local', count: 1, hard: true },
   ],
   pins,
   ...overrides,
@@ -86,23 +86,46 @@ test('a daytime turn contributes no night minutes', () => {
   assert.equal(memory.get('e1').nightMinutes, 0);
 });
 
-test('a mission held inside its repeatAfterDays is in heldWithinCooldown', () => {
-  const inside = readDutyMemory(withLog([
-    loggedPin({ missionId: 'm2', employeeId: 'e1', start: START - 3 * DAY, end: START - 3 * DAY + HOUR }),
+test('visits count runs of logged rows, not the rows themselves', () => {
+  // The freeze writes one pin per elapsed slot, so four unbroken hours in the
+  // kitchen arrive here as four rows and are one turn at the kitchen. Counting
+  // rows would say somebody who stood one long stint had been round four times
+  // and push them to the back of a rotation they have had one turn in.
+  const unbroken = readDutyMemory(withLog([
+    loggedPin({ missionId: 'm2', employeeId: 'e1', start: START - 5 * HOUR, end: START - 4 * HOUR }),
+    loggedPin({ missionId: 'm2', employeeId: 'e1', start: START - 4 * HOUR, end: START - 3 * HOUR }),
+    loggedPin({ missionId: 'm2', employeeId: 'e1', start: START - 3 * HOUR, end: START - 2 * HOUR }),
   ]));
-  assert.ok(inside.get('e1').heldWithinCooldown.has('m2'));
-
-  const outside = readDutyMemory(withLog([
-    loggedPin({ missionId: 'm2', employeeId: 'e1', start: START - 9 * DAY, end: START - 9 * DAY + HOUR }),
-  ]));
-  assert.equal(outside.get('e1').heldWithinCooldown.has('m2'), false);
+  assert.equal(unbroken.get('e1').visitsOnMission.get('m2'), 1, 'one stint');
+  assert.equal(unbroken.get('e1').turnsOnMission.get('m2'), 3, 'three slots');
 });
 
-test('a mission with no cooldown never lands in heldWithinCooldown', () => {
+test('a gap between two logged stints is two visits', () => {
+  const twice = readDutyMemory(withLog([
+    loggedPin({ missionId: 'm2', employeeId: 'e1', start: START - 3 * DAY, end: START - 3 * DAY + HOUR }),
+    loggedPin({ missionId: 'm2', employeeId: 'e1', start: START - DAY, end: START - DAY + HOUR }),
+  ]));
+  assert.equal(twice.get('e1').visitsOnMission.get('m2'), 2);
+});
+
+test('rows arriving out of order still merge into one visit', () => {
+  // Nothing promises the pin list is sorted, and a stint torn in half by an
+  // unrelated edit must not read as two turns because of the order it was
+  // written in.
+  const shuffled = readDutyMemory(withLog([
+    loggedPin({ missionId: 'm2', employeeId: 'e1', start: START - 3 * HOUR, end: START - 2 * HOUR }),
+    loggedPin({ missionId: 'm2', employeeId: 'e1', start: START - 5 * HOUR, end: START - 4 * HOUR }),
+    loggedPin({ missionId: 'm2', employeeId: 'e1', start: START - 4 * HOUR, end: START - 3 * HOUR }),
+  ]));
+  assert.equal(shuffled.get('e1').visitsOnMission.get('m2'), 1);
+});
+
+test('a mission the log never shows has no visits at all', () => {
   const memory = readDutyMemory(withLog([
     loggedPin({ missionId: 'm1', employeeId: 'e1', start: START - HOUR, end: START }),
   ]));
-  assert.equal(memory.get('e1').heldWithinCooldown.size, 0);
+  assert.equal(memory.get('e1').visitsOnMission.get('m2'), undefined);
+  assert.equal(memory.get('e1').visitsOnMission.get('m1'), 1);
 });
 
 test('hour-of-day counts use the viewer\'s clock, like the night windows', () => {
@@ -204,19 +227,6 @@ test('the record says what type it was, so a deleted mission is still charged ri
 test('memoryDays reaches the model through prepareProblem, which is the only route', () => {
   const doc = withLog([], { memoryDays: 7 });
   assert.equal(prepared(doc).memoryDays, 7);
-});
-
-test('a cooldown longer than the memory is reported, never clamped', () => {
-  const doc = docOf({
-    start: START,
-    memoryDays: 14,
-    employees: people(2),
-    missions: [{ id: 'm2', name: 'Kitchen', type: 'local', count: 1, repeatAfterDays: 21 }],
-  });
-  const issue = prepared(doc).issues.find((i) => i.code === 'cooldown-beyond-memory');
-  assert.ok(issue);
-  assert.equal(issue.repeatAfterDays, 21);
-  assert.equal(issue.memoryDays, 14);
 });
 
 test('the memory of a guard whose mission has dropped out of the period is still read', () => {

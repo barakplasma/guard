@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import {
-  Autocomplete, Box, Button, Checkbox, Chip, FormControlLabel, FormHelperText, IconButton,
+  Autocomplete, Box, Button, Checkbox, Chip, FormControlLabel, IconButton,
   Paper, Stack, Switch, TextField, ToggleButton,
   ToggleButtonGroup, Tooltip, Typography,
 } from '@mui/material';
@@ -94,23 +94,24 @@ function MissionCard({ mission, doc, onChange, onRemove, onDuplicate, onAssign }
             </Tooltip>
           )}
 
-          {/* Empty means "no rule", which is what every mission but the hated
-              one wants - so the field is nullable and shows blank rather than
-              a misleading zero. Offered on every type: a remote or daily
-              mission can be the hated one as easily as a local one. A cooldown
-              longer than the plan's memory cannot be observed, and says so
-              here rather than being clamped behind the user's back. */}
-          <Tooltip title={t.repeatAfterDaysHelp}>
-            <NumberField label={t.repeatAfterDays} value={mission.repeatAfterDays}
-              nullable min={1} max={90} step={1}
-              testId={`mission-repeat-days-${mission.id}`}
-              onChange={(value) => onChange({ repeatAfterDays: value })} />
+          {/* A flag and not a number of days: "once per rotation" is the rule,
+              and a rotation's length is a fact about the roster rather than a
+              figure to type in. Offered on every type - a remote or daily
+              mission can be the hated one as easily as a local one. */}
+          <Tooltip title={t.hardMissionHelp}>
+            <FormControlLabel
+              sx={{ flexShrink: 0 }}
+              control={(
+                <Switch
+                  size="small"
+                  checked={mission.hard ?? false}
+                  onChange={(e) => onChange({ hard: e.target.checked })}
+                  data-testid={`mission-hard-${mission.id}`}
+                />
+              )}
+              label={t.hardMission}
+            />
           </Tooltip>
-          {mission.repeatAfterDays != null && mission.repeatAfterDays > (doc.memoryDays ?? 21) && (
-            <FormHelperText data-testid={`mission-repeat-warning-${mission.id}`} sx={{ width: '100%' }}>
-              {t.cooldownBeyondMemory(mission.name, mission.repeatAfterDays, doc.memoryDays ?? 21)}
-            </FormHelperText>
-          )}
 
           <Tooltip title={t.onCallHelp}>
             <FormControlLabel

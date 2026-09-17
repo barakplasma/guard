@@ -380,11 +380,30 @@ preparation time. That is what removes the class of bug where a total has to be
 stamped at exactly the moment a window rolls, which ADR 015 spent a release
 getting right.
 
-`repeatAfterDays` on a mission is the once-per-rotation rule: kitchen duty with
-7 means nobody takes it twice inside seven days if anyone else can. A cooldown
-longer than the memory cannot be observed, so it is *reported* - as a
-preparation issue and as helper text under the field - and never clamped behind
-the user's back.
+`hard` on a mission is the once-per-rotation rule, and it is deliberately a
+flag rather than a number of days. Kitchen duty goes round as many people as
+possible before it comes back to anybody, and a rotation's length is a fact
+about the roster: with ten people and a daily kitchen a rotation is ten days,
+and five the moment half of them are away. `hardMissionSpread` is `max - min`
+over the visit counts, logged visits included, which says "everybody once
+before anybody twice" with no date arithmetic anywhere - so there is nothing
+here that can outrun `memoryDays`.
+
+A **visit** is a run, not a row. The freeze writes one pin per elapsed slot, so
+four unbroken hours in the kitchen arrive as four rows and are one turn at the
+kitchen; `visitsOf` in `prepare.ts` merges them, and `beginsVisit` is the same
+question inside the model. `turnsOnMission` keeps counting slots, because that
+is the unit the spread and the mission-variety levels are about.
+
+`exemptFromHardMissions` on a qualification keeps drivers and commanders out of
+that rotation: their never having cooked does not hold the spread open, and
+they take a hard mission only when there is nobody else. It is **not**
+`excludes`, which says "never this person" and means it. The exemption is its
+own level *above* the spread and cannot be folded into it — with three people,
+one a commander, and a kitchen running three days, every single-number form
+scores 1/1/1 at least as well as 2/1/0 and so hands the commander a kitchen
+day, which is exactly backwards. `scripts/hardMissionExemption.mjs` is the
+standing proof; lexicographic tiers are what this model has instead of weights.
 
 `FRAGMENT_LIMIT` in `urlState.js` is the document's real ceiling, and
 `fitPlanToFragment` runs last in `setDoc`. When a plan would not fit, the

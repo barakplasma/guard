@@ -26,12 +26,14 @@ without the extensions retain their previous encoding.
 | mission  | 12       | excluded tag ids                              | []                                 |
 | mission  | 13       | on-call flag                                  | absent; `1` when on-call           |
 | mission  | 14       | excluded employee ids                         | []                                 |
-| mission  | 15       | once-per-rotation days (`repeatAfterDays`)    | absent; written only when set      |
+| mission  | 15       | hard-mission flag (`hard`)                    | absent; `1` when hard              |
 | employee | 4        | qualification ids                             | []                                 |
 | employee | 5–6      | carried duty minutes, carried stints          | absent; written only when non-zero |
 | pin      | 0–4      | missionId, employeeId, start, end, frozen     | existing conventions               |
 | pin      | 5        | history record                                | absent until the pin is a record   |
 | plan     | key `tg` | qualification definitions                     | omitted                            |
+| tag      | 0–2      | id, name, minimum night rest minutes          | existing conventions               |
+| tag      | 3        | exempt from hard missions                     | absent; `1` when exempt            |
 | plan     | key `md` | how far back the log counts (`memoryDays`)    | omitted; the schema default is 21  |
 
 Mission types encode as local `0`, remote `1`, and daily `2`. Future extension
