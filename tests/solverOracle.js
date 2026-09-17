@@ -96,13 +96,13 @@ function visitsOnMissionOf(instance, assignment) {
   for (let e = 0; e < instance.employeeCount; e++) {
     const row = [];
     for (let m = 0; m < instance.missionCount; m++) {
-      let count = 0;
+      const starts = [];
       for (let s = 0; s < instance.segmentCount; s++) {
         if (instance.seatsWanted[m][s] === 0) continue;
         const entersRun = s === 0 || !isOn(assignment, e, s - 1, m);
-        if (entersRun && isOn(assignment, e, s, m)) count++;
+        if (entersRun && isOn(assignment, e, s, m)) starts.push(s);
       }
-      row.push(count);
+      row.push(starts);
     }
     visits.push(row);
   }
@@ -252,14 +252,16 @@ export function score(instance, assignment) {
   const longRunCount = longRunsByEmployee.reduce((sum, n) => sum + n, 0);
 
   const turnsOnMission = turnsOnMissionOf(instance, assignment);
-  const visitsOnMission = visitsOnMissionOf(instance, assignment);
+  const visitStarts = visitsOnMissionOf(instance, assignment);
   let cooldownBreachCount = 0;
   for (let e = 0; e < instance.employeeCount; e++) {
     for (let m = 0; m < instance.missionCount; m++) {
       if (instance.repeatAfterDays[m] <= 0) continue;
-      const visits = visitsOnMission[e][m];
-      cooldownBreachCount += (instance.heldWithinCooldown[e][m] && visits >= 1 ? 1 : 0)
-        + Math.max(0, visits - 1);
+      const starts = visitStarts[e][m];
+      // One if any visit begins while the log's own cooldown is still running
+      // at that segment, and one for every extra visit inside this window.
+      const insideLogged = starts.some((s) => instance.heldWithinCooldown[e][m][s]);
+      cooldownBreachCount += (insideLogged ? 1 : 0) + Math.max(0, starts.length - 1);
     }
   }
 

@@ -23,6 +23,7 @@ import type {
 } from './types.ts';
 
 const MINUTE = 60_000;
+const DAY = 24 * 60 * MINUTE;
 
 /** What the ladder adds to an instance per run. */
 export interface LadderParams {
@@ -292,12 +293,21 @@ export interface MemoryTables {
   recentTurns: number[];
   recentNightMinutes: number[];
   recentTurnsOnMission: number[][];
-  heldWithinCooldown: boolean[][];
+  /** `[employee][mission][segment]`, so the cooldown can expire mid-plan. */
+  heldWithinCooldown: boolean[][][];
   recentHourHolds: number[][];
   repeatAfterDays: number[];
 }
 
-export function memoryTables(problem: PreparedProblem): MemoryTables {
+/**
+ * @param segments the global grid, because the cooldown is a question about a
+ *   moment: "was this person's last logged turn on this mission still inside
+ *   its `repeatAfterDays` when *this segment* began?". Asked once at the
+ *   horizon start it is right for a 24-hour window and wrong for a plan longer
+ *   than the rotation, where a cooldown expiring on the third day would stay
+ *   active through the seventh.
+ */
+export function memoryTables(problem: PreparedProblem, segments: readonly Interval[]): MemoryTables {
   return {
     idleMinutesAtHorizonStart: problem.employees.map((e) => e.memory.idleMinutesAtHorizonStart),
     recentTurns: problem.employees.map((e) => e.memory.turns),
@@ -305,9 +315,13 @@ export function memoryTables(problem: PreparedProblem): MemoryTables {
     recentTurnsOnMission: problem.employees.map(
       (e) => problem.missions.map((m) => e.memory.turnsOnMission.get(m.id) ?? 0),
     ),
-    heldWithinCooldown: problem.employees.map(
-      (e) => problem.missions.map((m) => e.memory.heldWithinCooldown.has(m.id)),
-    ),
+    heldWithinCooldown: problem.employees.map((e) => problem.missions.map((m) => {
+      const lastEnd = e.memory.lastTurnOnMission.get(m.id);
+      const cooldownMs = (m.repeatAfterDays ?? 0) * DAY;
+      return segments.map((segment) => lastEnd !== undefined
+        && cooldownMs > 0
+        && segment.start - lastEnd < cooldownMs);
+    })),
     recentHourHolds: problem.employees.map((e) => [...e.memory.hourHolds]),
     repeatAfterDays: problem.missions.map((m) => m.repeatAfterDays ?? 0),
   };
@@ -401,7 +415,7 @@ export function deriveSymmetryClasses(
     memory.recentTurns[index],
     memory.recentNightMinutes[index],
     memory.recentTurnsOnMission[index].join(','),
-    memory.heldWithinCooldown[index].map((v) => (v ? 1 : 0)).join(''),
+    memory.heldWithinCooldown[index].map((row) => row.map((v) => (v ? 1 : 0)).join('')).join(','),
     memory.recentHourHolds[index].join(','),
   ].join('|');
 
@@ -445,7 +459,7 @@ export function compileInstance(problem: PreparedProblem): { instance: SolverIns
   const pins = commitmentTriples(problem, segments);
   const requirements = requirementTables(problem);
   const nights = nightOfSegment(problem, segments);
-  const memory = memoryTables(problem);
+  const memory = memoryTables(problem, segments);
   const longRun = enumerateLongRunWindows(segments);
   const sleep = enumerateSleepWindows(segments, nights);
   const shortSleep = enumerateSleepWindows(segments, nights, MINIMUM_SLEEP_MINUTES);

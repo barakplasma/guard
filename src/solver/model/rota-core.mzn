@@ -54,7 +54,7 @@ array[Employees] of int: idleMinutesAtHorizonStart; % since the last logged duty
 array[Employees] of int: recentTurns;
 array[Employees] of int: recentNightMinutes;
 array[Employees, Missions] of int: recentTurnsOnMission;
-array[Employees, Missions] of bool: heldWithinCooldown;
+array[Employees, Missions, Segments] of bool: heldWithinCooldown; % at that segment's start
 array[Employees, Hours] of int: recentHourHolds;   % turns begun at that hour of day
 array[Segments] of int: hourOfSegment;             % 0..23, at the segment's start
 array[Missions] of int: repeatAfterDays;           % 0 = no once-per-rotation rule
@@ -336,13 +336,25 @@ array[Employees] of var 0..longRunWindowCount: longRunsByEmployee :: add_to_outp
 var 0..employeeCount * longRunWindowCount: longRunCount :: add_to_output = sum(longRunsByEmployee);
 
 % Level 10: a mission everyone hates comes round once per rotation. A mission
-% with `repeatAfterDays` set, kitchen say, costs one for every person who takes
-% it while their last logged turn on it is inside the cooldown, and one more
-% for every extra turn on it inside this window. The cooldown is measured from
-% the log to the horizon start, an approximation of at most one window's
-% length, which on a 24-hour plan is one day. Above round robin on purpose:
-% this decides who is eligible for the kitchen, the wait decides who goes next
-% among them.
+% with `repeatAfterDays` set, kitchen say, costs one for every person who
+% *begins a visit to it while their last logged turn on it is still inside the
+% cooldown*, and one more for every extra visit inside this window. Above round
+% robin on purpose: this decides who is eligible for the kitchen, the wait
+% decides who goes next among them.
+%
+% The first term is per segment rather than per person because the cooldown
+% expires at a moment, not at the horizon: on a plan longer than the rotation,
+% a seven-day cooldown that runs out on the third day must stop charging on the
+% fourth. `heldWithinCooldown` carries that answer for every segment, computed
+% once in `compile.ts` from the log.
+%
+% The second term is deliberately blind to *when* the extra visit falls: two
+% kitchen turns eight days apart under a seven-day rule cost one here, the same
+% as two turns eight hours apart. Telling them apart needs a comparison between
+% two decisions rather than between a decision and a parameter, and the cost is
+% quadratic in segments. It only bites on a plan longer than the rotation, it
+% over-charges rather than under-charges, and level 15's `missionRepeatCost`
+% already prefers sending the mission elsewhere.
 array[Employees, Missions] of var 0..segmentCount: turnsOnMission :: add_to_output =
   array2d(Employees, Missions, [
     sum(segment in Segments
@@ -360,18 +372,23 @@ array[Employees, Missions] of var 0..segmentCount: turnsOnMission :: add_to_outp
 % not three, and charging the second and third as "came round again inside the
 % cooldown" punishes a single stint for being long. `turnsOnMission` keeps
 % counting slots, because that is the unit levels 12 and 15 are about.
+array[Employees, Missions, Segments] of var bool: beginsVisit =
+  array3d(Employees, Missions, Segments, [
+    seatsWanted[mission, segment] > 0
+      /\ isOnMission[employee, mission, segment]
+      /\ (if segment == 1 then true
+          else not isOnMission[employee, mission, segment - 1] endif)
+    | employee in Employees, mission in Missions, segment in Segments ]);
+
 array[Employees, Missions] of var 0..segmentCount: visitsOnMission =
   array2d(Employees, Missions, [
-    sum(segment in Segments
-        where seatsWanted[mission, segment] > 0
-           /\ (if segment == 1 then true
-               else not isOnMission[employee, mission, segment - 1] endif))(
-      isOnMission[employee, mission, segment])
+    sum(segment in Segments)(beginsVisit[employee, mission, segment])
     | employee in Employees, mission in Missions ]);
 
 var 0..employeeCount * missionCount * (segmentCount + 1): cooldownBreachCount :: add_to_output =
   sum(employee in Employees, mission in Missions where repeatAfterDays[mission] > 0)(
-    bool2int(heldWithinCooldown[employee, mission]) * bool2int(visitsOnMission[employee, mission] >= 1)
+    bool2int(exists(segment in Segments where heldWithinCooldown[employee, mission, segment])(
+      beginsVisit[employee, mission, segment]))
     + max(0, visitsOnMission[employee, mission] - 1));
 
 % Level 11: fairness is round robin, and nothing else. Whoever has waited

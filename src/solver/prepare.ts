@@ -260,6 +260,9 @@ export function readDutyMemory(draft: Draft, memoryDays = DEFAULT_MEMORY_DAYS): 
       nightMinutes: Math.round(at.nightMinutes) as DutyMemory['nightMinutes'],
       turnsOnMission: at.turnsOnMission,
       heldWithinCooldown: at.heldWithinCooldown,
+      lastTurnOnMission: new Map(
+        [...at.lastOnMission].filter(([, end]) => Number.isFinite(end)) as [MissionId, InstantMs][],
+      ),
       hourHolds: at.hourHolds,
     });
   }
@@ -336,6 +339,7 @@ export function prepareProblem(draft: Draft, clock: { now: number }): PreparedPr
     nightMinutes: 0 as DutyMemory['nightMinutes'],
     turnsOnMission: new Map(),
     heldWithinCooldown: new Set(),
+    lastTurnOnMission: new Map(),
     hourHolds: Array.from({ length: 24 }, () => 0),
   };
 

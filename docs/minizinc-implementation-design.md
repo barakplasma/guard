@@ -1477,13 +1477,28 @@ design's, one to fourteen, and the ladder now runs to sixteen.
   second call to the same `enumerateSleepWindows`, so "six hours" and "eight
   hours" are one piece of code with one argument between them.
 
-- **The cooldown counts visits, not slots.** `cooldownBreachCount` read
+- **The cooldown counts visits, not slots, and expires at a moment.** Two
+  separate things were wrong with `cooldownBreachCount`. It read
   `turnsOnMission`, which counts rotation slots entered - so three unbroken
   hours in the kitchen read as "came round again inside the cooldown" twice.
-  Three unbroken hours in the kitchen is one turn at the kitchen. The level now
-  reads `visitsOnMission`, a run of consecutive segments on one mission however
-  many slots it spans. `turnsOnMission` keeps counting slots, because that is
-  the unit levels 12 and 15 are about.
+  Three unbroken hours in the kitchen is one turn at the kitchen, so the level
+  now reads `beginsVisit`, a run of consecutive segments on one mission however
+  many slots it spans; `turnsOnMission` keeps counting slots, because that is
+  the unit levels 12 and 15 are about. And `heldWithinCooldown` was a boolean
+  stamped once at the horizon start, so on a plan longer than the rotation a
+  seven-day cooldown that ran out on the third day stayed active through the
+  seventh. It is now `[Employees, Missions, Segments]` - a parameter, computed
+  in `compile.ts` from each mission's last logged turn, so it costs the solver
+  nothing and answers exactly.
+
+  What is left is deliberate and recorded in the model: the "one per extra
+  visit" term is blind to *when* the extra visit falls, so two kitchen turns
+  eight days apart under a seven-day rule cost the same as two eight hours
+  apart. Telling those apart means comparing two decisions rather than a
+  decision against a parameter, which is quadratic in segments. It only bites
+  on a plan longer than the rotation, it over-charges rather than
+  under-charges, and level 15's `missionRepeatCost` already prefers sending the
+  mission elsewhere.
 
 One more, outside the model. `readDutyMemory` charged every logged turn against
 the *plan's* `shiftMinutes`, so a twelve-hour remote hold in the log read as

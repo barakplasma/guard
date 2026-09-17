@@ -67,6 +67,14 @@ export interface DutyMemory {
   readonly nightMinutes: DurationMinutes;
   readonly turnsOnMission: ReadonlyMap<MissionId, number>;
   readonly heldWithinCooldown: ReadonlySet<MissionId>;
+  /**
+   * When each mission's last logged turn ended, so the cooldown can be asked
+   * about *a moment* rather than only about the horizon start. A boolean
+   * stamped once at the horizon is right for a 24-hour window and wrong for a
+   * plan longer than the rotation: a cooldown that expires on the third day
+   * would otherwise stay active through the seventh.
+   */
+  readonly lastTurnOnMission: ReadonlyMap<MissionId, InstantMs>;
   /** 24 counts: turns begun in each hour of the day, on the viewer's clock. */
   readonly hourHolds: readonly number[];
 }
@@ -196,7 +204,8 @@ export interface SolverInstance {
   readonly recentTurns: readonly number[];
   readonly recentNightMinutes: readonly number[];
   readonly recentTurnsOnMission: readonly (readonly number[])[];
-  readonly heldWithinCooldown: readonly (readonly boolean[])[];
+  /** `[employee][mission][segment]`: was the last logged turn on it still inside the cooldown then? */
+  readonly heldWithinCooldown: readonly (readonly (readonly boolean[])[])[];
   readonly recentHourHolds: readonly (readonly number[])[];
   readonly hourOfSegment: readonly number[];
   readonly repeatAfterDays: readonly number[];

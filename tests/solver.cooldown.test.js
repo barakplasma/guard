@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  DAY, docOf, HOUR, loggedPin, people, prepared, skipWithoutSolver, solve,
+  compiled, DAY, docOf, HOUR, loggedPin, people, prepared, skipWithoutSolver, solve,
 } from './solverHelpers.js';
 
 /**
@@ -124,6 +124,47 @@ test('a mission with no cooldown never reports a breach, however often it comes 
   assert.ok(accepted);
   assert.equal(accepted.diagnostics.turnsTaken[0], 2);
   assert.equal(accepted.quantities.cooldownBreachCount, 0);
+});
+
+test('a cooldown that runs out mid-plan stops charging from there', skipWithoutSolver, async () => {
+  // A seven-day rule and a daily kitchen over four days, so the log's own
+  // cooldown expires inside the plan rather than before or after it. Two
+  // people share four visits, so two of them are somebody's second and cost
+  // one each whatever else happens; the question this asks is what the
+  // *logged* turn adds on top.
+  const fourDays = (loggedAt) => kitchen({
+    end: START + 4 * DAY,
+    employees: people(2),
+    missions: [{
+      id: 'k', name: 'Kitchen', type: 'daily', count: 1, repeatAfterDays: 7,
+      dayStart: 12 * 60, dayEnd: 13 * 60,
+    }],
+    pins: [loggedPin({
+      missionId: 'k', employeeId: 'e1', missionName: 'Kitchen', missionType: 'daily',
+      start: loggedAt, end: loggedAt + HOUR,
+    })],
+  });
+
+  // Six days back: day three of the plan is the eighth day since, so e1 is
+  // free from there on and the answer is the two unavoidable second visits.
+  const expiring = fourDays(START - 6 * DAY);
+  const { instance, problem } = compiled(expiring);
+  const e1 = problem.employees.findIndex((employee) => employee.id === 'e1');
+  const inside = instance.heldWithinCooldown[e1][0];
+  assert.equal(inside[0], true, 'the plan opens inside the seven days');
+  assert.equal(inside[inside.length - 1], false, 'and closes outside them');
+
+  const expired = await solve(expiring);
+  assert.ok(expired.accepted);
+  assert.equal(expired.accepted.quantities.unfilledSeatMinutes, 0);
+  assert.equal(expired.accepted.quantities.cooldownBreachCount, 2, 'nothing charged for the log');
+
+  // One day back: the cooldown covers every segment of the plan, so whichever
+  // days fall to e1 are charged, and the same four visits cost one more.
+  const { accepted } = await solve(fourDays(START - DAY));
+  assert.ok(accepted);
+  assert.equal(accepted.quantities.unfilledSeatMinutes, 0);
+  assert.equal(accepted.quantities.cooldownBreachCount, 3);
 });
 
 test('the cooldown is measured from the log, so a shorter memory cannot see it', skipWithoutSolver, async () => {
