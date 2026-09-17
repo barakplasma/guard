@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { LEVEL_COUNT, MODEL_VERSION, OBJECTIVE_ORDER } from '../src/solver/types.ts';
+import {
+  LEVEL_COUNT, MINIMUM_SLEEP_MINUTES, MODEL_VERSION, OBJECTIVE_ORDER, TARGET_REST_MINUTES,
+} from '../src/solver/types.ts';
 import { readModelSources } from '../src/solver/nativeRunner.ts';
 import { docOf, people, skipWithoutSolver, solve } from './solverHelpers.js';
 
@@ -33,6 +35,12 @@ test('LEVEL_COUNT agrees, and the objective list is that long', () => {
   assert.equal(OBJECTIVE_ORDER.length, LEVEL_COUNT);
 });
 
+test('the two rest thresholds agree, and one is under the other', () => {
+  assert.equal(constantIn(core, 'TARGET_REST_MINUTES'), TARGET_REST_MINUTES);
+  assert.equal(constantIn(core, 'MINIMUM_SLEEP_MINUTES'), MINIMUM_SLEEP_MINUTES);
+  assert.ok(MINIMUM_SLEEP_MINUTES < TARGET_REST_MINUTES, 'six hours is the tier under eight');
+});
+
 test('the objectives array lists the quantities in ladder order', () => {
   const block = core.slice(core.indexOf('array[Levels] of var int: objectives = ['));
   const listed = block.slice(0, block.indexOf('];'))
@@ -46,8 +54,8 @@ test('the objectives array lists the quantities in ladder order', () => {
 test('every quantity the schema expects is annotated for output', () => {
   for (const name of [...OBJECTIVE_ORDER, 'shortestWaitMinutes', 'echoedModelVersion',
     'assignedMission', 'seatsFilled', 'qualifiedSeatsFilled', 'nightRestMinutes',
-    'sleepsTarget', 'longRunsByEmployee', 'dutyMinutes', 'turnsTaken', 'turnsOnMission',
-    'nightMinutesInWindow']) {
+    'reachesTargetTotalRest', 'sleepsTarget', 'sleepsMinimum', 'longRunsByEmployee',
+    'dutyMinutes', 'turnsTaken', 'turnsOnMission', 'nightMinutesInWindow']) {
     assert.match(core, new RegExp(`${name}\\s*::\\s*add_to_output`), `${name} is in the output contract`);
   }
 });

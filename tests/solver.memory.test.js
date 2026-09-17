@@ -148,6 +148,59 @@ test('a turn longer than one shift counts as several, at least one', () => {
   assert.equal(readDutyMemory(short).get('e1').turns, 1, 'never zero');
 });
 
+test('a mission held whole is one turn, however long the hold ran', () => {
+  // A remote mission is one claim taken once - the same rule `ringKeys`
+  // follows inside the engine. Charged by the plan's shift length a
+  // twelve-hour hold would read as twelve turns and send its holder round the
+  // ring eleven laps early.
+  const doc = withLog([
+    loggedPin({
+      missionId: 'r1', employeeId: 'e1', missionName: 'Patrol', missionType: 'remote',
+      start: START - 14 * HOUR, end: START - 2 * HOUR,
+    }),
+  ], {
+    shiftMinutes: 60,
+    missions: [{
+      id: 'r1', name: 'Patrol', type: 'remote', count: 1,
+      start: START - 14 * HOUR, end: START - 2 * HOUR,
+    }],
+  });
+  const memory = readDutyMemory(doc);
+  assert.equal(memory.get('e1').turns, 1);
+  assert.equal(memory.get('e1').turnsOnMission.get('r1'), 1);
+});
+
+test('a local turn is charged against its own mission\'s shift length', () => {
+  // There is no single global step to do arithmetic on: a two-hour חמ"ל slot
+  // is one turn and so is the hourly gate slot beside it, and reading the
+  // plan default for both is exactly the arithmetic `gridFor` exists to stop.
+  const doc = withLog([
+    loggedPin({ missionId: 'slow', employeeId: 'e1', start: START - 5 * HOUR, end: START - HOUR }),
+    loggedPin({ missionId: 'fast', employeeId: 'e2', start: START - 5 * HOUR, end: START - HOUR }),
+  ], {
+    shiftMinutes: 60,
+    missions: [
+      { id: 'slow', name: 'War room', type: 'local', count: 1, shiftMinutes: 120 },
+      { id: 'fast', name: 'Gate', type: 'local', count: 1 },
+    ],
+  });
+  const memory = readDutyMemory(doc);
+  assert.equal(memory.get('e1').turns, 2, 'four hours of two-hour slots');
+  assert.equal(memory.get('e2').turns, 4, 'four hours of the plan\'s own hourly slots');
+});
+
+test('the record says what type it was, so a deleted mission is still charged right', () => {
+  // A recorded pin outlives the mission it names (ADR 012's second
+  // correction), and the live lists are the fallback, never the source.
+  const doc = withLog([
+    loggedPin({
+      missionId: 'gone', employeeId: 'e1', missionName: 'Convoy', missionType: 'remote',
+      start: START - 14 * HOUR, end: START - 2 * HOUR,
+    }),
+  ], { shiftMinutes: 60 });
+  assert.equal(readDutyMemory(doc).get('e1').turns, 1);
+});
+
 test('memoryDays reaches the model through prepareProblem, which is the only route', () => {
   const doc = withLog([], { memoryDays: 7 });
   assert.equal(prepared(doc).memoryDays, 7);

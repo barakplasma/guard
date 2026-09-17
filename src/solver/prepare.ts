@@ -133,6 +133,36 @@ interface LoggedTurn {
   missionId: MissionId;
   start: number;
   end: number;
+  /**
+   * How long one turn on that mission was, in minutes - or `0` for a mission
+   * held whole, where the range however long is a single turn.
+   */
+  slotMinutes: number;
+}
+
+/**
+ * What one logged turn on this mission cost, in minutes of grid.
+ *
+ * Zero for a remote or daily mission: one set of people holds it end to end,
+ * so a twelve-hour hold is one turn and charging it as twelve would send its
+ * holder round the ring eleven laps early - the same rule `ringKeys` follows
+ * inside the engine. A local mission is charged against **its own** shift
+ * length, not the plan's: a two-hour חמ"ל slot is one turn and so is a
+ * one-hour gate slot, and reading the plan default for both is exactly the
+ * arithmetic `gridFor` exists to stop.
+ *
+ * The type is read from the pin's own `record` first, because a recorded pin
+ * outlives the mission it names (ADR 012's second correction). The live
+ * mission is the fallback for pins written before the field existed; a mission
+ * that is gone leaves the plan default, which is all that is left to know.
+ */
+function turnSlotMinutes(pin: Draft, mission: Draft | undefined, planShiftMinutes: number): number {
+  const type = pin.record?.missionType ?? mission?.type ?? 'local';
+  if (type !== 'local') return 0;
+  // The night length is deliberately not consulted: a logged range has no grid
+  // left to say which stretch it fell in, and a turn here is an approximation
+  // that says so.
+  return Math.max(1, mission?.shiftMinutes ?? planShiftMinutes);
 }
 
 /**
@@ -147,6 +177,7 @@ interface LoggedTurn {
 export function loggedTurns(draft: Draft, memoryDays: number): LoggedTurn[] {
   const missionById = new Map<string, Draft>(draft.missions.map((m: Draft) => [m.id, m]));
   const memoryStart = draft.start - memoryDays * DAY;
+  const planShiftMinutes = Math.max(1, draft.shiftMinutes ?? 60);
   const out: LoggedTurn[] = [];
   for (const pin of draft.pins) {
     const mission = missionById.get(pin.missionId);
@@ -159,6 +190,7 @@ export function loggedTurns(draft: Draft, memoryDays: number): LoggedTurn[] {
       missionId: pin.missionId as MissionId,
       start: window.start,
       end: window.end,
+      slotMinutes: turnSlotMinutes(pin, mission, planShiftMinutes),
     });
   }
   return out;
@@ -180,7 +212,6 @@ export function loggedTurns(draft: Draft, memoryDays: number): LoggedTurn[] {
 export function readDutyMemory(draft: Draft, memoryDays = DEFAULT_MEMORY_DAYS): Map<EmployeeId, DutyMemory> {
   const turns = loggedTurns(draft, memoryDays);
   const nights = memoryNights(draft, draft.start - memoryDays * DAY);
-  const slotMs = Math.max(1, (draft.shiftMinutes ?? 60) * MINUTE);
   const repeatById = new Map<string, number | null>(
     draft.missions.map((m: Draft) => [m.id, m.repeatAfterDays ?? null]),
   );
@@ -196,9 +227,13 @@ export function readDutyMemory(draft: Draft, memoryDays = DEFAULT_MEMORY_DAYS): 
     // stops mattering because nothing will ask about them again.
     if (!at) { at = blankTally(); byEmployee.set(turn.employeeId, at); }
 
-    // No grid left to name a slot on, so a turn is one plan shift length, at
-    // least one - the same approximation ADR 015 recorded for carried stints.
-    const stints = Math.max(1, Math.round((turn.end - turn.start) / slotMs));
+    // No grid left to name a slot on, so a turn is one shift length of the
+    // mission it was stood on, at least one - the same approximation ADR 015
+    // recorded for carried stints. A mission held whole is one turn however
+    // long it ran (`turnSlotMinutes`).
+    const stints = turn.slotMinutes === 0
+      ? 1
+      : Math.max(1, Math.round((turn.end - turn.start) / (turn.slotMinutes * MINUTE)));
     at.turns += stints;
     at.turnsOnMission.set(turn.missionId, (at.turnsOnMission.get(turn.missionId) ?? 0) + stints);
     at.lastEnd = Math.max(at.lastEnd, turn.end);

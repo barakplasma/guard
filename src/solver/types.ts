@@ -36,7 +36,7 @@ export interface Interval {
 export const MODEL_VERSION = 1;
 
 /** Must equal `LEVEL_COUNT` in `model/rota-core.mzn`. */
-export const LEVEL_COUNT = 14;
+export const LEVEL_COUNT = 16;
 
 /**
  * Eight hours off: the rest target the owner optimises for, and the cap on how
@@ -44,6 +44,13 @@ export const LEVEL_COUNT = 14;
  * constant - it is the configured per-qualification minimum on a tag.
  */
 export const TARGET_REST_MINUTES = 480;
+
+/**
+ * Six continuous hours: the tier under the eight-hour stretch, and the same
+ * number as `PREFERRED_CONTINUOUS_MINUTES` in `rest.js`. Must equal
+ * `MINIMUM_SLEEP_MINUTES` in `model/rota-core.mzn`.
+ */
+export const MINIMUM_SLEEP_MINUTES = 360;
 
 /** One byte per cell, so 255 is the largest mission index the matrix can hold. */
 export const MAX_MISSIONS = 255;
@@ -174,6 +181,7 @@ export interface SolverInstance {
   readonly requirementCount: number;
   readonly longRunWindowCount: number;
   readonly sleepWindowCount: number;
+  readonly shortSleepWindowCount: number;
 
   readonly segmentMinutes: readonly number[];
   readonly nightOfSegment: readonly number[];
@@ -211,6 +219,10 @@ export interface SolverInstance {
   readonly sleepWindowFirstSegment: readonly number[];
   readonly sleepWindowLastSegment: readonly number[];
   readonly sleepWindowNight: readonly number[];
+
+  readonly shortSleepWindowFirstSegment: readonly number[];
+  readonly shortSleepWindowLastSegment: readonly number[];
+  readonly shortSleepWindowNight: readonly number[];
 }
 
 /** How to read the answer back. */
@@ -234,8 +246,10 @@ export interface NamedQuantities {
   readonly unfilledSeatMinutes: number;
   readonly slotHandoverCount: number;
   readonly restShortfallMinutes: number;
+  readonly nightsWithoutTargetTotalRest: number;
   readonly targetRestShortfallMinutes: number;
   readonly nightsWithoutTargetSleep: number;
+  readonly nightsWithoutMinimumSleep: number;
   readonly longRunCount: number;
   readonly cooldownBreachCount: number;
   readonly waitDeficitMinutes: number;
@@ -252,7 +266,9 @@ export interface SegmentDiagnostics {
   readonly seatsFilled: readonly (readonly number[])[];
   readonly qualifiedSeatsFilled: readonly (readonly number[])[];
   readonly nightRestMinutes: readonly (readonly number[])[];
+  readonly reachesTargetTotalRest: readonly (readonly boolean[])[];
   readonly sleepsTarget: readonly (readonly boolean[])[];
+  readonly sleepsMinimum: readonly (readonly boolean[])[];
   readonly longRunsByEmployee: readonly number[];
   readonly dutyMinutes: readonly number[];
   readonly turnsTaken: readonly number[];
@@ -305,8 +321,10 @@ export const OBJECTIVE_ORDER = [
   'unfilledSeatMinutes',
   'slotHandoverCount',
   'restShortfallMinutes',
+  'nightsWithoutTargetTotalRest',
   'targetRestShortfallMinutes',
   'nightsWithoutTargetSleep',
+  'nightsWithoutMinimumSleep',
   'longRunCount',
   'cooldownBreachCount',
   'waitDeficitMinutes',

@@ -86,6 +86,51 @@ function turnsOnMissionOf(instance, assignment) {
   return turns;
 }
 
+/**
+ * A *visit* is a run of consecutive segments on one mission, however many
+ * rotation slots it spans - the unit the cooldown level counts in, as against
+ * the slots `turnsOnMissionOf` counts.
+ */
+function visitsOnMissionOf(instance, assignment) {
+  const visits = [];
+  for (let e = 0; e < instance.employeeCount; e++) {
+    const row = [];
+    for (let m = 0; m < instance.missionCount; m++) {
+      let count = 0;
+      for (let s = 0; s < instance.segmentCount; s++) {
+        if (instance.seatsWanted[m][s] === 0) continue;
+        const entersRun = s === 0 || !isOn(assignment, e, s - 1, m);
+        if (entersRun && isOn(assignment, e, s, m)) count++;
+      }
+      row.push(count);
+    }
+    visits.push(row);
+  }
+  return visits;
+}
+
+/**
+ * Is this person off duty across some window of `windowCount` inside night
+ * `night`, and could they have been? Both halves read the same window table,
+ * which is what makes "eight hours" and "six hours" one piece of code.
+ */
+function sleepInNight(instance, assignment, employee, night, count, firsts, lasts, nights) {
+  let canSleep = false;
+  let sleeps = false;
+  for (let w = 0; w < count; w++) {
+    if (nights[w] !== night) continue;
+    let available = true;
+    let asleep = true;
+    for (let s = firsts[w] - 1; s < lasts[w]; s++) {
+      if (!instance.isAvailable[employee][s]) { available = false; asleep = false; break; }
+      if (!instance.isSleepable[assignment[employee][s]]) asleep = false;
+    }
+    canSleep = canSleep || available;
+    sleeps = sleeps || asleep;
+  }
+  return { canSleep, sleeps };
+}
+
 /** Every named quantity in `rota-core.mzn`, computed from the matrix alone. */
 export function score(instance, assignment) {
   const { segmentMinutes, nightOfSegment } = instance;
@@ -144,38 +189,52 @@ export function score(instance, assignment) {
   }
 
   let restShortfallMinutes = 0;
+  let nightsWithoutTargetTotalRest = 0;
   let targetRestShortfallMinutes = 0;
   let nightsWithoutTargetSleep = 0;
+  let nightsWithoutMinimumSleep = 0;
+  const reachesTargetTotalRest = [];
   const sleepsTarget = [];
+  const sleepsMinimum = [];
   for (let e = 0; e < instance.employeeCount; e++) {
+    const reachesRow = [];
     const row = [];
+    const minimumRow = [];
     for (let n = 1; n <= instance.nightCount; n++) {
       const rest = nightRestMinutes[e][n - 1];
       const required = instance.requiredNightRestMinutes[e];
+      const target = Math.max(required, TARGET_REST_MINUTES);
       if (required > 0) restShortfallMinutes += Math.max(0, required - rest);
-      const present = instance.nightOfSegment.some(
-        (night, s) => night === n && instance.isAvailable[e][s],
-      );
-      if (present) {
-        targetRestShortfallMinutes += Math.max(0, Math.max(required, TARGET_REST_MINUTES) - rest);
-      }
-      let canSleep = false;
-      let sleeps = false;
-      for (let w = 0; w < instance.sleepWindowCount; w++) {
-        if (instance.sleepWindowNight[w] !== n) continue;
-        let available = true;
-        let asleep = true;
-        for (let s = instance.sleepWindowFirstSegment[w] - 1; s < instance.sleepWindowLastSegment[w]; s++) {
-          if (!instance.isAvailable[e][s]) { available = false; asleep = false; break; }
-          if (!instance.isSleepable[assignment[e][s]]) asleep = false;
+      let availableNightMinutes = 0;
+      for (let s = 0; s < instance.segmentCount; s++) {
+        if (instance.nightOfSegment[s] === n && instance.isAvailable[e][s]) {
+          availableNightMinutes += segmentMinutes[s];
         }
-        canSleep = canSleep || available;
-        sleeps = sleeps || asleep;
       }
-      row.push(sleeps);
-      if (canSleep && !sleeps) nightsWithoutTargetSleep++;
+      const present = availableNightMinutes > 0;
+      const reaches = rest >= target;
+      reachesRow.push(reaches);
+      if (availableNightMinutes >= target && !reaches) nightsWithoutTargetTotalRest++;
+      if (present) targetRestShortfallMinutes += Math.max(0, target - rest);
+
+      const full = sleepInNight(
+        instance, assignment, e, n, instance.sleepWindowCount,
+        instance.sleepWindowFirstSegment, instance.sleepWindowLastSegment, instance.sleepWindowNight,
+      );
+      row.push(full.sleeps);
+      if (full.canSleep && !full.sleeps) nightsWithoutTargetSleep++;
+
+      const short = sleepInNight(
+        instance, assignment, e, n, instance.shortSleepWindowCount,
+        instance.shortSleepWindowFirstSegment, instance.shortSleepWindowLastSegment,
+        instance.shortSleepWindowNight,
+      );
+      minimumRow.push(short.sleeps);
+      if (short.canSleep && !short.sleeps) nightsWithoutMinimumSleep++;
     }
+    reachesTargetTotalRest.push(reachesRow);
     sleepsTarget.push(row);
+    sleepsMinimum.push(minimumRow);
   }
 
   const longRunsByEmployee = [];
@@ -193,13 +252,14 @@ export function score(instance, assignment) {
   const longRunCount = longRunsByEmployee.reduce((sum, n) => sum + n, 0);
 
   const turnsOnMission = turnsOnMissionOf(instance, assignment);
+  const visitsOnMission = visitsOnMissionOf(instance, assignment);
   let cooldownBreachCount = 0;
   for (let e = 0; e < instance.employeeCount; e++) {
     for (let m = 0; m < instance.missionCount; m++) {
       if (instance.repeatAfterDays[m] <= 0) continue;
-      const turns = turnsOnMission[e][m];
-      cooldownBreachCount += (instance.heldWithinCooldown[e][m] && turns >= 1 ? 1 : 0)
-        + Math.max(0, turns - 1);
+      const visits = visitsOnMission[e][m];
+      cooldownBreachCount += (instance.heldWithinCooldown[e][m] && visits >= 1 ? 1 : 0)
+        + Math.max(0, visits - 1);
     }
   }
 
@@ -266,8 +326,10 @@ export function score(instance, assignment) {
     unfilledSeatMinutes,
     slotHandoverCount,
     restShortfallMinutes,
+    nightsWithoutTargetTotalRest,
     targetRestShortfallMinutes,
     nightsWithoutTargetSleep,
+    nightsWithoutMinimumSleep,
     longRunCount,
     cooldownBreachCount,
     waitDeficitMinutes: TARGET_REST_MINUTES - shortestWaitMinutes,
@@ -281,7 +343,9 @@ export function score(instance, assignment) {
     seatsFilled,
     qualifiedSeatsFilled,
     nightRestMinutes,
+    reachesTargetTotalRest,
     sleepsTarget,
+    sleepsMinimum,
     longRunsByEmployee,
     dutyMinutes,
     turnsTaken,

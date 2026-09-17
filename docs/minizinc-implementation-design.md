@@ -1171,9 +1171,9 @@ outcome, its quantities and a diff of assignments. Only step 6 flips
 |--------------------------|-------|------------------------------------------------------------------|
 | optimize, per level      | 20 s  | the Pixel's slowest measured level was 7.6 s                     |
 | check                    | 5 s   | a fixed instance propagates; anything longer is a model problem  |
-| whole ladder (14 levels) | 280 s | a hard bound, not an expectation; `unknown` is the honest answer |
+| whole ladder (16 levels) | 320 s | a hard bound, not an expectation; `unknown` is the honest answer |
 
-Fourteen solves per plan sounds worse than it is: the default window is now
+Sixteen solves per plan sounds worse than it is: the default window is now
 24 hours, a third of the 72-hour instance every figure in ADR 011 was
 measured on, and a level whose optimum is zero on the first incumbent proves
 in propagation. The sweep in §16 is where the real number gets measured.
@@ -1443,5 +1443,52 @@ Two smaller ones: `planner.js` gained an export, `normalizedInput`, so the
 adapter reads the findings the existing normalization already raised instead of
 deriving them a second time; and the differential suite runs over documents
 *shaped* after the golden ones rather than the golden ones themselves, because
-fourteen proved levels over a 163-segment week is a measurement exercise rather
+sixteen proved levels over a 163-segment week is a measurement exercise rather
 than a unit test.
+
+
+## The ladder gained two levels, and the cooldown changed units
+
+Review of the first implementation found three places where the ladder as
+designed could not say what the decisions above already said. All three are in
+`rota-core.mzn`; the level numbers in §4.1 and in "Decisions taken" are the
+design's, one to fourteen, and the ladder now runs to sixteen.
+
+- **Level 5, `nightsWithoutTargetTotalRest`, above the aggregate.** Decision B
+  is "eight hours off in total for everyone present", and the design expressed
+  it as `targetRestShortfallMinutes` alone - a sum of shortfalls. A sum cannot
+  say *across as many people as possible*. With the same twelve person-hours of
+  rest to hand out, 8/4/0 and 4/4/4 have identical shortfall sums while the
+  first gets somebody a whole night off and the second gets nobody one. So the
+  cardinality goes above the aggregate, exactly as level 7 already sits above
+  nothing at all, and the aggregate stays underneath as its tiebreak (level 6).
+  A night somebody is present for only two hours of is not held against the
+  schedule: `canReachTargetTotalRest` is the same gate `canSleepTarget` applies
+  one level down.
+
+- **Level 8, `nightsWithoutMinimumSleep`, under the eight-hour stretch.**
+  Decision B names six hours beside eight, and the design spent it entirely on
+  level 4's per-qualification minimum - which is a *total*, and only for people
+  carrying the tag. A threshold on its own goes blind below itself: where
+  nobody can keep eight unbroken hours, every arrangement ties at level 7 and
+  night duty is then spread by quantities that know nothing about rest.
+  `MINIMUM_SLEEP_MINUTES` is 360, the same number as
+  `PREFERRED_CONTINUOUS_MINUTES` in `rest.js`, and the windows come from a
+  second call to the same `enumerateSleepWindows`, so "six hours" and "eight
+  hours" are one piece of code with one argument between them.
+
+- **The cooldown counts visits, not slots.** `cooldownBreachCount` read
+  `turnsOnMission`, which counts rotation slots entered - so three unbroken
+  hours in the kitchen read as "came round again inside the cooldown" twice.
+  Three unbroken hours in the kitchen is one turn at the kitchen. The level now
+  reads `visitsOnMission`, a run of consecutive segments on one mission however
+  many slots it spans. `turnsOnMission` keeps counting slots, because that is
+  the unit levels 12 and 15 are about.
+
+One more, outside the model. `readDutyMemory` charged every logged turn against
+the *plan's* `shiftMinutes`, so a twelve-hour remote hold in the log read as
+twelve turns and sent its holder round the ring eleven laps early, and a
+two-hour חמ"ל slot read as two. A mission held whole is one turn however long it
+ran, and a local turn is charged against its own mission's shift length - the
+same rule `ringKeys` follows inside the engine. The type is read from the pin's
+own `record` first, because a recorded pin outlives the mission it names.

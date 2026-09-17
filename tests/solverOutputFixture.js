@@ -22,7 +22,9 @@ export function solverSolution(index, instance, overrides = {}) {
     seatsFilled: grid(missions, segments),
     qualifiedSeatsFilled: grid(instance.requirementCount, segments),
     nightRestMinutes: grid(employees, instance.nightCount),
+    reachesTargetTotalRest: grid(employees, instance.nightCount, false),
     sleepsTarget: grid(employees, instance.nightCount, false),
+    sleepsMinimum: grid(employees, instance.nightCount, false),
     longRunsByEmployee: Array.from({ length: employees }, () => 0),
     dutyMinutes: Array.from({ length: employees }, () => 0),
     turnsTaken: Array.from({ length: employees }, () => 0),
@@ -32,8 +34,10 @@ export function solverSolution(index, instance, overrides = {}) {
     unfilledSeatMinutes: 0,
     slotHandoverCount: 0,
     restShortfallMinutes: 0,
+    nightsWithoutTargetTotalRest: 0,
     targetRestShortfallMinutes: 0,
     nightsWithoutTargetSleep: 0,
+    nightsWithoutMinimumSleep: 0,
     longRunCount: 0,
     cooldownBreachCount: 0,
     waitDeficitMinutes: 0,
@@ -63,8 +67,8 @@ export function solverSolutionFor(index, instance, assignment, overrides = {}) {
 export function quantitiesOf(raw) {
   const quantities = { ...raw };
   for (const key of ['assignedMission', 'seatsFilled', 'qualifiedSeatsFilled', 'nightRestMinutes',
-    'sleepsTarget', 'longRunsByEmployee', 'dutyMinutes', 'turnsTaken', 'turnsOnMission',
-    'nightMinutesInWindow', 'echoedModelVersion']) {
+    'reachesTargetTotalRest', 'sleepsTarget', 'sleepsMinimum', 'longRunsByEmployee', 'dutyMinutes',
+    'turnsTaken', 'turnsOnMission', 'nightMinutesInWindow', 'echoedModelVersion']) {
     delete quantities[key];
   }
   return quantities;

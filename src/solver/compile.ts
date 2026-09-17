@@ -17,7 +17,7 @@
 
 import { countAt } from '../lib/planner.js';
 import { MAX_UNBROKEN_MINUTES } from '../lib/strategies.js';
-import { LEVEL_COUNT, TARGET_REST_MINUTES } from './types.ts';
+import { LEVEL_COUNT, MINIMUM_SLEEP_MINUTES, TARGET_REST_MINUTES } from './types.ts';
 import type {
   InstanceIndex, InstantMs, Interval, PreparedMission, PreparedProblem, SolverInstance,
 } from './types.ts';
@@ -448,6 +448,7 @@ export function compileInstance(problem: PreparedProblem): { instance: SolverIns
   const memory = memoryTables(problem);
   const longRun = enumerateLongRunWindows(segments);
   const sleep = enumerateSleepWindows(segments, nights);
+  const shortSleep = enumerateSleepWindows(segments, nights, MINIMUM_SLEEP_MINUTES);
 
   const instance: SolverInstance = {
     employeeCount: problem.employees.length,
@@ -458,6 +459,7 @@ export function compileInstance(problem: PreparedProblem): { instance: SolverIns
     requirementCount: requirements.requirementMission.length,
     longRunWindowCount: longRun.first.length,
     sleepWindowCount: sleep.first.length,
+    shortSleepWindowCount: shortSleep.first.length,
 
     segmentMinutes: segments.map((s) => Math.round((s.end - s.start) / MINUTE)),
     nightOfSegment: nights,
@@ -497,6 +499,10 @@ export function compileInstance(problem: PreparedProblem): { instance: SolverIns
     sleepWindowFirstSegment: sleep.first,
     sleepWindowLastSegment: sleep.last,
     sleepWindowNight: sleep.night,
+
+    shortSleepWindowFirstSegment: shortSleep.first,
+    shortSleepWindowLastSegment: shortSleep.last,
+    shortSleepWindowNight: shortSleep.night,
   };
 
   const index: InstanceIndex = {

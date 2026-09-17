@@ -8,7 +8,7 @@ import {
  * A hated mission comes round once per rotation.
  *
  * Kitchen duty and its like should fall to a person once every 7, 14 or 21
- * days rather than whenever the queue happens to reach them. Level 8, above
+ * days rather than whenever the queue happens to reach them. Level 10, above
  * round robin on purpose: the cooldown decides who is *eligible*, the wait
  * decides who goes next among them.
  *
@@ -18,10 +18,10 @@ import {
 
 const START = new Date(2026, 0, 12, 12, 0, 0, 0).getTime();
 
-// One hourly slot by default. Two slots and two people is a different
-// question: the level charges one for every *extra* turn inside the window as
-// well as for a turn inside the cooldown, so somebody would breach either way
-// and the minimum would be one rather than zero.
+// One hourly slot by default. The level charges one for every *extra visit*
+// inside the window as well as for a visit inside the cooldown, so a fixture
+// meaning to test the first must put a gap between the two turns - back-to-back
+// hours are one visit.
 const kitchen = (overrides = {}) => docOf({
   start: START,
   end: START + HOUR,
@@ -78,13 +78,34 @@ test('a turn older than the cooldown is no obstacle', skipWithoutSolver, async (
   assert.equal(accepted.quantities.unfilledSeatMinutes, 0);
 });
 
-test('a second turn inside this window costs one too', skipWithoutSolver, async () => {
-  // Two hourly kitchen slots and one person: whoever takes both takes it twice
-  // inside the cooldown, which is the same offence the log records.
+test('two hours back to back in the kitchen is one visit, not two', skipWithoutSolver, async () => {
+  // The unit this level counts in is a *visit* - a run of consecutive segments
+  // on the mission - and not a rotation slot. Three unbroken hours in the
+  // kitchen is one turn at the kitchen however many slots it spans, and
+  // charging the second and third as "came round again inside the cooldown"
+  // would punish a single stint for being long. `turnsTaken` keeps counting
+  // slots, because that is what the queue and the spread are about.
   const { accepted } = await solve(kitchen({ end: START + 2 * HOUR, employees: people(1) }));
   assert.ok(accepted);
-  assert.equal(accepted.diagnostics.turnsTaken[0], 2);
-  assert.equal(accepted.quantities.cooldownBreachCount, 1, 'one extra turn, one breach');
+  assert.equal(accepted.diagnostics.turnsTaken[0], 2, 'two slots stood');
+  assert.equal(accepted.quantities.cooldownBreachCount, 0, 'but one visit to the kitchen');
+});
+
+test('coming back to it on the second day costs one', skipWithoutSolver, async () => {
+  // A daily kitchen over two days and one person: the two occurrences are a
+  // day apart, so the second one is a genuine second visit inside the
+  // cooldown - which is the same offence the log records.
+  const { accepted } = await solve(kitchen({
+    end: START + 2 * DAY,
+    employees: people(1),
+    missions: [{
+      id: 'k', name: 'Kitchen', type: 'daily', count: 1, repeatAfterDays: 7,
+      dayStart: 12 * 60, dayEnd: 13 * 60,
+    }],
+  }));
+  assert.ok(accepted);
+  assert.equal(accepted.diagnostics.turnsOnMission[0][0], 2, 'both days in the kitchen');
+  assert.equal(accepted.quantities.cooldownBreachCount, 1, 'one repeat visit, one breach');
 });
 
 test('with two people the two kitchen slots go to different people', skipWithoutSolver, async () => {
