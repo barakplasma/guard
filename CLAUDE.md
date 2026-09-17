@@ -374,11 +374,10 @@ before changing the model or the runner.
 
 There is no clear button and no carried totals. `memoryDays` on the plan says
 how far back logged duty still counts, and `readDutyMemory` derives every number
-about the past - idle time, turns, night minutes, turns per mission, missions
-held inside their cooldown, turns begun per hour - from the rows themselves at
-preparation time. That is what removes the class of bug where a total has to be
-stamped at exactly the moment a window rolls, which ADR 015 spent a release
-getting right.
+about the past - idle time, turns, night minutes, turns per mission, visits per
+mission, turns begun per hour - from the rows themselves at preparation time.
+That is what removes the class of bug where a total has to be stamped at exactly
+the moment a window rolls, which ADR 015 spent a release getting right.
 
 `hard` on a mission is the once-per-rotation rule, and it is deliberately a
 flag rather than a number of days. Kitchen duty goes round as many people as
