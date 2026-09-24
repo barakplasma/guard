@@ -156,6 +156,8 @@ test('clearing residue moves the number without moving a shift', () => {
   assert.deepEqual(run(cleared).shifts, run(d).shifts, 'the schedule is untouched');
 });
 
+const danaRow = (stats) => stats.perEmployee.find((p) => p.employeeId === 'e1');
+
 test('the summary reports carried duty the engine counts, before and after clearing', () => {
   // The schedule never moved when the residue was cleared, but the summary did:
   // it read only the document field, so four hours the engine was already
@@ -169,10 +171,9 @@ test('the summary reports carried duty the engine counts, before and after clear
     pins: [{ missionId: 'old', employeeId: 'e1', ...past, frozen: true }],
   });
   const before = run(d).stats, after = run(clearStalePins(d)).stats;
-  const row = (stats) => stats.perEmployee.find((p) => p.employeeId === 'e1');
-  assert.equal(row(before).carriedMinutes, 240, 'the pin is counted while it is still a pin');
-  assert.equal(row(before).carriedMinutes, row(after).carriedMinutes);
-  assert.equal(row(before).totalStints, row(after).totalStints);
+  assert.equal(danaRow(before).carriedMinutes, 240, 'the pin is counted while it is still a pin');
+  assert.equal(danaRow(before).carriedMinutes, danaRow(after).carriedMinutes);
+  assert.equal(danaRow(before).totalStints, danaRow(after).totalStints);
   assert.equal(before.totalSpreadMinutes, after.totalSpreadMinutes);
 });
 
