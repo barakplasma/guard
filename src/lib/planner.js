@@ -879,11 +879,16 @@ function planOnce({
   // Read straight from the raw pins, exactly like the count above and for the
   // same reason: a mission that has itself dropped out of the period is already
   // gone from `missionById`, and the hours its pins record are no less real.
+  //
+  // Only the half that has *elapsed*. An assignment beyond the period's end is
+  // a plan, not duty stood, and counting it sent its holder to the back of this
+  // window's queue for a shift they have not worked yet - the same confusion
+  // `isElapsedBeforePeriod` was split out to end in the export.
   const carried = new Map();
   const slotMs = shiftMinutes * MINUTE;
   for (const p of stalePins) {
     const mission = rawMissionById.get(p.missionId);
-    if (!mission) continue;
+    if (!mission || !isElapsedBeforePeriod(p, mission, start, end)) continue;
     const win = resolvePinWindow(p, mission, start, end);
     if (!(win.end > win.start)) continue;
     const at = carried.get(p.employeeId) ?? { minutes: 0, stints: 0 };
@@ -1167,7 +1172,7 @@ function planOnce({
     shifts,
     timeline: buildTimeline(shifts, emps, start, end, miss.filter((m) => m.requires.length)
       .flatMap((m) => m.type === 'daily' ? m.occurrences.flatMap((w) => [w.start, w.end]) : [m.start, m.end])),
-    stats: buildStats(shifts, emps, sleepable),
+    stats: buildStats(shifts, emps, sleepable, carried),
     warnings,
     // Per-employee, per-night total and continuous rest, and the actionable
     // corrections for shortages that only an accepted change can fix.
@@ -1363,7 +1368,7 @@ function buildTimeline(shifts, employees, planStart, planEnd, demandEdges = []) 
   return timeline;
 }
 
-function buildStats(shifts, employees, sleepable) {
+function buildStats(shifts, employees, sleepable, carried) {
   const perEmployee = employees.map((e) => {
     const own = shifts.filter((s) => s.employeeId === e.id).sort((a, b) => a.start - b.start);
     const minutes = own.reduce((sum, s) => sum + (s.end - s.start) / MINUTE, 0);
@@ -1388,8 +1393,14 @@ function buildStats(shifts, employees, sleepable) {
     // format follows and for the same reason: a plan that carries nothing must
     // produce exactly the object it always produced, or every golden fixture
     // changes shape for a feature it does not use.
-    const carriedMinutes = e.carriedMinutes ?? 0;
-    const carriedStints = e.carriedStints ?? 0;
+    //
+    // Both sources the engine reads (ADR 015), summed exactly as `makeState`
+    // sums them: the document field and pins the period has rolled past. Reading
+    // only the field made the figure appear the moment somebody pressed the
+    // export-and-clear button, for a schedule that had not moved.
+    const outside = carried.get(e.id);
+    const carriedMinutes = (e.carriedMinutes ?? 0) + (outside?.minutes ?? 0) / MINUTE;
+    const carriedStints = (e.carriedStints ?? 0) + (outside?.stints ?? 0);
     const row = { employeeId: e.id, name: e.name, minutes, stints: own.length, minGapMinutes };
     if (!carriedMinutes && !carriedStints) return row;
     return {

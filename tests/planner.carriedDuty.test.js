@@ -156,6 +156,43 @@ test('clearing residue moves the number without moving a shift', () => {
   assert.deepEqual(run(cleared).shifts, run(d).shifts, 'the schedule is untouched');
 });
 
+test('the summary reports carried duty the engine counts, before and after clearing', () => {
+  // The schedule never moved when the residue was cleared, but the summary did:
+  // it read only the document field, so four hours the engine was already
+  // counting against דנה appeared in the table only after the button.
+  const past = { start: BASE - 10 * HOUR, end: BASE - 6 * HOUR };
+  const d = doc({
+    missions: [
+      { id: 'm1', name: 'שער', type: 'local', count: 1 },
+      { id: 'old', name: 'ישן', type: 'local', ...past, count: 1 },
+    ],
+    pins: [{ missionId: 'old', employeeId: 'e1', ...past, frozen: true }],
+  });
+  const before = run(d).stats, after = run(clearStalePins(d)).stats;
+  const row = (stats) => stats.perEmployee.find((p) => p.employeeId === 'e1');
+  assert.equal(row(before).carriedMinutes, 240, 'the pin is counted while it is still a pin');
+  assert.equal(row(before).carriedMinutes, row(after).carriedMinutes);
+  assert.equal(row(before).totalStints, row(after).totalStints);
+  assert.equal(before.totalSpreadMinutes, after.totalSpreadMinutes);
+});
+
+test('an assignment beyond the period is a plan, not duty already stood', () => {
+  // Out of period on the far side. Counting it as carried duty sent דנה to the
+  // back of this window's queue for a shift she has not worked yet.
+  const later = { start: BASE + 10 * HOUR, end: BASE + 14 * HOUR };
+  const d = doc({
+    missions: [
+      { id: 'm1', name: 'שער', type: 'local', count: 1 },
+      { id: 'next', name: 'הבא', type: 'local', ...later, count: 1 },
+    ],
+    pins: [{ missionId: 'next', employeeId: 'e1', ...later }],
+  });
+  const result = run(d);
+  assert.ok(result.warnings.some((w) => w.code === 'pin-out-of-period' && w.elapsed === 0));
+  assert.equal(minutesOf(result, 'e1'), minutesOf(result, 'e2'), 'the window is shared evenly');
+  assert.equal(result.stats.perEmployee.find((p) => p.employeeId === 'e1').carriedMinutes, undefined);
+});
+
 test('a newcomer is not handed every hour there is', () => {
   // A guard joining a roster where everyone else has stood five hundred hours
   // is five hundred hours behind, and `balanced` picks the fewest minutes for
