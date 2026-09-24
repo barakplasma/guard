@@ -879,11 +879,16 @@ function planOnce({
   // Read straight from the raw pins, exactly like the count above and for the
   // same reason: a mission that has itself dropped out of the period is already
   // gone from `missionById`, and the hours its pins record are no less real.
+  //
+  // Only the half that has *elapsed*. An assignment beyond the period's end is
+  // a plan, not duty stood, and counting it sent its holder to the back of this
+  // window's queue for a shift they have not worked yet - the same confusion
+  // `isElapsedBeforePeriod` was split out to end in the export.
   const carried = new Map();
   const slotMs = shiftMinutes * MINUTE;
   for (const p of stalePins) {
     const mission = rawMissionById.get(p.missionId);
-    if (!mission) continue;
+    if (!mission || !isElapsedBeforePeriod(p, mission, start, end)) continue;
     const win = resolvePinWindow(p, mission, start, end);
     if (!(win.end > win.start)) continue;
     const at = carried.get(p.employeeId) ?? { minutes: 0, stints: 0 };
@@ -911,7 +916,7 @@ function planOnce({
     // reserved rest block. `selectCrew` re-reads the same vector per crew, so
     // qualification coverage still outranks every tier here.
     const costs = new Map(candidates.map((e) => [e.id, [
-      ...restCost(e, tags, nightWindows, rows.filter((r) => r.employeeId === e.id && !sleepable.has(r.missionId)), start, end, lo, hi),
+      ...restCost(e, tags, nightWindows, (rowsByEmployee.get(e.id) ?? []).filter((r) => !sleepable.has(r.missionId)), start, end, lo, hi),
       Number(overlapsRest(e.id, lo, hi, rest)),
     ]]));
     const ordered = [...candidates].sort((a, b) => {
@@ -925,6 +930,8 @@ function planOnce({
 
   /** Raw assignments before adjacent-row merging. */
   const rows = [];
+  /** The same rows per person, in the same order - `choose` asks per candidate. */
+  const rowsByEmployee = new Map();
   // `slot` is the grid slot the row belongs to - the mission's own window for a
   // remote hold, which is claimed once and held whole. Every row carries it
   // because there is no longer one global step anyone downstream could
@@ -932,7 +939,7 @@ function planOnce({
   // ring counts distinct slots entered.
   const addRow = (mission, st, blockStart, blockEnd, slot, pinned, frozen = false) => {
     occupy(st, mission, blockStart, blockEnd, slot.start, nextSeq);
-    rows.push({
+    const row = {
       missionId: mission.id,
       missionName: mission.name,
       type: mission.type,
@@ -945,7 +952,10 @@ function planOnce({
       pinned,
       frozen,
       ...(st.tags.length ? { qualifications: [...st.tags] } : {}),
-    });
+    };
+    rows.push(row);
+    if (!rowsByEmployee.has(st.id)) rowsByEmployee.set(st.id, []);
+    rowsByEmployee.get(st.id).push(row);
   };
 
   /* --- the segment grid local missions rotate on --- */
@@ -1046,9 +1056,8 @@ function planOnce({
     if (need <= 0) continue;
 
     const candidates = eligibleForRemote(m);
-    candidates.sort((a, b) => strategy.compare(a, b, {
-      mission: m, start: m.start, end: m.end, kind: m.type, planStart: start, shiftMinutes,
-    }));
+    const ctx = { mission: m, start: m.start, end: m.end, kind: m.type, planStart: start, shiftMinutes };
+    candidates.sort((a, b) => strategy.compare(a, b, ctx));
 
     const fixed = rows.filter((r) => r.missionId === m.id && r.start <= m.start && r.end >= m.end).map((r) => state.get(r.employeeId));
     const picked = choose(candidates, fixed, need, m, m.start, m.end);
@@ -1126,9 +1135,9 @@ function planOnce({
     );
     // Who among them actually gets it is the strategy's call - see
     // `strategies.js` for what each one optimizes for.
-    candidates.sort((a, b) => strategy.compare(a, b, {
-      mission: d.mission, start: d.start, end: d.end, kind: 'local', planStart: start, shiftMinutes,
-    }));
+    // One `ctx` per sort, not per comparison: the strategy caches its keys on it.
+    const ctx = { mission: d.mission, start: d.start, end: d.end, kind: 'local', planStart: start, shiftMinutes };
+    candidates.sort((a, b) => strategy.compare(a, b, ctx));
 
     const fixed = rows.filter((r) => r.missionId === d.mission.id && r.start <= d.start && r.end >= d.end).map((r) => state.get(r.employeeId));
     const picked = choose(candidates, fixed, d.need, d.mission, d.start, d.end);
@@ -1167,7 +1176,7 @@ function planOnce({
     shifts,
     timeline: buildTimeline(shifts, emps, start, end, miss.filter((m) => m.requires.length)
       .flatMap((m) => m.type === 'daily' ? m.occurrences.flatMap((w) => [w.start, w.end]) : [m.start, m.end])),
-    stats: buildStats(shifts, emps, sleepable),
+    stats: buildStats(shifts, emps, sleepable, carried),
     warnings,
     // Per-employee, per-night total and continuous rest, and the actionable
     // corrections for shortages that only an accepted change can fix.
@@ -1300,6 +1309,9 @@ function repairCandidates(input, base, warning, win) {
  * opens a new slot, so its `slotStart` differs from that of the row ending
  * where it begins, and no other row can start mid-slot without sharing one.
  */
+/** What a row must share with the one it continues, plus the instant it ends. */
+const joinKey = (r, at) => `${r.missionId}|${r.employeeId}|${r.pinned}|${r.frozen}|${r.slotStart}|${at}`;
+
 function mergeRows(rows) {
   const sorted = [...rows].sort((a, b) => (
     a.start - b.start
@@ -1308,18 +1320,24 @@ function mergeRows(rows) {
     || compareText(a.employeeId, b.employeeId)
   ));
 
+  // Open rows by everything a join must match plus where the row ends, so each
+  // row finds its predecessor in one lookup instead of scanning the output - a
+  // week-long rota has thousands of rows. The first row to claim a key keeps it,
+  // exactly as a scan in output order would find it first.
   const out = [];
+  const open = new Map();
   for (const row of sorted) {
-    const prev = out.find(
-      (r) => r.missionId === row.missionId
-        && r.employeeId === row.employeeId
-        && r.pinned === row.pinned
-        && r.frozen === row.frozen
-        && r.slotStart === row.slotStart
-        && r.end === row.start,
-    );
-    if (prev) prev.end = row.end;
-    else out.push({ ...row });
+    const key = joinKey(row, row.start);
+    const prev = open.get(key);
+    if (prev) {
+      open.delete(key);
+      prev.end = row.end;
+      if (!open.has(joinKey(prev, prev.end))) open.set(joinKey(prev, prev.end), prev);
+      continue;
+    }
+    const copy = { ...row };
+    out.push(copy);
+    if (!open.has(joinKey(copy, copy.end))) open.set(joinKey(copy, copy.end), copy);
   }
   return out.sort((a, b) => (
     a.start - b.start
@@ -1363,7 +1381,7 @@ function buildTimeline(shifts, employees, planStart, planEnd, demandEdges = []) 
   return timeline;
 }
 
-function buildStats(shifts, employees, sleepable) {
+function buildStats(shifts, employees, sleepable, carried) {
   const perEmployee = employees.map((e) => {
     const own = shifts.filter((s) => s.employeeId === e.id).sort((a, b) => a.start - b.start);
     const minutes = own.reduce((sum, s) => sum + (s.end - s.start) / MINUTE, 0);
@@ -1388,8 +1406,14 @@ function buildStats(shifts, employees, sleepable) {
     // format follows and for the same reason: a plan that carries nothing must
     // produce exactly the object it always produced, or every golden fixture
     // changes shape for a feature it does not use.
-    const carriedMinutes = e.carriedMinutes ?? 0;
-    const carriedStints = e.carriedStints ?? 0;
+    //
+    // Both sources the engine reads (ADR 015), summed exactly as `makeState`
+    // sums them: the document field and pins the period has rolled past. Reading
+    // only the field made the figure appear the moment somebody pressed the
+    // export-and-clear button, for a schedule that had not moved.
+    const outside = carried.get(e.id);
+    const carriedMinutes = (e.carriedMinutes ?? 0) + (outside?.minutes ?? 0) / MINUTE;
+    const carriedStints = (e.carriedStints ?? 0) + (outside?.stints ?? 0);
     const row = { employeeId: e.id, name: e.name, minutes, stints: own.length, minGapMinutes };
     if (!carriedMinutes && !carriedStints) return row;
     return {

@@ -15,6 +15,7 @@ import { shiftsToCsv, downloadCsv } from '../lib/exportCsv.js';
 import { findNowSlot, groupAgenda } from '../lib/agenda.js';
 import { formatDuration } from '../lib/format.js';
 import { sortByHebrewName } from '../lib/sort.js';
+import { releasablePins } from '../lib/pins.js';
 import useNow from '../hooks/useNow.js';
 import { t } from '../strings.js';
 
@@ -168,7 +169,7 @@ export default function SchedulePage() {
             {t.jumpToNow}
           </Button>
         )}
-        {doc.pins.length > 0 && (
+        {releasablePins(doc).length > 0 && (
           <Button size="small" onClick={() => setConfirmClearPins(true)} data-testid="clear-all-pins">
             {t.clearAllPins}
           </Button>
