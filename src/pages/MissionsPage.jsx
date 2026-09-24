@@ -27,7 +27,11 @@ function MissionCard({ mission, doc, onChange, onRemove, onDuplicate, onAssign }
   // marker instead; unticking them still releases every pin they hold here.
   const missionPins = doc.pins.filter((p) => p.missionId === mission.id);
   const assigned = [...new Set(missionPins.map((p) => p.employeeId))];
-  const partiallyAssigned = (employeeId) => !missionPins.some(
+  // Never on a remote mission, where any pin means the whole mission however
+  // it was written (normalizePins). Freezing the first elapsed hour writes a
+  // ranged pin there, and the picker used to call its holder "partial" the
+  // moment the clock rolled past the hour.
+  const partiallyAssigned = (employeeId) => mission.type !== 'remote' && !missionPins.some(
     (p) => p.employeeId === employeeId && p.start == null && p.end == null,
   );
 
