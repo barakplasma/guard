@@ -14,6 +14,7 @@ import ConfirmDialog from '../components/ConfirmDialog.jsx';
 import { usePlan } from '../state/PlanContext.jsx';
 import { sortByHebrewName } from '../lib/sort.js';
 import { nextTopOfHour } from '../lib/planSchema.js';
+import { releasablePins } from '../lib/pins.js';
 import { t } from '../strings.js';
 import { MissionQualifications, MissionExcludedEmployees } from '../components/Qualifications.jsx';
 
@@ -305,7 +306,7 @@ export default function MissionsPage() {
         title={t.confirmRemoveMissionTitle}
         body={pendingRemove && t.confirmRemoveMissionBody(
           pendingRemove.name || t.missionName,
-          doc.pins.filter((p) => p.missionId === pendingRemove.id).length,
+          releasablePins(doc, (p) => p.missionId === pendingRemove.id).length,
         )}
         onCancel={() => setPendingRemove(null)}
         onConfirm={() => {

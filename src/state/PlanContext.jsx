@@ -7,6 +7,7 @@ import { emptyPlan, makeId, planSchema, prunePins } from '../lib/planSchema.js';
 import {
   applyClearPin, applyClearPinsForMission, applyMissionAssignees, applySwap,
   applyCorrection, clearStalePins, freezeElapsedBeforeEdit, acceptSchedule, captureHistory,
+  applyRemoveEmployee, applyRemoveMission, applyClearManualPins,
 } from '../lib/pins.js';
 import { addEmployeesToPlan } from '../lib/employees.js';
 import { browserModelContext, registerWebMcpTools } from '../lib/webmcp.js';
@@ -140,11 +141,9 @@ export function PlanProvider({ children }) {
       employees: d.employees.map((e) => (e.id === id ? { ...e, ...patch } : e)),
     })),
 
-    removeEmployee: (id) => update((d) => ({
-      ...d,
-      employees: d.employees.filter((e) => e.id !== id),
-      pins: d.pins.filter((p) => p.employeeId !== id),
-    })),
+    // Pins are left to `setDoc`, which records what has elapsed before pruning
+    // the rest - see `applyRemoveEmployee`.
+    removeEmployee: (id) => update((d) => applyRemoveEmployee(d, id)),
 
     addMission: () => update((d) => ({
       ...d,
@@ -194,11 +193,7 @@ export function PlanProvider({ children }) {
       return { ...d, missions };
     }),
 
-    removeMission: (id) => update((d) => ({
-      ...d,
-      missions: d.missions.filter((m) => m.id !== id),
-      pins: d.pins.filter((p) => p.missionId !== id),
-    })),
+    removeMission: (id) => update((d) => applyRemoveMission(d, id)),
 
     /** Whole-mission assignment: the Missions page person-picker. */
     setMissionAssignees: (missionId, employeeIds) => update(
@@ -218,7 +213,8 @@ export function PlanProvider({ children }) {
       (d) => applyClearPin(d, { missionId, employeeId, start, end }),
     ),
 
-    clearAllPins: () => update((d) => ({ ...d, pins: [] })),
+    /** Manual assignments only: recorded history is never cleared, only exported. */
+    clearAllPins: () => update(applyClearManualPins),
 
     /**
      * Record an accepted correction proposal (lib/corrections.js): the named
