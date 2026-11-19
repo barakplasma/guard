@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { outOfPeriodLog, outOfPeriodCount, logFilename } from '../src/lib/logExport.js';
-import { captureHistory, clearStalePins, countStalePins } from '../src/lib/pins.js';
+import {
+  captureHistory, clearStalePins, countStalePins,
+  applyRemoveEmployee, applyRemoveMission, applyClearManualPins, releasablePins,
+} from '../src/lib/pins.js';
 import { planSchema, prunePins } from '../src/lib/planSchema.js';
 import { shiftsToCsv } from '../src/lib/exportCsv.js';
 
@@ -135,6 +138,38 @@ test('deleting a mission does not delete the record of duty on it', () => {
   assert.equal(rows.length, 2);
   assert.ok(rows.every((r) => r.missionName === 'שער'));
   assert.ok(rows.every((r) => r.type === 'local'));
+});
+
+/**
+ * The two tests above build the edit by hand. The app's own buttons also
+ * deleted the removed guard's or mission's pins inside the edit - before
+ * `captureHistory` could stamp them or `prunePins` could spare the stamped
+ * ones - so the fix they prove never reached the screen. `setDoc`'s order,
+ * applied to the mutators the UI actually calls:
+ */
+const throughSetDoc = (before, edit) => planSchema.parse(prunePins(captureHistory(before, edit(before))));
+
+test('the remove-guard button keeps the record, already stamped or not', () => {
+  for (const before of [doc(), captureHistory(doc(), doc())]) {
+    const after = throughSetDoc(before, (d) => applyRemoveEmployee(d, 'e1'));
+    assert.equal(outOfPeriodLog(after).length, 2, 'both elapsed assignments are still on the record');
+    assert.equal(outOfPeriodLog(after).find((r) => r.employeeId === 'e1').employeeName, 'דנה');
+    assert.ok(after.pins.every((p) => p.employeeId !== 'e1' || p.record), 'her live assignment is gone');
+  }
+});
+
+test('the remove-mission button keeps the record of duty on it', () => {
+  const after = throughSetDoc(captureHistory(doc(), doc()), (d) => applyRemoveMission(d, 'm1'));
+  assert.equal(outOfPeriodLog(after).length, 2);
+  assert.ok(after.pins.every((p) => p.record), 'only the history survives');
+});
+
+test('clearing manual assignments clears only what is not yet history', () => {
+  const before = captureHistory(doc(), doc());
+  assert.equal(releasablePins(before).length, 1, 'the dialog counts the one live pin');
+  const after = throughSetDoc(before, applyClearManualPins);
+  assert.equal(outOfPeriodLog(after).length, 2);
+  assert.equal(releasablePins(after).length, 0, 'and the button then has nothing left to offer');
 });
 
 test('renaming a guard does not rewrite what the history file says they did', () => {

@@ -133,6 +133,29 @@ const balanced = {
  * is why one pass yields both keys.
  */
 function ringKeys(st, ctx) {
+  return memo(ringCache, st, ctx, computeRingKeys);
+}
+
+/**
+ * Keys measured once per candidate per sort rather than once per comparison.
+ *
+ * A comparator rescanning a person's whole booking list on every call was the
+ * engine's hottest line - a week-long rota spent a quarter of its time here.
+ * Nothing a key reads can change while one sort runs, and the engine hands every
+ * comparison of one sort the same `ctx`, so keying on that object is exact; a
+ * caller that builds a fresh `ctx` per comparison just gets no reuse.
+ */
+const ringCache = new WeakMap();
+const dailyCache = new WeakMap();
+function memo(cache, st, ctx, compute) {
+  let perCtx = cache.get(ctx);
+  if (!perCtx) cache.set(ctx, perCtx = new Map());
+  let keys = perCtx.get(st);
+  if (!keys) perCtx.set(st, keys = compute(st, ctx));
+  return keys;
+}
+
+function computeRingKeys(st, ctx) {
   const at = ctx.start;
   const slots = new Set();
   let remotes = 0;
@@ -151,6 +174,9 @@ function ringKeys(st, ctx) {
 
 /** Daily fairness counts completed occurrences, never future pins or hours. */
 function dailyKeys(st, ctx) {
+  return memo(dailyCache, st, ctx, computeDailyKeys);
+}
+function computeDailyKeys(st, ctx) {
   const past = st.busy.filter((iv) => iv.end <= ctx.start);
   const own = past.filter((iv) => iv.missionId === ctx.mission.id);
   return {

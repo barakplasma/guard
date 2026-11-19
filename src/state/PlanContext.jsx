@@ -1,5 +1,5 @@
 import {
-  createContext, useCallback, useContext, useMemo, useRef, useState,
+  createContext, useCallback, useContext, useEffect, useMemo, useRef, useState,
 } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { decodePlan, encodePlan, fitPlanToFragment, PARAM } from '../lib/urlState.js';
@@ -7,8 +7,10 @@ import { emptyPlan, makeId, planSchema, prunePins } from '../lib/planSchema.js';
 import {
   applyClearPin, applyClearPinsForMission, applyMissionAssignees, applySwap,
   applyCorrection, clearStalePins, freezeElapsedBeforeEdit, acceptSchedule, captureHistory,
+  applyRemoveEmployee, applyRemoveMission, applyClearManualPins,
 } from '../lib/pins.js';
-import { addUniqueEmployees } from '../lib/employees.js';
+import { addEmployeesToPlan } from '../lib/employees.js';
+import { browserModelContext, registerWebMcpTools } from '../lib/webmcp.js';
 import { t } from '../strings.js';
 
 const PlanContext = createContext(null);
@@ -131,14 +133,14 @@ export function PlanProvider({ children }) {
      * untouched rather than re-encoding an identical plan.
      */
     addEmployee: (name) => {
-      const result = addUniqueEmployees(doc.employees, [name]);
-      if (result.added.length > 0) update((d) => ({ ...d, employees: result.employees }));
+      const result = addEmployeesToPlan(lastDoc.current ?? doc, [name]);
+      if (result.added.length) setDoc(result.plan);
       return result;
     },
 
     addEmployees: (names) => {
-      const result = addUniqueEmployees(doc.employees, names);
-      if (result.added.length > 0) update((d) => ({ ...d, employees: result.employees }));
+      const result = addEmployeesToPlan(lastDoc.current ?? doc, names);
+      if (result.added.length) setDoc(result.plan);
       return result;
     },
 
@@ -147,11 +149,9 @@ export function PlanProvider({ children }) {
       employees: d.employees.map((e) => (e.id === id ? { ...e, ...patch } : e)),
     })),
 
-    removeEmployee: (id) => update((d) => ({
-      ...d,
-      employees: d.employees.filter((e) => e.id !== id),
-      pins: d.pins.filter((p) => p.employeeId !== id),
-    })),
+    // Pins are left to `setDoc`, which records what has elapsed before pruning
+    // the rest - see `applyRemoveEmployee`.
+    removeEmployee: (id) => update((d) => applyRemoveEmployee(d, id)),
 
     addMission: () => update((d) => ({
       ...d,
@@ -201,11 +201,7 @@ export function PlanProvider({ children }) {
       return { ...d, missions };
     }),
 
-    removeMission: (id) => update((d) => ({
-      ...d,
-      missions: d.missions.filter((m) => m.id !== id),
-      pins: d.pins.filter((p) => p.missionId !== id),
-    })),
+    removeMission: (id) => update((d) => applyRemoveMission(d, id)),
 
     /** Whole-mission assignment: the Missions page person-picker. */
     setMissionAssignees: (missionId, employeeIds) => update(
@@ -225,7 +221,8 @@ export function PlanProvider({ children }) {
       (d) => applyClearPin(d, { missionId, employeeId, start, end }),
     ),
 
-    clearAllPins: () => update((d) => ({ ...d, pins: [] })),
+    /** Manual assignments only: recorded history is never cleared, only exported. */
+    clearAllPins: () => update(applyClearManualPins),
 
     /**
      * Record an accepted correction proposal (lib/corrections.js): the named
@@ -261,12 +258,35 @@ export function PlanProvider({ children }) {
         })
         : applyClearPinsForMission(d, { missionId: warning.missionId, employeeId: warning.employeeId })
     )),
-  }), [doc, update]);
+  }), [doc, setDoc, update]);
 
   const value = useMemo(
     () => ({ doc, schedule: scheduleFor(doc), setDoc, update, notice, setNotice, decodeFailed, ...api }),
     [doc, scheduleFor, setDoc, update, notice, decodeFailed, api],
   );
+
+  const webMcpState = useRef(null);
+  webMcpState.current = { doc, schedule: value.schedule, actions: api };
+  useEffect(() => {
+    let disposed = false;
+    let unregister = () => {};
+    registerWebMcpTools({
+      modelContext: browserModelContext(),
+      getState: () => webMcpState.current,
+      actions: {
+        addEmployees: (...args) => webMcpState.current.actions.addEmployees(...args),
+        pinShift: (...args) => webMcpState.current.actions.pinShift(...args),
+        clearPin: (...args) => webMcpState.current.actions.clearPin(...args),
+      },
+    }).then((cleanup) => {
+      if (disposed) cleanup();
+      else unregister = cleanup;
+    });
+    return () => {
+      disposed = true;
+      unregister();
+    };
+  }, []);
 
   return <PlanContext.Provider value={value}>{children}</PlanContext.Provider>;
 }

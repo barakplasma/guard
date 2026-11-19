@@ -10,6 +10,7 @@ import ConfirmDialog from '../components/ConfirmDialog.jsx';
 import { usePlan } from '../state/PlanContext.jsx';
 import { sortByHebrewName } from '../lib/sort.js';
 import { duplicateEmployeeIds } from '../lib/employees.js';
+import { releasablePins } from '../lib/pins.js';
 import { t } from '../strings.js';
 import QualificationManager, { EmployeeQualifications } from '../components/Qualifications.jsx';
 
@@ -188,7 +189,7 @@ export default function EmployeesPage() {
         title={t.confirmRemoveEmployeeTitle}
         body={pendingRemove && t.confirmRemoveEmployeeBody(
           pendingRemove.name || t.employeeName,
-          doc.pins.filter((p) => p.employeeId === pendingRemove.id).length,
+          releasablePins(doc, (p) => p.employeeId === pendingRemove.id).length,
         )}
         onCancel={() => setPendingRemove(null)}
         onConfirm={() => {

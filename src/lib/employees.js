@@ -59,6 +59,15 @@ export function addUniqueEmployees(employees, names) {
   return { employees: next, added, skipped };
 }
 
+/** Apply a roster addition to the document supplied at call time. */
+export function addEmployeesToPlan(plan, names) {
+  const result = addUniqueEmployees(plan.employees, names);
+  return {
+    ...result,
+    plan: result.added.length ? { ...plan, employees: result.employees } : plan,
+  };
+}
+
 /**
  * Ids of employees sharing a name with another row. Renaming is never blocked
  * mid-keystroke - "דנ" on the way to "דנה" would collide with itself - so an

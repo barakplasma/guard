@@ -129,6 +129,24 @@ export function applyClearPinsForMission(doc, { missionId, employeeId }) {
 }
 
 /**
+ * Removing a guard or a mission, and clearing manual assignments, all leave
+ * recorded pins where they are: a pin carrying a `record` is the history of a
+ * shift that happened (ADR 012), and none of these is an export.
+ *
+ * Removal does not touch pins at all. `setDoc` runs `captureHistory` on the
+ * previous document - the last moment the name still exists to be copied onto
+ * the record - and only then `prunePins`, which drops the dangling references
+ * that carry no record. Deleting them here, inside the edit, ran before either
+ * could see them: `scripts/historyRecordLoss.mjs` measured the fix on a removal
+ * that left pins alone, and the app's own buttons never took that path.
+ */
+export const applyRemoveEmployee = (doc, id) => ({ ...doc, employees: doc.employees.filter((e) => e.id !== id) });
+export const applyRemoveMission = (doc, id) => ({ ...doc, missions: doc.missions.filter((m) => m.id !== id) });
+export const applyClearManualPins = (doc) => ({ ...doc, pins: doc.pins.filter((p) => p.record) });
+/** The pins those edits will actually take away: everything not yet a record. */
+export const releasablePins = (doc, keep = () => true) => doc.pins.filter((p) => !p.record && keep(p));
+
+/**
  * Turn every already-elapsed, auto-assigned shift in `result` into a pin, so
  * that a later edit elsewhere in the document can never reshuffle who already
  * worked a shift that is in the past. `result` must be the schedule computed
