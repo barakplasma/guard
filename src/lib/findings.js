@@ -1,7 +1,9 @@
 import { t } from '../strings.js';
 
 export const ERROR_FINDINGS = new Set(['engine-bug', 'missing-required-tag', 'rest-unsatisfied', 'understaffed', 'long-shift']);
-export const INFO_FINDINGS = new Set(['pin-availability-overridden', 'pin-out-of-period', 'pin-excluded-tag']);
+export const INFO_FINDINGS = new Set([
+  'pin-availability-overridden', 'pin-out-of-period', 'pin-excluded-tag',
+]);
 export function findingText(w, doc) {
   const person = doc.employees.find((e) => e.id === w.employeeId)?.name ?? w.employeeId;
   const mission = doc.missions.find((m) => m.id === w.missionId)?.name ?? w.missionId;
@@ -14,6 +16,9 @@ export function findingText(w, doc) {
     case 'rest-incomplete': return t.restIncomplete(person);
     case 'pin-excluded-tag': return t.pinExcluded(person, mission);
     case 'tag-required-and-excluded': return t.contradictoryTag(mission, tag);
+    case 'daily-missing-clock': return t.dailyMissingClock(mission);
+    case 'target-sleep-missed': return t.targetSleepMissed(person);
+    case 'too-many-missions': return t.tooManyMissions(w.count, w.limit);
     case 'no-rest-between-shifts': return t.qualityNoRest(person, w.count);
     case 'same-mission-consecutive': return t.qualitySameMission(person, w.count);
     case 'long-unbroken-run': return t.qualityLongRun(person, w.count);

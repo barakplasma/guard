@@ -309,6 +309,111 @@ beside each other — that nobody is ever double-booked, no mission is overstaff
 respected, every row lies inside the slot it names, and the same input always gives the same
 output. Do not weaken it to make a change pass.
 
+## The MiniZinc solver, beside the engine
+
+`src/solver/` is the ADR 017 path, built to
+[its design](docs/minizinc-implementation-design.md) at migration steps 1, 3, 4
+and 5. **The engine in `planner.js` is still the production authority.** Nothing
+in `src/solver/` renders the schedule or freezes history; the debug section's
+toggle runs it and shows what it proved beside what the engine decided. Step 6
+is the one that flips `acceptSchedule`, and there is deliberately no step where
+both are the authority.
+
+It is **TypeScript**, and the only TypeScript here. Vite strips the types for
+the bundle and Node 22 strips them for `node --test`, so neither *checks* them -
+`npm run typecheck` does, and CI runs it. `tsconfig.json` sets
+`erasableSyntaxOnly`, because an enum or a parameter property would compile
+there and crash the test run.
+
+Nothing in `src/solver/` re-derives a rule that already exists. The segment grid
+comes from `segmentGrid`, the surviving pins and the findings they raised from
+`normalizedInput` (added for this), the headcount at an instant from `countAt`,
+the nights from `nightWindows`, the daily holds from `dailyOccurrences`, the
+unbroken-run cap from `MAX_UNBROKEN_MINUTES`. A second implementation of any of
+those disagrees with the engine about what a shift *is*, in a way neither side
+reveals on its own reading.
+
+The three values that are not interchangeable are the point of the module:
+`PreparedProblem` is the question, `CandidateSchedule` is what optimize mode
+claimed, `AcceptedSchedule` is what check mode recomputed - and `checkCandidate`
+is its only constructor. History takes the third and nothing wider, so "history
+is appended from an accepted result" is a thing the compiler enforces.
+
+**Two modes of one core is the whole safety argument.** `rota-optimize.mzn`
+minimises a level; `rota-check.mzn` fixes the answer and recomputes every named
+quantity through the same `rota-core.mzn`. If the two disagree about a level the
+ladder *proved*, the answer is rejected. So every quantity has to be determined
+by the assignment: `shortestWaitMinutes` is written as a `min` rather than as a
+variable bounded from above for exactly this reason, and a new quantity that is
+merely *constrained* rather than *defined* would silently make the comparison
+vacuous.
+
+The ladder advances only on `OPTIMAL_SOLUTION`. A time-limited incumbent ends
+it where it stands, because a cap taken from a guess can make every level below
+it infeasible for no real reason - which the ladder would then report as
+`cap-infeasible`, a model defect, rather than as a staffing shortage.
+
+`tests/solverOracle.js` is a second implementation of the model in JavaScript,
+deliberately. It scores an assignment independently, so "MiniZinc computed what
+it reported" is a comparison rather than an article of faith, and it brute-forces
+the lexicographic optimum on instances small enough to enumerate. It does not
+reproduce symmetry breaking, which changes neither feasibility nor any quantity.
+
+The tests that need a real solver skip with a message when `minizinc` is absent
+and **report skipped, not passed**; CI installs the bundle so they run there.
+`tests/solver.e2e.mjs` is the only place the shipped WebAssembly path is
+exercised at all.
+
+Six things the design could not have known before a solver ran are recorded at
+the end of that document - the output annotation, the `min`, the missing status
+line on a satisfaction run, `addFile(..., false)`, absolute worker asset URLs,
+and why the revision is a synchronous digest rather than SHA-256. Read them
+before changing the model or the runner.
+
+## The log is the memory, and the fragment is the limit
+
+There is no clear button and no carried totals. `memoryDays` on the plan says
+how far back logged duty still counts, and `readDutyMemory` derives every number
+about the past - idle time, turns, night minutes, turns per mission, visits per
+mission, turns begun per hour - from the rows themselves at preparation time.
+That is what removes the class of bug where a total has to be stamped at exactly
+the moment a window rolls, which ADR 015 spent a release getting right.
+
+`hard` on a mission is the once-per-rotation rule, and it is deliberately a
+flag rather than a number of days. Kitchen duty goes round as many people as
+possible before it comes back to anybody, and a rotation's length is a fact
+about the roster: with ten people and a daily kitchen a rotation is ten days,
+and five the moment half of them are away. `hardMissionSpread` is `max - min`
+over the visit counts, logged visits included, which says "everybody once
+before anybody twice" with no date arithmetic anywhere - so there is nothing
+here that can outrun `memoryDays`.
+
+A **visit** is a run, not a row. The freeze writes one pin per elapsed slot, so
+four unbroken hours in the kitchen arrive as four rows and are one turn at the
+kitchen; `visitsOf` in `prepare.ts` merges them, and `beginsVisit` is the same
+question inside the model. `turnsOnMission` keeps counting slots, because that
+is the unit the spread and the mission-variety levels are about.
+
+`exemptFromHardMissions` on a qualification keeps drivers and commanders out of
+that rotation: their never having cooked does not hold the spread open, and
+they take a hard mission only when there is nobody else. It is **not**
+`excludes`, which says "never this person" and means it. The exemption is its
+own level *above* the spread and cannot be folded into it — with three people,
+one a commander, and a kitchen running three days, every single-number form
+scores 1/1/1 at least as well as 2/1/0 and so hands the commander a kitchen
+day, which is exactly backwards. `scripts/hardMissionExemption.mjs` is the
+standing proof; lexicographic tiers are what this model has instead of weights.
+
+`FRAGMENT_LIMIT` in `urlState.js` is the document's real ceiling, and
+`fitPlanToFragment` runs last in `setDoc`. When a plan would not fit, the
+**oldest logged shifts drop first**, and only ones that are both a stamped
+record and behind the window: a pin with no record is an instruction to the
+scheduler and a pin after the window is somebody's plan. Narrowing the period
+consumed somebody's plan once already (ADR 012's correction) and this is the
+same mistake waiting in a different place. The constant is measured, by
+`tests/urlState.fifo.e2e.mjs`, and should be re-measured on the Pixel before it
+is raised.
+
 ## The employee list
 
 Two names are the same person when `nameKey` (`src/lib/employees.js`) says so — trimmed,
@@ -402,8 +507,19 @@ validation error there takes down the whole document, which is the user's only c
 ## Before delivering
 
 ```bash
-npm run lint && npm test && npm run build
+npm run lint && npm run typecheck && npm test && npm run build
 ```
+
+`npm run typecheck` is the only thing that checks `src/solver/`: Vite and
+`node --test` both strip the types rather than verifying them. Without a
+`minizinc` binary on `PATH` (or in `MINIZINC`) the tests that exercise the model
+report **skipped**, so a green local run there has proved less than it looks -
+CI installs the 2.9.3 bundle so they run on every pull request.
+
+For anything touching `src/solver/` or the shipped assets, also run
+`tests/solver.e2e.mjs`: it is the only place the WebAssembly path, the precache
+and the offline reload are exercised, and every failure found while building it
+was invisible to the native runner.
 
 For anything touching the UI, exports, sharing, or offline behaviour, also run the browser check
 (`tests/e2e.mjs`, instructions in `README.md`; the other `*.e2e.mjs` files are focused scenarios

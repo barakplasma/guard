@@ -1,0 +1,22 @@
+{
+  "//": "Type checking only. Nothing here emits: Vite strips the types for the browser bundle and Node 22 strips them for `node --test`, which is why `erasableSyntaxOnly` is on - an enum or a parameter property would compile here and crash the test run.",
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": false,
+    "skipLibCheck": true,
+    "allowJs": true,
+    "checkJs": false,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "types": ["node"]
+  },
+  "include": ["src/solver/**/*.ts", "src/vite-env.d.ts"]
+}

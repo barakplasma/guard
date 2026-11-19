@@ -8,6 +8,7 @@ import { WARN } from '../lib/planner.js';
 import { planToReadableText } from '../lib/planText.js';
 import { whatsappText } from '../lib/exportText.js';
 import { outOfPeriodLog } from '../lib/logExport.js';
+import SolverPanel from './SolverPanel.jsx';
 import useCopyToast from '../hooks/useCopyToast.jsx';
 import { t } from '../strings.js';
 import { ERROR_FINDINGS, findingText } from '../lib/findings.js';
@@ -203,6 +204,12 @@ export default function DebugSection({ doc, result, onClearPinByWarning, onClear
 
           <CopyDump title={t.scheduleTextTitle} text={scheduleText} buttonTestId="copy-schedule-text"
             textTestId="schedule-text" copy={copy} />
+
+          <Divider sx={{ my: 1.25 }} />
+
+          {/* ADR 017 step 5: MiniZinc runs beside the engine and reports, and
+              the engine is still what the page renders and freezes. */}
+          <SolverPanel doc={doc} result={result} />
         </Box>
       </AccordionDetails>
     </Accordion>

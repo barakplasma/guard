@@ -39,6 +39,18 @@ DISABLE_LINTERS:
   # committing.
   - JAVASCRIPT_STANDARD
 
+  # The same linter, the same reason, on the files `src/solver/` added. It was
+  # not listed before only because there was no TypeScript here to rewrite; the
+  # first run that saw some stripped the semicolons out of all fourteen files
+  # and committed it, which is the behaviour the entry above exists to stop.
+  # TypeScript here is oxlint's job too (`npm run lint`), with `npm run
+  # typecheck` for what oxlint cannot see, and both gate every pull request in
+  # the `check` job. Note that this rewrite lands on a commit that carries no
+  # checks of its own - GITHUB_TOKEN pushes do not trigger a workflow run - so
+  # nothing had tested the reformatted files, and dropping semicolons from
+  # TypeScript is a change automatic semicolon insertion can make meaningful.
+  - TYPESCRIPT_STANDARD
+
 # Kept named even though DISABLE_ERRORS already makes the whole run advisory:
 # these three are advisory *by nature* - a style opinion, a duplication
 # heuristic, a link that was reachable yesterday - so they should stay

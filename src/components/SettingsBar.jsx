@@ -71,6 +71,16 @@ export default function SettingsBar() {
           onChange={(n) => setField('shiftMinutes', n)}
           min={5} max={1440} step={5} testId="shift-minutes"
         />
+        {/* The log is never cleared, so this is the only thing that says how
+            much of it still counts - see planSchema's `memoryDays`. */}
+        <Tooltip title={t.memoryDaysHelp}>
+          <NumberField
+            label={t.memoryDays}
+            value={doc.memoryDays}
+            onChange={(n) => setField('memoryDays', n)}
+            min={1} max={90} step={1} testId="memory-days"
+          />
+        </Tooltip>
         <Tooltip title={t.nightWindowHelp}>
           <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
             <DailyClockField label={t.nightStart} value={doc.nightStart} nullable={false}
